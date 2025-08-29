@@ -31,7 +31,6 @@
           nativeBuildInputs = with pkgs; [
             rustToolchain
             pkg-config
-            cmake
             gnumake
           ];
 
@@ -46,12 +45,6 @@
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
-            # Initialize submodules first
-            export HOME=$TMPDIR
-            git config --global --add safe.directory $(pwd)
-            git submodule sync
-            git submodule update --init --recursive
-            
             cd core
             
             # Ensure Rust nightly toolchain is available
