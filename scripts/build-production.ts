@@ -233,7 +233,7 @@ export function getExtensionPath() {
   // Browser check - prevent misuse in browsers
   if (typeof window !== 'undefined') {
     throw new Error(
-      '@effect-native/cr-sqlite is for Node.js server environments only. ' +
+      '@effect-native/libcrsql is for Node.js server environments only. ' +
       'For browsers, use sql.js or a server-side database API.'
     );
   }
@@ -320,7 +320,7 @@ export default _default;
  */
 export function getExtensionPath() {
   throw new Error(
-    '🚫 @effect-native/cr-sqlite is for Node.js / Bun server environments only.\n\n' +
+    '🚫 @effect-native/libcrsql is for Node.js / Bun server environments only.\n\n' +
     '📱 For React Native, use one of these instead:\n' +
     '  • @op-engineering/op-sqlite: https://www.npmjs.com/package/@op-engineering/op-sqlite\n' +
     '  • expo-sqlite: https://docs.expo.dev/versions/latest/sdk/sqlite/\n' +
@@ -334,7 +334,7 @@ export function getExtensionPath() {
  */
 export const pathToCRSQLite = (() => {
   throw new Error(
-    '🚫 @effect-native/cr-sqlite is for Node.js / Bun server environments only.\n\n' +
+    '🚫 @effect-native/libcrsql is for Node.js / Bun server environments only.\n\n' +
     '📱 For React Native, use one of these instead:\n' +
     '  • @op-engineering/op-sqlite: https://www.npmjs.com/package/@op-engineering/op-sqlite\n' +
     '  • expo-sqlite: https://docs.expo.dev/versions/latest/sdk/sqlite/\n' +
@@ -384,10 +384,10 @@ try {
 }
 `;
 
-  yield* fs.writeFileString("dist/bin/cr-sqlite-extension-path.js", binContent);
+  yield* fs.writeFileString("dist/bin/libcrsql-extension-path.js", binContent);
 
   // Make it executable
-  yield* Command.make("chmod", "+x", "dist/bin/cr-sqlite-extension-path.js").pipe(
+  yield* Command.make("chmod", "+x", "dist/bin/libcrsql-extension-path.js").pipe(
     Command.exitCode,
   );
 });
@@ -418,8 +418,8 @@ const generateProductionPackageJson = Effect.gen(function* () {
       "./package.json": "./package.json",
     },
     bin: {
-      "@effect-native/cr-sqlite": "./bin/cr-sqlite-extension-path.js",
-      "cr-sqlite-extension-path": "./bin/cr-sqlite-extension-path.js",
+      "@effect-native/libcrsql": "./bin/libcrsql-extension-path.js",
+      "libcrsql-extension-path": "./bin/libcrsql-extension-path.js",
     },
     files: [
       "index.js",
@@ -448,20 +448,20 @@ const copyStaticFiles = Effect.gen(function* () {
   if (readmeExists) {
     yield* fs.copy("README.md", "dist/README.md");
   } else {
-    const basicReadme = `# @effect-native/cr-sqlite
+    const basicReadme = `# @effect-native/libcrsql
 
 Pure-Nix CR-SQLite extension for conflict-free replicated databases.
 
 ## Installation
 
 \`\`\`bash
-npm install @effect-native/cr-sqlite
+npm install @effect-native/libcrsql
 \`\`\`
 
 ## Usage
 
 \`\`\`javascript
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 import sqlite3 from 'sqlite3';
 
 const db = new sqlite3.Database(':memory:');
@@ -475,7 +475,7 @@ db.run("SELECT crsql_as_crr('users')");
 
 \`\`\`bash
 # Get path to extension
-npx cr-sqlite-extension-path
+npx libcrsql-extension-path
 \`\`\`
 `;
     yield* fs.writeFileString("dist/README.md", basicReadme);
@@ -502,7 +502,7 @@ const generateBuildSummary = (builtExtensions: Array<any>) =>
 
 const main = Effect.gen(function* () {
   yield* Console.log(
-    "🚀 Building UNIVERSAL production package for @effect-native/cr-sqlite",
+    "🚀 Building UNIVERSAL production package for @effect-native/libcrsql",
   );
   yield* Console.log(
     "🎯 Goal: Just Works™ everywhere - Mac, Linux, Pi, Docker, Vercel, etc.",

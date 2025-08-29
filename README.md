@@ -1,6 +1,6 @@
-# @effect-native/cr-sqlite
+# @effect-native/libcrsql
 
-[![npm version](https://badge.fury.io/js/%40effect-native%2Fcr-sqlite.svg)](https://badge.fury.io/js/%40effect-native%2Fcr-sqlite)
+[![npm version](https://badge.fury.io/js/%40effect-native%2Flibcrsql.svg)](https://badge.fury.io/js/%40effect-native%2Flibcrsql)
 
 Pure-Nix CR-SQLite extension for conflict-free replicated databases. Just Works™ everywhere - Mac, Linux, Pi, Docker, Vercel, etc.
 
@@ -13,13 +13,13 @@ This package provides pre-built CR-SQLite extensions via Nix, eliminating the ne
 ## Installation
 
 ```bash
-npm install @effect-native/cr-sqlite
+npm install @effect-native/libcrsql
 ```
 
 ## Quick Start
 
 ```javascript
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 import Database from 'better-sqlite3';
 
 const db = new Database(':memory:');
@@ -46,7 +46,7 @@ console.log('Changes to sync:', changes);
 Path to the CR-SQLite extension file. Use this with your SQLite library's `loadExtension()` method.
 
 ```javascript
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 console.log(pathToCRSQLite); // /path/to/crsqlite-darwin-aarch64.dylib
 ```
 
@@ -55,14 +55,14 @@ console.log(pathToCRSQLite); // /path/to/crsqlite-darwin-aarch64.dylib
 Function that returns the path to the CR-SQLite extension.
 
 ```javascript
-import { getExtensionPath } from '@effect-native/cr-sqlite';
+import { getExtensionPath } from '@effect-native/libcrsql';
 const extensionPath = getExtensionPath();
 ```
 
 ## CLI Usage
 
 ```bash
-npx cr-sqlite-extension-path
+npx libcrsql-extension-path
 # /path/to/crsqlite-darwin-aarch64.dylib
 ```
 
@@ -82,7 +82,7 @@ Works with any SQLite library that supports loading extensions:
 ### better-sqlite3
 ```javascript
 import Database from 'better-sqlite3';
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 
 const db = new Database('my-app.db');
 db.loadExtension(pathToCRSQLite);
@@ -91,7 +91,7 @@ db.loadExtension(pathToCRSQLite);
 ### sqlite3  
 ```javascript
 import sqlite3 from 'sqlite3';
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 
 const db = new sqlite3.Database('my-app.db');
 db.loadExtension(pathToCRSQLite);
@@ -100,7 +100,7 @@ db.loadExtension(pathToCRSQLite);
 ### Bun SQLite
 ```javascript
 import { Database } from 'bun:sqlite';
-import { pathToCRSQLite } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite } from '@effect-native/libcrsql';
 
 const db = new Database('my-app.db');
 db.loadExtension(pathToCRSQLite);
@@ -151,11 +151,11 @@ npm run test:docker
 
 ```bash
 # Check what platforms are available
-npm list @effect-native/cr-sqlite
-ls node_modules/@effect-native/cr-sqlite/lib/
+npm list @effect-native/libcrsql
+ls node_modules/@effect-native/libcrsql/lib/
 
 # Get extension path for debugging  
-npx cr-sqlite-extension-path
+npx libcrsql-extension-path
 ```
 
 ## Contributing

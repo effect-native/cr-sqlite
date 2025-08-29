@@ -24,8 +24,8 @@ trap cleanup EXIT
 cd "$TEMP_DIR"
 
 # Test 1: Install the package
-echo -e "\n${BLUE}📦 Test 1: Installing @effect-native/cr-sqlite...${NC}"
-if npm init -y > /dev/null 2>&1 && npm install @effect-native/cr-sqlite > /dev/null 2>&1; then
+echo -e "\n${BLUE}📦 Test 1: Installing @effect-native/libcrsql...${NC}"
+if npm init -y > /dev/null 2>&1 && npm install @effect-native/libcrsql > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Package installed successfully${NC}"
 else
     echo -e "${RED}❌ Package installation failed${NC}"
@@ -34,7 +34,7 @@ fi
 
 # Test 2: Check if extension file exists and is accessible
 echo -e "\n${BLUE}🔍 Test 2: Checking extension file accessibility...${NC}"
-EXTENSION_PATH=$(npx cr-sqlite-extension-path 2>/dev/null || echo "")
+EXTENSION_PATH=$(npx libcrsql-extension-path 2>/dev/null || echo "")
 if [[ -n "$EXTENSION_PATH" && -f "$EXTENSION_PATH" ]]; then
     echo -e "${GREEN}✅ Extension file found: $EXTENSION_PATH${NC}"
     echo -e "${BLUE}📊 File info:${NC}"
@@ -48,7 +48,7 @@ fi
 # Test 3: Test programmatic access
 echo -e "\n${BLUE}💻 Test 3: Testing programmatic access...${NC}"
 cat > test.mjs << 'EOF'
-import { pathToCRSQLite, getExtensionPath } from '@effect-native/cr-sqlite';
+import { pathToCRSQLite, getExtensionPath } from '@effect-native/libcrsql';
 import { existsSync } from 'fs';
 
 console.log('Extension path:', pathToCRSQLite);
@@ -101,7 +101,7 @@ echo "Expected extension: crsqlite-$(node -e 'console.log(process.platform === "
 
 # Test 6: Performance check (basic)
 echo -e "\n${BLUE}⚡ Test 6: Basic performance check...${NC}"
-time node -e 'import("@effect-native/cr-sqlite").then(({pathToCRSQLite}) => console.log("Path loaded:", !!pathToCRSQLite))' || echo "Performance test completed"
+time node -e 'import("@effect-native/libcrsql").then(({pathToCRSQLite}) => console.log("Path loaded:", !!pathToCRSQLite))' || echo "Performance test completed"
 
 echo -e "\n${GREEN}🎉 All VPS verification tests passed!${NC}"
 echo -e "${BLUE}📊 Summary:${NC}"
@@ -112,4 +112,4 @@ echo "- SQLite integration $(command -v sqlite3 >/dev/null && echo '✅' || echo
 echo "- Platform detection works ✅"
 echo "- Performance acceptable ✅"
 
-echo -e "\n${GREEN}✨ @effect-native/cr-sqlite is ready for production on this system!${NC}"
+echo -e "\n${GREEN}✨ @effect-native/libcrsql is ready for production on this system!${NC}"

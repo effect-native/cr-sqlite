@@ -1,5 +1,5 @@
 {
-  "name": "@effect-native/cr-sqlite",
+  "name": "@effect-native/libcrsql",
   "version": "0.16.3-1",
   "description": "Pure-Nix CR-SQLite extension (.dylib/.so) for conflict-free replicated databases",
   "main": "dist/index.js",
@@ -31,8 +31,8 @@
     "prepublishOnly": "npm run build-production && npm run test && npm run test:docker && npm run test:vps"
   },
   "bin": {
-    "@effect-native/cr-sqlite": "./dist/bin/cr-sqlite-extension-path.js",
-    "cr-sqlite-extension-path": "./dist/bin/cr-sqlite-extension-path.js"
+    "@effect-native/libcrsql": "./dist/bin/libcrsql-extension-path.js",
+    "libcrsql-extension-path": "./dist/bin/libcrsql-extension-path.js"
   },
   "files": [
     "dist/index.js",
