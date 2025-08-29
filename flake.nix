@@ -46,6 +46,12 @@
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
+            # Initialize submodules first
+            export HOME=$TMPDIR
+            git config --global --add safe.directory $(pwd)
+            git submodule sync
+            git submodule update --init --recursive
+            
             cd core
             
             # Ensure Rust nightly toolchain is available
@@ -58,14 +64,14 @@
           installPhase = ''
             mkdir -p $out/lib
             
-            # Copy the loadable extension
-            if [ -f dist/crsqlite.dylib ]; then
-              cp dist/crsqlite.dylib $out/lib/crsqlite.dylib
-            elif [ -f dist/crsqlite.so ]; then
-              cp dist/crsqlite.so $out/lib/crsqlite.so
+            # Copy the loadable extension from core/dist/
+            if [ -f core/dist/crsqlite.dylib ]; then
+              cp core/dist/crsqlite.dylib $out/lib/crsqlite.dylib
+            elif [ -f core/dist/crsqlite.so ]; then
+              cp core/dist/crsqlite.so $out/lib/crsqlite.so
             else
-              echo "ERROR: No extension file found in dist/"
-              find dist/ -type f || echo "No dist directory found"
+              echo "ERROR: No extension file found in core/dist/"
+              find core/dist/ -type f || echo "No core/dist directory found"
               exit 1
             fi
             
