@@ -46,19 +46,13 @@
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
-            # Check that git submodules are properly initialized
-            if [ ! -f core/rs/sqlite-rs-embedded/sqlite_nostd/Cargo.toml ]; then
-              echo "ERROR: Git submodules not initialized! Run: git submodule update --init --recursive"
-              exit 1
-            fi
-            
-            cd core
-            
-            # Ensure Rust nightly toolchain is available
-            export PATH="${rustToolchain}/bin:$PATH"
-            
-            # Build the loadable extension directly
-            make loadable
+            # Debug: show what files are actually available
+            echo "=== DEBUG: Files in build root ==="
+            find . -type f | head -20
+            echo "=== DEBUG: sqlite-rs-embedded content ==="
+            ls -la core/rs/sqlite-rs-embedded/ || echo "No sqlite-rs-embedded directory"
+            find core/rs/sqlite-rs-embedded/ -name "*.toml" 2>/dev/null | head -5 || echo "No .toml files found"
+            exit 1
           '';
 
           installPhase = ''
