@@ -13,8 +13,20 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # Use the current directory as source
-        crSqliteSource = ./.;
+        # Use the working tree as source (include submodules)
+        # builtins.path snapshots the on-disk tree instead of the flake's
+        # git-based source (which omits submodule contents). We then apply a
+        # lightweight clean filter to avoid bulky folders like node_modules.
+        crSqliteSource = pkgs.lib.cleanSourceWith {
+          src = builtins.path { path = ./.; name = "crsqlite-src"; };
+          filter = path: type:
+            pkgs.lib.cleanSourceFilter path type &&
+            !(builtins.elem (baseNameOf path) [
+              ".git" 
+              "node_modules" "dist" "result" "build" "target"
+              ".direnv" ".turbo" ".vscode" "__pycache__"
+            ]);
+        };
         
         # Rust toolchain - use nightly as required by CR-SQLite
         rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
@@ -47,11 +59,18 @@
           # Build the extension using the upstream Makefile
           buildPhase = ''
             # Debug: show what files are actually available
-            echo "=== DEBUG: Files in build root ==="
-            find . -type f | head -20
-            echo "=== DEBUG: sqlite-rs-embedded content ==="
-            ls -la core/rs/sqlite-rs-embedded/ || echo "No sqlite-rs-embedded directory"
-            find core/rs/sqlite-rs-embedded/ -name "*.toml" 2>/dev/null | head -5 || echo "No .toml files found"
+            echo "=== DEBUG: Files in build root (first 30) ==="
+            find . -maxdepth 2 -type f | head -30
+            echo
+            echo "=== DEBUG: core directory checks ==="
+            ls -la core || true
+            ls -la core/rs || true
+            ls -la core/rs/sqlite-rs-embedded || true
+            test -f core/Makefile && echo "Found core/Makefile" || echo "Missing core/Makefile"
+            echo
+            echo "=== DEBUG: sqlite-rs-embedded sample files ==="
+            find core/rs/sqlite-rs-embedded -maxdepth 2 -name "*.toml" 2>/dev/null | head -10 || echo "No .toml files found"
+            # Stop early; this is a verification build
             exit 1
           '';
 
