@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is `@effect-native/libcrsql`, a Pure-Nix package that provides pre-built CR-SQLite extensions for conflict-free replicated databases. The package builds CR-SQLite extensions using Nix and distributes them for multiple platforms (macOS x86_64/ARM64, Linux x86_64/ARM64).
 
+## Project Structure & Module Organization
+
+- **Core C/Rust**: `core/` (CR-SQLite sources, Makefile, tests). Builds shared library into `core/dist/`
+- **Node package entry**: `index.js`, types `index.d.ts`, CLI `bin/`, helper macro `build-macros.ts`
+- **Prebuilt artifacts**: `lib/` (platform-specific `crsqlite-<platform>-<arch>.(dylib|so)` and fallbacks)
+- **Nix flake**: `flake.nix` (packages, dev shell, apps like `print-path`, `build-all-platforms`)
+- **Scripts**: `scripts/` (production bundling, version sync, VPS verification)
+- **Tests**: C tests under `core/src/*.test.c`; integration in `py/correctness/`; packaging sanity `dist.test.ts`
+
 ### Key Architecture Components
 
 - **Nix-based Build System**: Uses `flake.nix` for reproducible cross-platform builds of CR-SQLite extensions
@@ -14,34 +23,34 @@ This is `@effect-native/libcrsql`, a Pure-Nix package that provides pre-built CR
 - **TypeScript/Effect Integration**: Uses Effect-TS for build scripts and type-safe operations
 - **React Native Compatibility**: Separate entry point that throws helpful errors for RN usage
 
-## Common Development Commands
+## Build, Test, and Development Commands
 
 ```bash
-# Build CR-SQLite extension for current platform only
-npm run build
-# OR: nix build .#cr-sqlite
+# Build (current platform via Nix)
+npm run build                    # nix build .#cr-sqlite
 
-# Build extensions for ALL platforms (requires cross-compilation support)
-npm run bundle-lib
-# OR: nix run .#build-all-platforms
+# Bundle local lib (writes to lib/ with platform naming)
+npm run bundle-lib              # nix run .#build-all-platforms
 
-# Run tests (basic functionality checks)
-npm test
-# OR: npm run check
-
-# Test in Docker environment
-npm run test:docker
-
-# Build production package with all extensions
+# Production bundle (multi-platform)
 npm run build-production
 
-# Get path to CR-SQLite extension
-npm run get-path
-# OR: nix run .#print-path
+# Validate flake
+npm run check                   # nix flake check
 
-# Check Nix flake configuration
-npm run check
-# OR: nix flake check
+# Tests
+npm test                        # flake check
+npm run test:docker             # if Docker running
+npm run test:vps               # VPS verification
+
+# Manual core build
+make -C core loadable          # outputs core/dist/crsqlite.(dylib|so)
+
+# Dev shell (enter environment with Rust/C toolchains)
+nix develop
+
+# Get path to CR-SQLite extension
+npm run get-path               # nix run .#print-path
 
 # Version synchronization
 npm run sync-version
@@ -98,6 +107,31 @@ Extensions are named: `crsqlite-{platform}-{arch}.{ext}`
 - **Language**: TypeScript with Effect-TS for type-safe operations
 - **Testing**: Custom Effect-based test runner
 
+## Coding Style & Naming Conventions
+
+- **JS/TS**: ESM modules, Node ≥16. Prettier enforced: 2-space indent, trailing commas (es5), double quotes
+- **C**: Follow upstream style; `core/.clang-format` available; keep changes minimal and upstream-friendly
+- **Artifacts**: Name as `crsqlite-<platform>-<arch>.(dylib|so)` and keep generic fallbacks (`crsqlite.dylib|so`)
+
+## Testing Guidelines
+
+- **Wrapper/package changes**: Run `npm run check` and `npm run test:vps`; if packaging logic changes, also run `npx tsx dist.test.ts`
+- **Core changes**: `make -C core test` (optionally `valgrind`), and run CI-mirroring commands in `.github/workflows/*` when possible
+- **Python correctness** (optional): `cd py/correctness && ./install-and-test.sh`
+
+## Commit & Pull Request Guidelines
+
+- **Messages**: Concise, imperative ("Fix build on Linux", "Add extension path CLI")
+- **Scope**: Separate functional changes from formatting. Reference issues when relevant
+- **PRs**: Include description, affected platforms, test results (commands run + output snippets), and any `lib/` artifacts touched. Screenshots/logs for `npx libcrsql-extension-path` helpful
+
+## Security & Configuration Tips
+
+- **Prefer Nix builds** for reproducibility. Avoid committing built binaries outside `lib/`
+- **For cross-compiles**, use `npm run build-production`; avoid ad-hoc renames—let scripts place files correctly
+- **Do not modify vendored upstream** lightly (`core/`); propose upstream when possible
+- **Reproducibility**: Use Nix builders or binary cache; avoid manual renames
+
 ## Important Notes
 
 - This package is for **Node.js/Bun server environments only**, NOT React Native
@@ -105,3 +139,4 @@ Extensions are named: `crsqlite-{platform}-{arch}.{ext}`
 - Extension loading requires native SQLite libraries that support `loadExtension()`
 - Cross-platform builds require Nix remote builders or binary cache substitution
 - All build outputs go to `dist/` directory for production packaging
+- **When changing packaging/loading**, test: `npm run bundle-lib`, `npx libcrsql-extension-path`, `npm run test:docker`, `npm run test:vps`
