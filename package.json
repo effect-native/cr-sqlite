@@ -1,0 +1,82 @@
+{
+  "name": "@effect-native/cr-sqlite",
+  "version": "0.16.3-1",
+  "description": "Pure-Nix CR-SQLite extension (.dylib/.so) for conflict-free replicated databases",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "react-native": "./dist/react-native.js",
+      "default": "./dist/index.js"
+    },
+    "./react-native": {
+      "import": "./dist/react-native.js",
+      "types": "./dist/react-native.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "nix build .#cr-sqlite",
+    "bundle-lib": "nix run .#build-all-platforms",
+    "get-path": "nix run .#print-path",
+    "check": "nix flake check",
+    "test": "npm run check",
+    "test:docker": "if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then docker build -t cr-sqlite-test . && docker run --rm cr-sqlite-test; else echo '⚠️  Docker not running - skipping Docker tests'; fi",
+    "test:vps": "./scripts/verify-vps.sh",
+    "sync-version": "tsx scripts/sync-version.ts",
+    "build-production": "tsx scripts/build-production.ts",
+    "preversion": "npm run sync-version",
+    "version": "git add package.json",
+    "prepublishOnly": "npm run build-production && npm run test && npm run test:docker && npm run test:vps"
+  },
+  "bin": {
+    "@effect-native/cr-sqlite": "./dist/bin/cr-sqlite-extension-path.js",
+    "cr-sqlite-extension-path": "./dist/bin/cr-sqlite-extension-path.js"
+  },
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/react-native.js",
+    "dist/react-native.d.ts",
+    "dist/lib/",
+    "dist/bin/",
+    "README.md"
+  ],
+  "keywords": [
+    "sqlite",
+    "sqlite3",
+    "cr-sqlite",
+    "crsqlite",
+    "crdt",
+    "conflict-free",
+    "replicated",
+    "extension",
+    "nix",
+    "dylib",
+    "shared-library"
+  ],
+  "author": "Tom Aylott",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/effect-native/cr-sqlite.git"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {},
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
+    "@types/node": "^22.0.0",
+    "effect": "^3.10.0",
+    "@effect/platform": "^0.66.3",
+    "@effect/platform-bun": "^0.46.0",
+    "@types/bun": "latest"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
