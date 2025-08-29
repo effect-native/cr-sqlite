@@ -279,12 +279,12 @@ export function getExtensionPath() {
  * Path to CR-SQLite extension - for use with db.loadExtension()
  * Automatically detects your platform and returns the right extension
  */
-export const pathToCRSQLite = getExtensionPath();
+export const pathToCRSQLiteExtension = getExtensionPath();
 
 /**
- * Default export - same as pathToCRSQLite
+ * Default export - same as pathToCRSQLiteExtension
  */
-export default pathToCRSQLite;
+export default pathToCRSQLiteExtension;
 `;
 
     yield* fs.writeFileString("dist/index.js", indexContent);
@@ -299,10 +299,10 @@ export declare function getExtensionPath(): string;
 /**
  * Path to CR-SQLite extension - for use with db.loadExtension()
  */
-export declare const pathToCRSQLite: string;
+export declare const pathToCRSQLiteExtension: string;
 
 /**
- * Default export - same as pathToCRSQLite
+ * Default export - same as pathToCRSQLiteExtension
  */
 declare const _default: string;
 export default _default;
@@ -329,10 +329,10 @@ export function getExtensionPath() {
 }
 
 /**
- * React Native placeholder for pathToCRSQLite
+ * React Native placeholder for pathToCRSQLiteExtension
  * @throws Always throws with helpful message
  */
-export const pathToCRSQLite = (() => {
+export const pathToCRSQLiteExtension = (() => {
   throw new Error(
     '🚫 @effect-native/libcrsql is for Node.js / Bun server environments only.\n\n' +
     '📱 For React Native, use one of these instead:\n' +
@@ -342,7 +342,7 @@ export const pathToCRSQLite = (() => {
   );
 })();
 
-export default pathToCRSQLite;
+export default pathToCRSQLiteExtension;
 `;
 
     yield* fs.writeFileString("dist/react-native.js", reactNativeContent);
@@ -355,12 +355,12 @@ export default pathToCRSQLite;
 export declare function getExtensionPath(): never;
 
 /**
- * React Native placeholder for pathToCRSQLite
+ * React Native placeholder for pathToCRSQLiteExtension
  * @throws Always throws with helpful message for React Native users
  */
-export declare const pathToCRSQLite: never;
+export declare const pathToCRSQLiteExtension: never;
 
-export default pathToCRSQLite;
+export default pathToCRSQLiteExtension;
 `;
 
     yield* fs.writeFileString("dist/react-native.d.ts", reactNativeDtsContent);
@@ -374,10 +374,10 @@ const generateOptimizedBin = Effect.gen(function* () {
 
   const binContent = js`#!/usr/bin/env node
 
-import { pathToCRSQLite } from '../index.js';
+import { pathToCRSQLiteExtension } from '../index.js';
 
 try {
-  console.log(pathToCRSQLite);
+  console.log(pathToCRSQLiteExtension);
 } catch (error) {
   console.error(error.message);
   process.exit(1);
@@ -461,11 +461,11 @@ npm install @effect-native/libcrsql
 ## Usage
 
 \`\`\`javascript
-import { pathToCRSQLite } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
 import sqlite3 from 'sqlite3';
 
 const db = new sqlite3.Database(':memory:');
-db.loadExtension(pathToCRSQLite);
+db.loadExtension(pathToCRSQLiteExtension);
 
 // Now you can use CR-SQLite functions
 db.run("SELECT crsql_as_crr('users')");

@@ -19,11 +19,11 @@ npm install @effect-native/libcrsql
 ## Quick Start
 
 ```javascript
-import { pathToCRSQLite } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
 import Database from 'better-sqlite3';
 
 const db = new Database(':memory:');
-db.loadExtension(pathToCRSQLite);
+db.loadExtension(pathToCRSQLiteExtension);
 
 // Convert table to conflict-free replicated relation
 db.exec(`
@@ -41,13 +41,13 @@ console.log('Changes to sync:', changes);
 
 ## API
 
-### `pathToCRSQLite`
+### `pathToCRSQLiteExtension`
 
 Path to the CR-SQLite extension file. Use this with your SQLite library's `loadExtension()` method.
 
 ```javascript
-import { pathToCRSQLite } from '@effect-native/libcrsql';
-console.log(pathToCRSQLite); // /path/to/crsqlite-darwin-aarch64.dylib
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
+console.log(pathToCRSQLiteExtension); // /path/to/crsqlite-darwin-aarch64.dylib
 ```
 
 ### `getExtensionPath()`
@@ -82,28 +82,28 @@ Works with any SQLite library that supports loading extensions:
 ### better-sqlite3
 ```javascript
 import Database from 'better-sqlite3';
-import { pathToCRSQLite } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
 
 const db = new Database('my-app.db');
-db.loadExtension(pathToCRSQLite);
+db.loadExtension(pathToCRSQLiteExtension);
 ```
 
 ### sqlite3  
 ```javascript
 import sqlite3 from 'sqlite3';
-import { pathToCRSQLite } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
 
 const db = new sqlite3.Database('my-app.db');
-db.loadExtension(pathToCRSQLite);
+db.loadExtension(pathToCRSQLiteExtension);
 ```
 
 ### Bun SQLite
 ```javascript
 import { Database } from 'bun:sqlite';
-import { pathToCRSQLite } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension } from '@effect-native/libcrsql';
 
 const db = new Database('my-app.db');
-db.loadExtension(pathToCRSQLite);
+db.loadExtension(pathToCRSQLiteExtension);
 ```
 
 ## React Native

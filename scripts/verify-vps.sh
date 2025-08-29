@@ -48,14 +48,14 @@ fi
 # Test 3: Test programmatic access
 echo -e "\n${BLUE}💻 Test 3: Testing programmatic access...${NC}"
 cat > test.mjs << 'EOF'
-import { pathToCRSQLite, getExtensionPath } from '@effect-native/libcrsql';
+import { pathToCRSQLiteExtension, getExtensionPath } from '@effect-native/libcrsql';
 import { existsSync } from 'fs';
 
-console.log('Extension path:', pathToCRSQLite);
+console.log('Extension path:', pathToCRSQLiteExtension);
 console.log('getExtensionPath():', getExtensionPath());
-console.log('File exists:', existsSync(pathToCRSQLite));
+console.log('File exists:', existsSync(pathToCRSQLiteExtension));
 
-if (!existsSync(pathToCRSQLite)) {
+if (!existsSync(pathToCRSQLiteExtension)) {
     throw new Error('Extension file not found');
 }
 
@@ -101,7 +101,7 @@ echo "Expected extension: crsqlite-$(node -e 'console.log(process.platform === "
 
 # Test 6: Performance check (basic)
 echo -e "\n${BLUE}⚡ Test 6: Basic performance check...${NC}"
-time node -e 'import("@effect-native/libcrsql").then(({pathToCRSQLite}) => console.log("Path loaded:", !!pathToCRSQLite))' || echo "Performance test completed"
+time node -e 'import("@effect-native/libcrsql").then(({pathToCRSQLiteExtension}) => console.log("Path loaded:", !!pathToCRSQLiteExtension))' || echo "Performance test completed"
 
 echo -e "\n${GREEN}🎉 All VPS verification tests passed!${NC}"
 echo -e "${BLUE}📊 Summary:${NC}"

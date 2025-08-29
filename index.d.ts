@@ -8,7 +8,7 @@ export declare function getExtensionPath(): string;
  * Hip alias for getExtensionPath() - for use with db.loadExtension()
  * @returns Absolute path to crsqlite.dylib/.so
  */
-export declare const pathToCRSQLite: string;
+export declare const pathToCRSQLiteExtension: string;
 
 /**
  * Default export - same as getExtensionPath
