@@ -13,7 +13,7 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # Use the current directory as source (since we're already in the cr-sqlite repo)
+        # Use the current directory as source
         crSqliteSource = ./.;
         
         # Rust toolchain - use nightly as required by CR-SQLite
@@ -32,6 +32,7 @@
             rustToolchain
             pkg-config
             gnumake
+            git
           ];
 
           buildInputs = with pkgs; [
@@ -45,6 +46,12 @@
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
+            # Check that git submodules are properly initialized
+            if [ ! -f core/rs/sqlite-rs-embedded/sqlite_nostd/Cargo.toml ]; then
+              echo "ERROR: Git submodules not initialized! Run: git submodule update --init --recursive"
+              exit 1
+            fi
+            
             cd core
             
             # Ensure Rust nightly toolchain is available
