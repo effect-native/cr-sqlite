@@ -54,7 +54,8 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay"
+        "rust-overlay": "rust-overlay",
+        "sqlite-rs-embedded": "sqlite-rs-embedded"
       }
     },
     "rust-overlay": {
@@ -72,6 +73,22 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "sqlite-rs-embedded": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1703188587,
+        "narHash": "sha256-+nNV6+01T6dRqeIfLrkc5V3PAX9Zxo/VrSqy6Xf1fHE=",
+        "owner": "vlcn-io",
+        "repo": "sqlite-rs-embedded",
+        "rev": "aba562843b26642e2242f8e3388b83a1a2625031",
+        "type": "github"
+      },
+      "original": {
+        "owner": "vlcn-io",
+        "repo": "sqlite-rs-embedded",
         "type": "github"
       }
     },

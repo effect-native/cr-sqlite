@@ -5,9 +5,14 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    # Bring the sqlite-rs-embedded submodule in as an explicit input
+    sqlite-rs-embedded = {
+      url = "github:vlcn-io/sqlite-rs-embedded";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay, sqlite-rs-embedded }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -39,6 +44,13 @@
           version = "0.16.3";
           
           src = crSqliteSource;
+          # Inject the sqlite-rs-embedded source after unpack so it is available
+          # even though flakes omit submodules by default.
+          postUnpack = ''
+            echo "Injecting sqlite-rs-embedded from flake input..."
+            mkdir -p core/rs/sqlite-rs-embedded
+            cp -a --no-preserve=mode,ownership ${sqlite-rs-embedded}/. core/rs/sqlite-rs-embedded/
+          '';
           
           nativeBuildInputs = with pkgs; [
             rustToolchain
