@@ -70,6 +70,11 @@
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
+            echo "Ensuring sqlite-rs-embedded present in source tree..."
+            if [ ! -d core/rs/sqlite-rs-embedded ]; then
+              mkdir -p core/rs/sqlite-rs-embedded
+              cp -a --no-preserve=mode,ownership ${sqlite-rs-embedded}/. core/rs/sqlite-rs-embedded/
+            fi
             # Debug: show what files are actually available
             echo "=== DEBUG: Files in build root (first 30) ==="
             find . -maxdepth 2 -type f | head -30
