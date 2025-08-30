@@ -19,13 +19,17 @@
   "scripts": {
     "build": "nix build .#cr-sqlite",
     "bundle-lib": "nix run .#build-all-platforms",
+    "bundle-lib:linux-amd64": "bash scripts/build-linux-docker.sh amd64",
+    "bundle-lib:linux-arm64": "bash scripts/build-linux-docker.sh arm64",
+    "bundle-lib:linux": "bash scripts/build-linux-docker.sh both",
+    "bundle-lib:all": "npm run bundle-lib && npm run bundle-lib:linux",
     "get-path": "nix run .#print-path",
     "check": "nix flake check",
     "test": "npm run check",
     "test:docker": "if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then docker build -t cr-sqlite-test . && docker run --rm cr-sqlite-test; else echo '⚠️  Docker not running - skipping Docker tests'; fi",
     "test:vps": "./scripts/verify-vps.sh",
     "sync-version": "tsx scripts/sync-version.ts",
-    "build-production": "tsx scripts/build-production.ts",
+    "build-production": "node scripts/build-production.cjs",
     "preversion": "npm run sync-version",
     "version": "git add package.json",
     "prepublishOnly": "npm run build-production && npm run test && npm run test:docker && npm run test:vps"
