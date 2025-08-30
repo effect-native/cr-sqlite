@@ -33,9 +33,9 @@
             ]);
         };
         
-        # Rust toolchain - use nightly as required by CR-SQLite
-        rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
-          extensions = [ "rust-src" ];
+        # Rust toolchain - pin to sqlite-rs-embedded's nightly
+        rustToolchain = pkgs.rust-bin.fromRustupToolchain {
+          channel = "nightly-2024-03-15";
         };
 
         # Build the CR-SQLite extension
@@ -44,6 +44,7 @@
           version = "0.16.3";
           
           src = crSqliteSource;
+          dontStrip = true;
           # Inject the sqlite-rs-embedded source after unpack so it is available
           # even though flakes omit submodules by default.
           postUnpack = ''
@@ -57,6 +58,9 @@
             pkg-config
             gnumake
             git
+            cacert
+            llvmPackages.clang
+            llvmPackages.libclang
           ];
 
           buildInputs = with pkgs; [
@@ -67,28 +71,31 @@
           # Rust/Cargo environment
           CARGO_HOME = "$TMPDIR/.cargo";
           RUSTC_BOOTSTRAP = "1";
+          # Ensure cargo downloads work (Darwin often needs explicit CA bundle)
+          SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+          NIX_SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+          # Help bindgen find libclang
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
           
           # Build the extension using the upstream Makefile
           buildPhase = ''
+            set -euxo pipefail
             echo "Ensuring sqlite-rs-embedded present in source tree..."
             if [ ! -d core/rs/sqlite-rs-embedded ]; then
               mkdir -p core/rs/sqlite-rs-embedded
               cp -a --no-preserve=mode,ownership ${sqlite-rs-embedded}/. core/rs/sqlite-rs-embedded/
             fi
-            # Debug: show what files are actually available
+
             echo "=== DEBUG: Files in build root (first 30) ==="
-            find . -maxdepth 2 -type f | head -30
-            echo
+            find . -maxdepth 2 -type f | head -30 || true
             echo "=== DEBUG: core directory checks ==="
             ls -la core || true
             ls -la core/rs || true
             ls -la core/rs/sqlite-rs-embedded || true
-            test -f core/Makefile && echo "Found core/Makefile" || echo "Missing core/Makefile"
-            echo
-            echo "=== DEBUG: sqlite-rs-embedded sample files ==="
-            find core/rs/sqlite-rs-embedded -maxdepth 2 -name "*.toml" 2>/dev/null | head -10 || echo "No .toml files found"
-            # Stop early; this is a verification build
-            exit 1
+            test -f core/Makefile && echo "Found core/Makefile" || (echo "Missing core/Makefile" && exit 1)
+
+            echo "Building CR-SQLite loadable extension via Makefile..."
+            make -C core CC=clang loadable
           '';
 
           installPhase = ''
