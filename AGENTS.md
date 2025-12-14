@@ -4,6 +4,53 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ---
 
+## Product Owner Wishes System
+
+Tom (Product Owner) can asynchronously express wishes by dropping markdown files into `.wishes/`.
+
+### How It Works
+
+```
+.wishes/
+├── README.md           # Instructions for Tom
+├── done/               # Completed wishes (moved here with completion notes)
+├── blocked/            # Blocked wishes (moved here with reason)
+└── *.md                # Active wishes (inbox) - PROCESS THESE
+```
+
+### Agent Workflow for Wishes
+
+At the start of each OODA loop iteration:
+
+1. **Check `.wishes/` for new files** (not in subdirs)
+2. **Parse priority** from filename or content (`high-`, `medium-`, `low-` prefix or `## Priority` section)
+3. **Incorporate high-priority wishes** into current round planning
+4. **After completing a wish**:
+   - Move file to `.wishes/done/`
+   - Append completion notes (date, what was done, commit hash)
+5. **If wish is blocked**:
+   - Move file to `.wishes/blocked/`
+   - Append reason why it's blocked
+6. **Update `research/zig-cr/92-gap-backlog.md`** with relevant items from wishes
+
+### Wish File Format
+
+```markdown
+# [Title]
+
+## Priority
+high | medium | low
+
+## Description
+What to do.
+
+## Acceptance Criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+```
+
+---
+
 ## Zig CR-SQLite Rewrite: Orchestration Workflow
 
 This project is undergoing a major rewrite from C/Rust to Zig. The following workflow governs how work proceeds.
@@ -11,15 +58,16 @@ This project is undergoing a major rewrite from C/Rust to Zig. The following wor
 ### Continuous Integration Loop
 
 ```
-1. Review the evergreen end state spec
-2. Compare it to the current WIP implementation
-3. Identify gaps
-4. Ensure each gap is captured and all status documents are updated in git
-5. Brainstorm the optimal divide-and-conquer strategy to keep many subagents busy without stepping on each other's toes
-6. Ensure the current subagent tasklist properly reflects that strategy
-7. Assign tasks to subagents and direct them to update their task card once done
-8. Ensure everything is in git
-9. While not yet done, goto step 1
+1. Check .wishes/ for new product owner requests
+2. Review the evergreen end state spec
+3. Compare it to the current WIP implementation
+4. Identify gaps
+5. Ensure each gap is captured and all status documents are updated in git
+6. Brainstorm the optimal divide-and-conquer strategy to keep many subagents busy without stepping on each other's toes
+7. Ensure the current subagent tasklist properly reflects that strategy
+8. Assign tasks to subagents and direct them to update their task card once done
+9. Ensure everything is in git
+10. While not yet done, goto step 1
 ```
 
 ### Document Organization

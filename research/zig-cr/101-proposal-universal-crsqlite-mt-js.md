@@ -25,6 +25,10 @@ See node multi-process proposal:
 
 - [`100-proposal-node-multiprocess-crsqlite-mesh.md`](./100-proposal-node-multiprocess-crsqlite-mesh.md)
 
+See global mesh target:
+
+- [`102-proposal-crsqlite-global-mesh.md`](./102-proposal-crsqlite-global-mesh.md)
+
 ---
 
 ## Proposal: `@libcrsql/crsqlite-mt` (universal JS package)
