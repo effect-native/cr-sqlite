@@ -1,11 +1,11 @@
 # TASK-042: Spec Phase 1 — New Package: `@effect-native/crsql-mesh-transport`
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 high
@@ -29,13 +29,20 @@ No implementation in this task.
 - `effect-native/.specs/crsql-mesh-transport/instructions.md`
 
 ## Acceptance Criteria
-- [ ] `effect-native/.specs/crsql-mesh-transport/instructions.md` exists and follows Phase 1 rules.
-- [ ] Doc names the kinds of transports we anticipate (same-process, browser BroadcastChannel, WS, WebRTC), without specifying libraries.
-- [ ] STOP after this document (do not proceed to Phase 2 without explicit approval).
+- [x] `effect-native/.specs/crsql-mesh-transport/instructions.md` exists and follows Phase 1 rules.
+- [x] Doc names the kinds of transports we anticipate (same-process, browser BroadcastChannel, WS, WebRTC), without specifying libraries.
+- [x] STOP after this document (do not proceed to Phase 2 without explicit approval).
 
 ## Progress Log
 ### 2025-12-14
 - Task created during TS planning
+- Created `effect-native/.specs/crsql-mesh-transport/instructions.md`
+- Phase 1 spec covers Context, User Stories, High-Level Goals, Out of Scope
+- Enumerated transport categories: same-process, same-origin browser (BroadcastChannel), network (WS), peer-to-peer (WebRTC), local network (UDP/mDNS), platform-native (Bluetooth/Multipeer), IPC (unix sockets)
+- No libraries specified, only interface intent
+- STOPPED after Phase 1 as required
 
 ## Completion Notes
-[fill in when done]
+- Phase 1 instructions.md created at `effect-native/.specs/crsql-mesh-transport/instructions.md`
+- Document follows Phase 1 rules: no technical jargon, no implementation details, no "shall" statements
+- Awaiting approval to proceed to Phase 2 (requirements.md)

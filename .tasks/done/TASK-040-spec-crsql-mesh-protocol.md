@@ -5,7 +5,7 @@
 - [ ] Assigned
 - [ ] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 high
@@ -31,13 +31,16 @@ No implementation in this task.
 - `effect-native/.specs/crsql-mesh-protocol/instructions.md`
 
 ## Acceptance Criteria
-- [ ] `effect-native/.specs/crsql-mesh-protocol/instructions.md` exists and follows Phase 1 rules.
-- [ ] Doc states what the protocol does not cover (auth, encryption, membership, etc.).
-- [ ] STOP after this document (do not proceed to Phase 2 without explicit approval).
+- [x] `effect-native/.specs/crsql-mesh-protocol/instructions.md` exists and follows Phase 1 rules.
+- [x] Doc states what the protocol does not cover (auth, encryption, membership, etc.).
+- [x] STOP after this document (do not proceed to Phase 2 without explicit approval).
 
 ## Progress Log
 ### 2025-12-14
 - Task created during TS planning
+- Phase 1 instructions.md created at `effect-native/.specs/crsql-mesh-protocol/instructions.md`
+- Document follows Phase 1 rules: Context, User Story, High-Level Goals, Out of Scope
+- Explicitly lists 12 items that are out of scope (auth, encryption, transport, discovery, persistence, compaction, schema, snapshots, conflict resolution, implementation)
 
 ## Completion Notes
-[fill in when done]
+Phase 1 complete. Document created and ready for review. STOPPED as instructed — awaiting explicit approval before proceeding to Phase 2.

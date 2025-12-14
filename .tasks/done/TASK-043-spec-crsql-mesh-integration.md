@@ -5,7 +5,7 @@
 - [ ] Assigned
 - [ ] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 high
@@ -34,13 +34,22 @@ No implementation in this task.
 - `effect-native/.specs/crsql-mesh-integration/instructions.md`
 
 ## Acceptance Criteria
-- [ ] `effect-native/.specs/crsql-mesh-integration/instructions.md` exists and follows Phase 1 rules.
-- [ ] Doc explains what part belongs in `@effect-native/crsql` vs `@effect-native/crsql-mesh`.
-- [ ] STOP after this document (do not proceed to Phase 2 without explicit approval).
+- [x] `effect-native/.specs/crsql-mesh-integration/instructions.md` exists and follows Phase 1 rules.
+- [x] Doc explains what part belongs in `@effect-native/crsql` vs `@effect-native/crsql-mesh`.
+- [x] STOP after this document (do not proceed to Phase 2 without explicit approval).
 
 ## Progress Log
 ### 2025-12-14
 - Task created during TS planning
+- Created `effect-native/.specs/crsql-mesh-integration/instructions.md`
+- Spec defines the integration surface between `@effect-native/crsql` and `@effect-native/crsql-mesh-core`
+- Clearly separates database primitives (crsql) from sync orchestration (mesh-core)
+- STOPPED as required — awaiting approval before Phase 2
 
 ## Completion Notes
-[fill in when done]
+Phase 1 complete. Created instructions.md covering:
+- Context: existing crsql package capabilities and mesh integration needs
+- User Story: sync engine developer perspective
+- High-Level Goals: typed change access, streaming, cursor management, package boundary principles
+- Out of Scope: sync engine logic, protocol, transport, peer discovery, auth, encryption, reactivity
+- Questions for Design Phase: streaming approach, cursor enhancement, validation, mutation observation

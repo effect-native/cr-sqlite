@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 26)
+> **Last Updated**: 2025-12-14 (Round 27)
 
 ## Status Summary
 
@@ -15,7 +15,7 @@
 - Windows `.dll`: ✅ COMPLETE (see `.tasks/done/TASK-030-windows-dll-build.md`)
 - Hosted web ESM proposal: ✅ COMPLETE (see `.tasks/done/TASK-035-hosted-wasm-proposal.md`)
 - Effect submodules + TS-work rule: ✅ COMPLETE (see `.tasks/done/TASK-038-add-effect-native-submodules.md`)
-- npm native packaging (Zig artifacts): `.tasks/backlog/TASK-034-npm-package-zig-native.md`
+- npm native packaging (Zig artifacts): ✅ COMPLETE (see `.tasks/active/TASK-034-npm-package-zig-native.md`)
 - Release-planning proposal: `.tasks/backlog/TASK-036-release-planning-proposal.md`
 - Web phase-2 (now TS-in-`effect-native/`): `.tasks/backlog/TASK-031-web-service-worker-fallback.md`, `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 - Global mesh spec-first planning:
@@ -163,6 +163,24 @@
   - `test-realistic-collab.sh` - Concurrent edit conflict resolution
   - `test-realistic-offline.sh` - Offline-first field worker pattern
   - All serve as executable documentation per `.wishes/spec-first-RGRTDD.md`
+
+### Round 27: npm Packaging for Zig Artifacts
+- ✅ **npm packaging for Zig-built native extensions** (TASK-034)
+  - Updated `index.js` with implementation selection logic
+  - New `PREFER_IMPLEMENTATION` export ('zig' | 'c-rust' | 'auto')
+  - `getExtensionPath({ implementation })` option for explicit selection
+  - Default 'auto' mode prefers Zig, falls back to C/Rust
+  - Naming convention: `crsqlite-zig-<platform>-<arch>.<ext>`
+- ✅ **Build scripts**: `scripts/build-zig.sh`, `scripts/bundle-zig-lib.sh`
+  - Cross-platform builds: darwin (universal), linux (x64, arm64)
+  - npm scripts: `build:zig`, `build:zig:all`, `bundle-lib:zig`
+- ✅ **Test verification**: `dist.test.ts` extended
+  - Checks for both C/Rust and Zig artifacts
+  - Verifies loader selection logic
+- ✅ **Bundled artifacts** in `lib/`:
+  - `crsqlite-zig-darwin-universal.dylib`
+  - `crsqlite-zig-darwin-aarch64.dylib`
+  - `crsqlite-zig-darwin-x86_64.dylib`
 
 ---
 

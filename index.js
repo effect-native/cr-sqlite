@@ -9,10 +9,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CRSQLITE_EXTENSION_PATH = getCRSQLiteExtensionPath();
 
 /**
+ * Extension implementation type - Zig is the new pure-Zig rewrite, 
+ * C/Rust is the original upstream implementation
+ * @type {'zig' | 'c-rust' | 'auto'}
+ */
+export const PREFER_IMPLEMENTATION = process.env.CRSQLITE_IMPL || 'auto';
+
+/**
  * Get the absolute path to the bundled CR-SQLite extension
+ * @param {Object} options - Configuration options
+ * @param {('zig'|'c-rust'|'auto')} [options.implementation='auto'] - Which implementation to prefer
  * @returns {string} Absolute path to crsqlite.dylib/.so
  */
-export function getExtensionPath() {
+export function getExtensionPath(options = {}) {
+  const impl = options.implementation || PREFER_IMPLEMENTATION;
+  
   // Detect platform and architecture
   const platform = process.platform === 'darwin' ? 'darwin' : 'linux';
   const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
@@ -20,10 +31,28 @@ export function getExtensionPath() {
   
   const libDir = resolve(__dirname, 'lib');
   
-  // Try platform-specific extension first (highest priority)
-  const specificExt = resolve(libDir, `crsqlite-${platform}-${arch}.${ext}`);
-  if (existsSync(specificExt)) {
-    return specificExt;
+  // Build candidates list based on implementation preference
+  const zigSpecific = resolve(libDir, `crsqlite-zig-${platform}-${arch}.${ext}`);
+  const cRustSpecific = resolve(libDir, `crsqlite-${platform}-${arch}.${ext}`);
+  
+  // Priority order depends on implementation preference
+  let candidates = [];
+  
+  if (impl === 'zig') {
+    // Zig-only: only try Zig artifacts
+    candidates = [zigSpecific];
+  } else if (impl === 'c-rust') {
+    // C/Rust-only: only try C/Rust artifacts
+    candidates = [cRustSpecific];
+  } else {
+    // Auto mode: prefer Zig (new), fall back to C/Rust (legacy)
+    candidates = [zigSpecific, cRustSpecific];
+  }
+  
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
   }
   
   // If we have a build-time path and it exists, use it as fallback
@@ -45,10 +74,11 @@ export function getExtensionPath() {
   }
   
   // Helpful error message
-  const expectedExt = `crsqlite-${platform}-${arch}.${ext}`;
+  const zigExt = `crsqlite-zig-${platform}-${arch}.${ext}`;
+  const cRustExt = `crsqlite-${platform}-${arch}.${ext}`;
   throw new Error(
     `CR-SQLite extension not found for ${platform}/${arch}. ` +
-    `Expected: ${expectedExt}. ` +
+    `Expected: ${impl === 'zig' ? zigExt : impl === 'c-rust' ? cRustExt : `${zigExt} or ${cRustExt}`}. ` +
     `Run 'npm run bundle-lib' to build platform-specific extensions.`
   );
 }

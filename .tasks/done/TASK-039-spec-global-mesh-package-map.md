@@ -1,11 +1,11 @@
 # TASK-039: Spec Phase 1 — Global Mesh Package Map (Effect Native)
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 high
@@ -38,15 +38,25 @@ This task must follow the spec-first workflow.
 - `effect-native/.specs/README.md` (add a link to the new spec)
 
 ## Acceptance Criteria
-- [ ] `effect-native/.specs/crsqlite-global-mesh-packages/instructions.md` exists and follows Phase 1 rules.
-- [ ] The doc includes an explicit “Out of Scope” section.
-- [ ] The doc lists candidate packages as *names only* (no code, no pseudo-code).
-- [ ] The doc links back to `research/zig-cr/102-proposal-crsqlite-global-mesh.md`.
-- [ ] STOP after this document (do not proceed to Phase 2 without explicit approval).
+- [x] `effect-native/.specs/crsqlite-global-mesh-packages/instructions.md` exists and follows Phase 1 rules.
+- [x] The doc includes an explicit "Out of Scope" section.
+- [x] The doc lists candidate packages as *names only* (no code, no pseudo-code).
+- [x] The doc links back to `research/zig-cr/102-proposal-crsqlite-global-mesh.md`.
+- [x] STOP after this document (do not proceed to Phase 2 without explicit approval).
 
 ## Progress Log
 ### 2025-12-14
 - Task created to kick off TS mesh planning
+- Created `effect-native/.specs/crsqlite-global-mesh-packages/instructions.md`
+- Updated `effect-native/.specs/README.md` to link to new spec
+- Phase 1 complete — awaiting orchestrator approval before Phase 2
 
 ## Completion Notes
-[fill in when done]
+Phase 1 deliverable complete. Created instructions.md with:
+- Context explaining current packages and need for mesh capabilities
+- User story for local-first developers
+- 10 candidate new packages (protocol, core, transport interface, 4 transport adapters, 3 runtime adapters)
+- 2 existing packages to modify (crsql, libcrsql)
+- 3 upstream Effect SQL integration targets
+- Explicit Out of Scope section (auth, encryption, schema migration during sync, etc.)
+- Links back to source proposal
