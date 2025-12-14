@@ -1,19 +1,20 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 16)
+> **Last Updated**: 2025-12-14 (Round 21)
 
 ## Status Summary
 
 **MVP COMPLETE** — All core replication functionality implemented and tested:
-- Native parity tests: 52/52 PASS
-- Browser WASM tests: 14/14 PASS (including multi-tab SharedWorker)
-- C oracle harness: 4/4 suites PASS
+- Zig unit tests: 64/64 PASS
+- Shell parity tests: 52/52 PASS
+- Browser WASM tests: 18/18 PASS (including multi-tab SharedWorker + OPFS)
+- C oracle harness: 20/20 PASS (5 suites)
 - E2E sync tests: ALL PASS
-- **Total: 66+ tests passing**
+- **Total: 154/154 tests passing (100%)** 🎉
 
 ---
 
-## Recent Progress (Rounds 10-16)
+## Recent Progress (Rounds 10-20)
 
 ### Round 10: CI Infrastructure
 - ✅ GitHub Actions CI workflow (`.github/workflows/zig-tests.yaml`)
@@ -51,6 +52,37 @@
 - ✅ C oracle harness all 4 suites pass (changes-vtab, as-crr, e2e-sync, filters)
 - ✅ Native parity tests expanded to 52 tests
 - ✅ Browser tests expanded to 14 tests
+
+### Round 17: OPFS Persistence & npm Package Structure
+- ✅ OPFS persistence integration for browser storage
+- ✅ npm package structure updates (`zig/browser-dist/`)
+- ✅ Production-ready JavaScript bundles (coordinator.js, provider.js)
+
+### Round 18: OPFS Testing & Stress Tests
+- ✅ OPFS persistence tests added to browser test suite
+- ✅ Concurrent writes stress test (multi-tab write contention)
+- ✅ Browser tests expanded to 16 tests
+
+### Round 19: Provider Re-election
+- ✅ Provider failover and re-election fully working
+- ✅ Graceful handoff when provider tab closes
+- ✅ All 18 browser tests pass
+
+### Round 20: C Oracle Expansion
+- ✅ browser-dist package updates for npm publishing
+- ✅ `sandbox.test.c` added to C oracle harness
+- ✅ `rs-fract.test.c` added to C oracle harness
+- ✅ C oracle now covers 5 test suites (19/20 pass)
+- ⚠️ 1 failing test: `fract: AsOrdered` (stub not implemented)
+
+### Round 21: Fractional Indexing Complete
+- ✅ `crsql_fract_as_ordered` fully implemented (`zig/src/fract_index.zig`)
+  - AFTER INSERT trigger for `-1`/`1` sentinel handling (prepend/append)
+  - AFTER UPDATE trigger for move operations
+  - `<table>_fractindex` view with INSTEAD OF triggers
+- ✅ `crsql_fract_fix_conflict_return_old_key` implemented (collision repair)
+- ✅ **All C oracle tests now pass: 20/20 (100%)**
+- ✅ **Total test count: 154/154 (100%)**
 
 ---
 
@@ -92,39 +124,41 @@
 ### 2. Fractional Indexing UDFs
 **Source**: `research/zig-cr/07-fractindex-rust.md`
 **Priority**: Low (deferred from MVP)
-**Status**: Partial — key_between implemented
+**Status**: ✅ COMPLETE — All UDFs implemented
 
 - [x] `crsql_fract_key_between(left, right)` — lexicographic midpoint (`zig/src/fract_index.zig`)
-- [ ] `crsql_fract_as_ordered(table, order_col, collection_cols...)` — view + triggers
-- [ ] `crsql_fract_fix_conflict_return_old_key(...)` — collision repair
+- [x] `crsql_fract_as_ordered(table, order_col, collection_cols...)` — view + triggers ✅
+- [x] `crsql_fract_fix_conflict_return_old_key(...)` — collision repair ✅
 
 ### 3. Multi-tab Web Architecture
 **Source**: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 **Priority**: High (for production web use)
-**Status**: ✅ Core complete — 4 multi-tab tests passing
+**Status**: ✅ Complete — 18 browser tests passing (including OPFS + re-election)
 
 - [x] SharedWorker coordinator for provider election (`zig/browser-test/src/SharedWorkerCoordinator.ts`)
 - [x] Web Locks for exclusive provider access
 - [x] RPC interface (exec, query) (`zig/browser-test/src/DbClient.ts`)
 - [x] Provider worker (`zig/browser-test/src/ProviderWorker.ts`)
-- [x] Browser test coverage for multi-tab scenarios (4 tests passing)
+- [x] Browser test coverage for multi-tab scenarios (18 tests passing)
+- [x] OPFS storage integration (`opfs-sahpool` VFS) ✅
+- [x] Provider re-election on tab close ✅
 - [ ] Service Worker fallback for environments without SharedWorker
 - [ ] Subscribe/reactive queries in RPC interface
-- [ ] OPFS storage integration (`opfs-sahpool` VFS)
-- [ ] Provider migration safety (idempotent writes)
 
 ### 4. C Test Harness (Oracle Validation)
 **Source**: `research/zig-cr/10-test-oracle.md`
 **Priority**: Medium
-**Status**: ✅ COMPLETE — All 4 suites pass
+**Status**: ✅ COMPLETE — All 20/20 tests pass
 
 - [x] Build harness scaffolding (`zig/harness/c-oracle/`)
 - [x] Load Zig `.so`/`.dylib` via `sqlite3_load_extension()` in harness
-- [x] Run original C tests against Zig extension — **4/4 suites pass**:
+- [x] Run original C tests against Zig extension — **20/20 tests pass (5 suites)**:
   - `test-changes-vtab.sh` ✅
   - `test-as-crr.sh` ✅
   - `test-e2e-sync.sh` ✅
   - `test-filters.sh` ✅
+  - `test-sandbox.sh` ✅
+  - `test-fract.sh` ✅
 - [x] Validate codec compatibility via merge tests
 
 ### 5. Cross-platform Packaging & CI
@@ -170,14 +204,15 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 
 ### High Priority
 1. **npm package updates** — Integrate Zig-built extensions into existing npm package
-2. **OPFS storage** — `opfs-sahpool` VFS for persistent browser storage
+2. ~~**OPFS storage**~~ — ✅ DONE (`opfs-sahpool` VFS integrated)
 
 ### Medium Priority
-3. `crsql_fract_as_ordered` — View + triggers for ordered collections
+3. ~~`crsql_fract_as_ordered`~~ — ✅ DONE (Round 21)
 4. macOS universal binary
 5. Windows `.dll` build
+6. Statement cache integration into hot paths
 
 ### Low Priority
-6. Service Worker fallback
-7. Subscribe/reactive queries
-8. `crsql_fract_fix_conflict_return_old_key`
+7. Service Worker fallback
+8. Subscribe/reactive queries
+9. ~~`crsql_fract_fix_conflict_return_old_key`~~ — ✅ DONE (Round 21)
