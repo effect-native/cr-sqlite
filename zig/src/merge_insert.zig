@@ -105,9 +105,7 @@ pub fn updateBaseTableColumn(
         switch (val_type) {
             api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 1, api.value_int64(v)),
             api.SQLITE_FLOAT => {
-                // bind_double not wrapped yet, use bind_int64 with bits
-                // TODO: Add bind_double to api.zig
-                _ = api.bind_null(stmt, 1);
+                _ = api.bind_double(stmt, 1, api.value_double(v));
             },
             api.SQLITE_TEXT => {
                 const text = api.value_text(v);
@@ -302,8 +300,7 @@ pub fn insertIntoBaseTable(
         switch (val_type) {
             api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
             api.SQLITE_FLOAT => {
-                // TODO: Add bind_double to api.zig
-                _ = api.bind_null(stmt, 2);
+                _ = api.bind_double(stmt, 2, api.value_double(v));
             },
             api.SQLITE_TEXT => {
                 const text = api.value_text(v);
@@ -389,8 +386,7 @@ pub fn insertRowForResurrection(
         switch (val_type) {
             api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
             api.SQLITE_FLOAT => {
-                // TODO: Add bind_double to api.zig
-                _ = api.bind_null(stmt, 2);
+                _ = api.bind_double(stmt, 2, api.value_double(v));
             },
             api.SQLITE_TEXT => {
                 const text = api.value_text(v);

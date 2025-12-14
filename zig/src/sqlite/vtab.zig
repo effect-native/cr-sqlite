@@ -67,7 +67,19 @@
 //! ```
 
 const std = @import("std");
-const log = std.log.scoped(.vtab);
+const builtin = @import("builtin");
+
+// Platform-aware logging: use std.log on native, no-op on WASM/freestanding
+const log = if (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)
+    struct {
+        // No-op logger for WASM/freestanding
+        pub fn debug(comptime fmt: []const u8, args: anytype) void {
+            _ = fmt;
+            _ = args;
+        }
+    }
+else
+    std.log.scoped(.vtab);
 
 // =============================================================================
 // SQLite C ABI Type Definitions

@@ -223,10 +223,11 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header
+    // Trigger header with sync_bit gating
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_itrig"
         \\AFTER INSERT ON "{s}"
+        \\WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
         \\  INSERT OR REPLACE INTO "{s}__crsql_pks" ("pk", "pks")
         \\  VALUES (NEW.rowid, crsql_pack_columns(
@@ -321,12 +322,11 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with WHEN clause
+    // Trigger header with sync_bit gating + column change check
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
         \\AFTER UPDATE ON "{s}"
-        \\FOR EACH ROW WHEN
-        \\  
+        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
     , .{ table_name, table_name }) catch return error.BufferOverflow;
 
     // Build WHEN clause: OLD.col IS NOT NEW.col OR ...
@@ -344,7 +344,8 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         }
     }
 
-    writer.writeAll("\nBEGIN\n") catch return error.BufferOverflow;
+    // Close the parenthesis for the column change check condition
+    writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column (only when changed)
     for (info.columns[0..info.count]) |col| {
@@ -402,14 +403,13 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header
-    // Note: Unlike Rust which uses `WHEN crsql_internal_sync_bit() = 0`,
-    // we omit that check since we don't have the sync bit infrastructure yet.
+    // Trigger header with sync_bit gating
     // Note: db_version is set to 1 for local writes. The commit hook
     // will track actual db_version progression.
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
         \\AFTER DELETE ON "{s}"
+        \\WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
         \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"

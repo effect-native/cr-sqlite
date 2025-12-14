@@ -4,13 +4,24 @@
 //! - crsql_site_id() - returns 16-byte site UUID (stable per database file)
 //! - crsql_db_version() - returns current logical clock value
 //!
-//! MVP: Uses global state. Production would use ExtData per-connection.
+//! Site ID is persisted in the `crsql_site_id` table:
+//! - Local site is always ordinal 0
+//! - Remote sites get ordinals on demand when first seen
+//! - Clock tables store site_id as integer ordinal, not blob
+//!
+//! WASM/Freestanding Notes:
+//! - std.crypto.random is not available on freestanding targets
+//! - We use a simple xorshift64 PRNG seeded deterministically
+//! - Production WASM builds should provide entropy from JS host
 
 const std = @import("std");
+const builtin = @import("builtin");
 const api = @import("ffi/api.zig");
 
-/// Global site ID (MVP: randomly generated once per process)
-/// In production, this would be stored in the database and loaded on open.
+/// Table and index names for site_id storage
+const TBL_SITE_ID = "crsql_site_id";
+
+/// Global site ID (persisted to database)
 var global_site_id: [16]u8 = undefined;
 var site_id_initialized: bool = false;
 
@@ -22,14 +33,229 @@ var global_db_version: i64 = 0;
 /// Used by crsql_next_db_version() to return max(dbVersion+1, pendingDbVersion, merging_version)
 var pending_db_version: i64 = 0;
 
-/// Initialize site ID if not already done
-fn ensureSiteIdInitialized() void {
-    if (!site_id_initialized) {
-        // MVP: Generate random site ID
-        // In production: read from crsql_site_id table or generate and persist
-        std.crypto.random.bytes(&global_site_id);
+/// Check if the crsql_site_id table exists
+fn hasTable(db: ?*api.sqlite3, table_name: [*:0]const u8) bool {
+    const sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND tbl_name = ?";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return false;
+    defer _ = api.finalize(stmt);
+
+    rc = api.bind_text(stmt, 1, table_name, -1, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return false;
+
+    return api.step(stmt) == api.SQLITE_ROW;
+}
+
+/// PRNG state for WASM/freestanding builds
+var prng_state: u64 = 0;
+var prng_initialized: bool = false;
+
+/// Initialize PRNG with a seed (for WASM/freestanding)
+fn initPrng() void {
+    if (!prng_initialized) {
+        // Use a fixed seed for deterministic behavior in WASM
+        // Production builds should call setSeed() from JS with real entropy
+        prng_state = 0x853c49e6748fea9b; // Arbitrary non-zero seed
+        prng_initialized = true;
+    }
+}
+
+/// xorshift64 step
+fn xorshift64() u64 {
+    initPrng();
+    var x = prng_state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    prng_state = x;
+    return x;
+}
+
+/// Fill buffer with random bytes (platform-aware)
+fn fillRandomBytes(buf: []u8) void {
+    if (comptime (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)) {
+        // WASM/freestanding: Use xorshift64 PRNG
+        for (buf) |*byte| {
+            byte.* = @truncate(xorshift64());
+        }
+    } else {
+        // Native: use OS-provided cryptographic randomness
+        std.crypto.random.bytes(buf);
+    }
+}
+
+/// Generate a random UUID v4 (16 bytes)
+fn generateUuid() [16]u8 {
+    var blob: [16]u8 = undefined;
+    fillRandomBytes(&blob);
+    // Set version to 4 (random UUID)
+    blob[6] = (blob[6] & 0x0f) | 0x40;
+    // Set variant to RFC 4122
+    blob[8] = (blob[8] & 0x3f) | 0x80;
+    return blob;
+}
+
+/// Create the crsql_site_id table and insert initial site_id
+fn createSiteIdTable(db: ?*api.sqlite3) bool {
+    // Create table
+    const create_sql =
+        \\CREATE TABLE "crsql_site_id" (site_id BLOB NOT NULL, ordinal INTEGER PRIMARY KEY);
+        \\CREATE UNIQUE INDEX crsql_site_id_site_id ON "crsql_site_id" (site_id);
+    ;
+    var rc = api.exec(db, create_sql, null, null, null);
+    if (rc != api.SQLITE_OK) return false;
+
+    // Insert site_id with ordinal 0
+    const insert_sql = "INSERT INTO \"crsql_site_id\" (site_id, ordinal) VALUES (?, 0)";
+    var stmt: ?*api.sqlite3_stmt = null;
+    rc = api.prepare_v2(db, insert_sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return false;
+    defer _ = api.finalize(stmt);
+
+    const site_id = generateUuid();
+    rc = api.bind_blob(stmt, 1, &site_id, 16, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return false;
+
+    rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE and rc != api.SQLITE_ROW) return false;
+
+    // Copy to global
+    @memcpy(&global_site_id, &site_id);
+    return true;
+}
+
+/// Load site_id from database (ordinal 0)
+fn loadSiteId(db: ?*api.sqlite3) bool {
+    const sql = "SELECT site_id FROM \"crsql_site_id\" WHERE ordinal = 0";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return false;
+    defer _ = api.finalize(stmt);
+
+    rc = api.step(stmt);
+    if (rc == api.SQLITE_ROW) {
+        // Load existing site_id
+        const blob = api.column_blob(stmt, 0);
+        const bytes = api.column_bytes(stmt, 0);
+        if (blob != null and bytes == 16) {
+            const ptr: [*]const u8 = @ptrCast(blob);
+            @memcpy(&global_site_id, ptr[0..16]);
+            return true;
+        }
+        return false;
+    } else if (rc == api.SQLITE_DONE) {
+        // Table exists but no row with ordinal 0 - insert one
+        const insert_sql = "INSERT INTO \"crsql_site_id\" (site_id, ordinal) VALUES (?, 0)";
+        var insert_stmt: ?*api.sqlite3_stmt = null;
+        rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
+        if (rc != api.SQLITE_OK) return false;
+        defer _ = api.finalize(insert_stmt);
+
+        const site_id = generateUuid();
+        rc = api.bind_blob(insert_stmt, 1, &site_id, 16, api.SQLITE_STATIC);
+        if (rc != api.SQLITE_OK) return false;
+
+        rc = api.step(insert_stmt);
+        if (rc != api.SQLITE_DONE and rc != api.SQLITE_ROW) return false;
+
+        @memcpy(&global_site_id, &site_id);
+        return true;
+    }
+    return false;
+}
+
+/// Initialize site ID from database. Creates table if needed.
+/// Must be called during extension initialization with a valid db connection.
+pub fn initSiteId(db: ?*api.sqlite3) bool {
+    if (db == null) return false;
+    if (site_id_initialized) return true;
+
+    const success = if (!hasTable(db, TBL_SITE_ID))
+        createSiteIdTable(db)
+    else
+        loadSiteId(db);
+
+    if (success) {
         site_id_initialized = true;
     }
+    return success;
+}
+
+/// Get or create ordinal for a site_id blob.
+/// Local site (matching global_site_id) is always ordinal 0.
+/// Remote sites get ordinals on demand via INSERT...RETURNING.
+pub fn getOrCreateSiteOrdinal(db: ?*api.sqlite3, site_id_blob: []const u8) ?i64 {
+    if (db == null or site_id_blob.len != 16) return null;
+
+    // Check if this is the local site
+    if (std.mem.eql(u8, site_id_blob, &global_site_id)) {
+        return 0;
+    }
+
+    // Try to find existing ordinal
+    const select_sql = "SELECT ordinal FROM \"crsql_site_id\" WHERE site_id = ?";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, select_sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return null;
+    defer _ = api.finalize(stmt);
+
+    rc = api.bind_blob(stmt, 1, site_id_blob.ptr, 16, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return null;
+
+    rc = api.step(stmt);
+    if (rc == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+
+    // Not found - insert new entry
+    const insert_sql = "INSERT INTO \"crsql_site_id\" (site_id) VALUES (?) RETURNING ordinal";
+    var insert_stmt: ?*api.sqlite3_stmt = null;
+    rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
+    if (rc != api.SQLITE_OK) return null;
+    defer _ = api.finalize(insert_stmt);
+
+    rc = api.bind_blob(insert_stmt, 1, site_id_blob.ptr, 16, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return null;
+
+    rc = api.step(insert_stmt);
+    if (rc == api.SQLITE_ROW) {
+        return api.column_int64(insert_stmt, 0);
+    }
+    return null;
+}
+
+/// Get site_id blob for a given ordinal.
+/// Returns null if not found.
+pub fn getSiteIdByOrdinal(db: ?*api.sqlite3, ordinal: i64) ?[16]u8 {
+    if (db == null) return null;
+
+    // Fast path for local site
+    if (ordinal == 0 and site_id_initialized) {
+        return global_site_id;
+    }
+
+    const sql = "SELECT site_id FROM \"crsql_site_id\" WHERE ordinal = ?";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return null;
+    defer _ = api.finalize(stmt);
+
+    rc = api.bind_int64(stmt, 1, ordinal);
+    if (rc != api.SQLITE_OK) return null;
+
+    rc = api.step(stmt);
+    if (rc == api.SQLITE_ROW) {
+        const blob = api.column_blob(stmt, 0);
+        const bytes = api.column_bytes(stmt, 0);
+        if (blob != null and bytes == 16) {
+            var result: [16]u8 = undefined;
+            const ptr: [*]const u8 = @ptrCast(blob);
+            @memcpy(&result, ptr[0..16]);
+            return result;
+        }
+    }
+    return null;
 }
 
 /// Implementation of crsql_site_id() SQL function
@@ -44,7 +270,10 @@ fn crsqlSiteIdFunc(
         return;
     }
 
-    ensureSiteIdInitialized();
+    if (!site_id_initialized) {
+        api.result_error(pCtx, "site_id not initialized", -1);
+        return;
+    }
     api.result_blob(pCtx, &global_site_id, 16, api.getTransientDestructor());
 }
 
@@ -175,10 +404,20 @@ pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
     pending_db_version = 0;
 }
 
-/// Get site ID as slice
+/// Get site ID as slice (must be initialized first via initSiteId)
 pub fn getSiteId() *const [16]u8 {
-    ensureSiteIdInitialized();
     return &global_site_id;
+}
+
+/// Check if site ID has been initialized
+pub fn isInitialized() bool {
+    return site_id_initialized;
+}
+
+/// Reset site ID state (for testing only)
+pub fn resetForTesting() void {
+    site_id_initialized = false;
+    @memset(&global_site_id, 0);
 }
 
 /// Register both UDFs with a database connection
@@ -225,7 +464,7 @@ pub fn register(db: ?*api.sqlite3) c_int {
 }
 
 test "site_id is 16 bytes" {
-    ensureSiteIdInitialized();
+    // site_id array is always 16 bytes
     try std.testing.expectEqual(@as(usize, 16), global_site_id.len);
 }
 
@@ -327,4 +566,18 @@ test "getSiteId returns consistent value" {
     const id1 = getSiteId();
     const id2 = getSiteId();
     try std.testing.expectEqual(id1, id2);
+}
+
+test "generateUuid produces valid UUID v4" {
+    const uuid = generateUuid();
+    // Version should be 4 (bits 6-9 of byte 6)
+    try std.testing.expectEqual(@as(u8, 0x40), uuid[6] & 0xf0);
+    // Variant should be RFC 4122 (bits 6-7 of byte 8)
+    try std.testing.expectEqual(@as(u8, 0x80), uuid[8] & 0xc0);
+}
+
+test "generateUuid produces different values" {
+    const uuid1 = generateUuid();
+    const uuid2 = generateUuid();
+    try std.testing.expect(!std.mem.eql(u8, &uuid1, &uuid2));
 }

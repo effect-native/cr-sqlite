@@ -13,6 +13,7 @@ const finalize = @import("../finalize.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
 const site_identity = @import("../site_identity.zig");
+const sync_bit = @import("../sync_bit.zig");
 
 /// CR-SQLite Zig implementation version string.
 /// This is returned by the `crsql_zig_version()` SQL function.
@@ -85,6 +86,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
     rc = site_identity.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
+    // Register crsql_internal_sync_bit() function
+    rc = sync_bit.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
     return api.SQLITE_OK;
 }
 
@@ -92,8 +97,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 ///
 /// This function:
 /// 1. Stores the API pointer globally (equivalent to `SQLITE_EXTENSION_INIT2`)
-/// 2. Registers CR-SQLite functions and virtual tables
-/// 3. Returns SQLITE_OK on success
+/// 2. Initializes site_id (loads from db or creates new)
+/// 3. Initializes db_version from existing clock tables
+/// 4. Registers CR-SQLite functions and virtual tables
+/// 5. Returns SQLITE_OK on success
 ///
 /// Signature matches SQLite's expected extension init function:
 /// ```c
@@ -115,6 +122,14 @@ pub export fn sqlite3_crsqlite_init(
     if (init_rc != api.SQLITE_OK) {
         return init_rc;
     }
+
+    // Initialize site_id (creates table if needed, loads or generates site_id)
+    if (!site_identity.initSiteId(db)) {
+        return api.SQLITE_ERROR;
+    }
+
+    // Initialize db_version from existing clock tables
+    site_identity.initDbVersionFromDb(db);
 
     // Register functions
     const func_rc = registerFunctions(db);

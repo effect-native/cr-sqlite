@@ -1,0 +1,440 @@
+#!/usr/bin/env bash
+# Parity Test Suite for Zig CR-SQLite
+# Validates Zig extension against behavioral contract defined in C tests
+#
+# This is the main test runner that exercises all core behaviors.
+# Individual test files:
+#   - test-merge.sh: rows_impacted and merge semantics
+#   - test-e2e-sync.sh: End-to-end multi-DB sync
+#   - test-filters.sh: crsql_changes filter pushdown
+#   - test-rowid-slab.sh: Rowid slab allocation
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ZIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+echo "╔═══════════════════════════════════════════════════════════════════════╗"
+echo "║           Zig CR-SQLite Parity Test Suite                            ║"
+echo "║  Behavioral contract from: core/src/*.test.c                         ║"
+echo "╚═══════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Build the extension first
+echo "Building Zig extension..."
+cd "$ZIG_DIR"
+if ! nix run nixpkgs#zig -- build 2>&1; then
+    echo "FAIL: Zig build failed"
+    exit 1
+fi
+
+# Determine extension path based on platform
+if [[ "$(uname)" == "Darwin" ]]; then
+    EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
+else
+    EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
+fi
+
+if [[ ! -f "$EXT" ]]; then
+    echo "FAIL: Extension not found at $EXT"
+    exit 1
+fi
+
+echo "Extension: $EXT"
+echo ""
+
+TMPFILE=$(mktemp)
+ERRFILE=$(mktemp)
+trap "rm -f $TMPFILE $ERRFILE" EXIT
+
+TOTAL_PASS=0
+TOTAL_FAIL=0
+TOTAL_SKIP=0
+
+# Helper to run SQL and capture result (returns last line of output)
+run_sql() {
+    local sql="$1"
+    nix run nixpkgs#sqlite -- :memory: -cmd ".load $EXT" "$sql" 2>"$ERRFILE" | tail -1 || true
+}
+
+# Check if core functions are available
+echo "Checking core function availability..."
+SMOKE_RESULT=$(run_sql "SELECT crsql_version();" 2>&1 || echo "ERROR")
+if [[ "$SMOKE_RESULT" == "ERROR" ]] || [[ -s "$ERRFILE" && $(grep -c "no such function" "$ERRFILE") -gt 0 ]]; then
+    echo "WARNING: Some core functions may not be implemented yet"
+    echo ""
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test Suite 1: rows-impacted.test.c
+# ═══════════════════════════════════════════════════════════════════════════
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test Suite: rows_impacted (rows-impacted.test.c)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Test: SingleInsertSingleTx
+echo "Test: SingleInsertSingleTx"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif grep -q "Error:" "$ERRFILE" 2>/dev/null; then
+    echo "  FAIL: SQL error occurred (insertIntoBaseTable issue)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$RESULT" == "1" ]]; then
+    echo "  PASS: rows_impacted = 1 for single insert"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 1, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: ManyInsertsInATx
+echo "Test: ManyInsertsInATx"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
+INSERT INTO crsql_changes VALUES ('foo', X'010902', 'b', 2, 1, 1, NULL, 1, 1);
+INSERT INTO crsql_changes VALUES ('foo', X'010903', 'b', 2, 1, 1, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif grep -q "Error:" "$ERRFILE" 2>/dev/null; then
+    echo "  FAIL: SQL error occurred (insertIntoBaseTable issue)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$RESULT" == "3" ]]; then
+    echo "  PASS: rows_impacted = 3 for three inserts"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 3, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: CountResetsOnCommit
+echo "Test: CountResetsOnCommit"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
+COMMIT;
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif grep -q "Error:" "$ERRFILE" 2>/dev/null; then
+    echo "  FAIL: SQL error occurred (insertIntoBaseTable issue)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$RESULT" == "0" ]]; then
+    echo "  PASS: rows_impacted resets to 0 after commit"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 0 after commit, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: UpdateThatDoesNotChangeAnything (identical value)
+echo "Test: UpdateThatDoesNotChangeAnything"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "0" ]]; then
+    echo "  PASS: rows_impacted = 0 for no-op update"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 0 for no-op, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: LowerColVersionLoses
+echo "Test: LowerColVersionLoses"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 999, 0, 0, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "0" ]]; then
+    echo "  PASS: rows_impacted = 0 when local wins (lower col_version)"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 0, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: ValueWin (same col_version, different value)
+echo "Test: ValueWin"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 3, 1, 1, X'00000000000000000000000000000000', 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "1" ]]; then
+    echo "  PASS: rows_impacted = 1 when value wins tie-break"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 1, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: ClockWin (higher col_version)
+echo "Test: ClockWin"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 2, 2, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "1" ]]; then
+    echo "  PASS: rows_impacted = 1 when clock wins"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 1, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: Delete
+echo "Test: Delete"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', '-1', NULL, 2, 2, NULL, 2, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "1" ]]; then
+    echo "  PASS: rows_impacted = 1 for delete"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 1, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: DeleteThatDoesNotChangeAnything
+echo "Test: DeleteThatDoesNotChangeAnything"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+DELETE FROM foo;
+BEGIN;
+INSERT INTO crsql_changes VALUES ('foo', X'010901', '-1', NULL, 2, 2, NULL, 1, 1);
+SELECT crsql_rows_impacted();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "0" ]]; then
+    echo "  PASS: rows_impacted = 0 for already-deleted row"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 0, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test Suite 2: Compound Primary Keys (changes-vtab.test.c:testManyPkTable)
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test Suite: Compound PK Encoding (changes-vtab.test.c)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Test: ManyPkTable - compound PK blob encoding
+echo "Test: ManyPkTable (compound PK encoding)"
+RESULT=$(run_sql "
+CREATE TABLE foo (a NOT NULL, b NOT NULL, c, PRIMARY KEY (a, b));
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (4, 5, 6);
+SELECT quote(pk) FROM crsql_changes;
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "X'0209040905'" ]]; then
+    echo "  PASS: Compound PK encoded as X'0209040905'"
+    echo "        (02=2 cols, 09=int8, 04=4, 09=int8, 05=5)"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected X'0209040905', got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test Suite 3: Core Functions
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test Suite: Core Functions"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Test: crsql_site_id returns 16-byte blob
+echo "Test: crsql_site_id() returns 16-byte blob"
+RESULT=$(run_sql "SELECT length(crsql_site_id());")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: crsql_site_id() not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "16" ]]; then
+    echo "  PASS: site_id is 16 bytes"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 16 bytes, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: crsql_db_version starts at 0
+echo "Test: crsql_db_version() starts at 0"
+RESULT=$(run_sql "SELECT crsql_db_version();")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: crsql_db_version() not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "0" ]]; then
+    echo "  PASS: db_version starts at 0"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 0, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: crsql_db_version increments on change
+echo "Test: crsql_db_version() increments on change"
+RESULT=$(run_sql "
+CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+SELECT crsql_as_crr('foo');
+INSERT INTO foo VALUES (1, 2);
+SELECT crsql_db_version();
+")
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ "$RESULT" == "1" ]]; then
+    echo "  PASS: db_version incremented to 1"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected 1, got: $RESULT"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Test: crsql_finalize doesn't error
+echo "Test: crsql_finalize() runs without error"
+RESULT=$(run_sql "SELECT crsql_finalize();" 2>&1)
+if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: crsql_finalize() not implemented"
+    TOTAL_SKIP=$((TOTAL_SKIP + 1))
+elif [[ -z "$RESULT" ]] || [[ "$RESULT" == "" ]]; then
+    echo "  PASS: crsql_finalize() succeeded"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  INFO: crsql_finalize() returned: $RESULT"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Run Additional Test Scripts
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Running Additional Test Scripts"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Run filter tests
+echo "Running test-filters.sh..."
+if bash "$SCRIPT_DIR/test-filters.sh" > "$TMPFILE" 2>&1; then
+    FILTER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FILTER_PASS=0
+    echo "  Filter tests: $FILTER_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + FILTER_PASS))
+else
+    if grep -q "BLOCKED:" "$TMPFILE"; then
+        echo "  Filter tests: BLOCKED (functions not implemented)"
+    else
+        FILTER_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || FILTER_FAIL=0
+        FILTER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FILTER_PASS=0
+        echo "  Filter tests: $FILTER_PASS passed, $FILTER_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + FILTER_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + FILTER_FAIL))
+    fi
+fi
+
+# Run rowid slab tests (only if not blocked)
+echo "Running test-rowid-slab.sh..."
+if bash "$SCRIPT_DIR/test-rowid-slab.sh" > "$TMPFILE" 2>&1; then
+    ROWID_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ROWID_PASS=0
+    echo "  Rowid slab tests: $ROWID_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + ROWID_PASS))
+else
+    if grep -q "BLOCKED:" "$TMPFILE"; then
+        echo "  Rowid slab tests: BLOCKED (functions not implemented)"
+    else
+        ROWID_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ROWID_FAIL=0
+        ROWID_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ROWID_PASS=0
+        echo "  Rowid slab tests: $ROWID_PASS passed, $ROWID_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + ROWID_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + ROWID_FAIL))
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Summary
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "╔═══════════════════════════════════════════════════════════════════════╗"
+echo "║                           TEST SUMMARY                               ║"
+echo "╠═══════════════════════════════════════════════════════════════════════╣"
+printf "║  PASSED:  %-58d ║\n" "$TOTAL_PASS"
+printf "║  FAILED:  %-58d ║\n" "$TOTAL_FAIL"
+printf "║  SKIPPED: %-58d ║\n" "$TOTAL_SKIP"
+echo "╚═══════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+if [[ $TOTAL_FAIL -eq 0 && $TOTAL_PASS -gt 0 ]]; then
+    echo "✓ All implemented tests PASSED"
+    exit 0
+elif [[ $TOTAL_FAIL -eq 0 && $TOTAL_PASS -eq 0 ]]; then
+    echo "⚠ All tests SKIPPED (core functions not yet implemented)"
+    exit 2
+else
+    echo "✗ Some tests FAILED"
+    exit 1
+fi

@@ -62,15 +62,31 @@ pub const DestructorFn = ?*const fn (?*anyopaque) callconv(.c) void;
 /// SQLITE_STATIC - tells SQLite the data is static/const and won't be freed
 pub const SQLITE_STATIC: DestructorFn = null;
 
-// Import the C workaround function that returns SQLITE_TRANSIENT (-1)
-// This is needed because Zig doesn't allow creating misaligned pointer constants.
-extern fn sqliteTransientAsDestructor() DestructorFn;
+/// SQLITE_TRANSIENT as a constant - tells SQLite to make a copy of the data.
+/// This is the value ((void(*)(void *))-1) from SQLite's headers.
+/// We use @ptrFromInt to create this special sentinel value.
+pub const SQLITE_TRANSIENT: DestructorFn = @ptrFromInt(@as(usize, @bitCast(@as(isize, -1))));
+
+/// Platform-specific implementation for getting SQLITE_TRANSIENT.
+/// On native platforms with C interop, we use the C workaround function.
+/// On WASM/freestanding, we use the pure Zig constant.
+const builtin = @import("builtin");
 
 /// Get SQLITE_TRANSIENT for passing to SQLite result functions.
 /// Tells SQLite to make a copy of the data because it may be deallocated.
 pub inline fn getTransientDestructor() DestructorFn {
-    return sqliteTransientAsDestructor();
+    if (comptime (builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64 or builtin.os.tag == .freestanding)) {
+        // Pure Zig implementation for WASM/freestanding
+        return SQLITE_TRANSIENT;
+    } else {
+        // Use C workaround on native platforms for maximum compatibility
+        return sqliteTransientAsDestructor();
+    }
 }
+
+// Import the C workaround function that returns SQLITE_TRANSIENT (-1)
+// Only available on native platforms where we link workaround.c
+extern fn sqliteTransientAsDestructor() DestructorFn;
 
 /// Initialize the global API pointer. Called once during extension initialization.
 /// Equivalent to C's `SQLITE_EXTENSION_INIT2(pApi)` macro.
@@ -577,6 +593,15 @@ pub fn bind_null(pStmt: ?*c.sqlite3_stmt, i: c_int) c_int {
     if (api == null) return SQLITE_MISUSE;
     const func = api.*.bind_null orelse return SQLITE_MISUSE;
     return func(pStmt, i);
+}
+
+/// Wrapper for sqlite3_bind_double
+/// Binds a floating-point value to a prepared statement parameter.
+pub fn bind_double(pStmt: ?*c.sqlite3_stmt, i: c_int, val: f64) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.bind_double orelse return SQLITE_MISUSE;
+    return func(pStmt, i, val);
 }
 
 // =============================================================================

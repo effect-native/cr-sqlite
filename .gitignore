@@ -14,3 +14,4 @@ tsconfig.tsbuildinfo
 target/
 .zig-cache/
 .tmp
+.tmp

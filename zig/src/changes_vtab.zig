@@ -27,13 +27,25 @@
 //! Reference: `core/src/changes-vtab.c`
 
 const std = @import("std");
+const builtin = @import("builtin");
 const vtab = @import("sqlite/vtab.zig");
 const api = @import("ffi/api.zig");
 const rows_impacted = @import("rows_impacted.zig");
 const merge_insert = @import("merge_insert.zig");
 const compare_values = @import("compare_values.zig");
+const sync_bit = @import("sync_bit.zig");
 
-const log = std.log.scoped(.changes_vtab);
+// Platform-aware logging: use std.log on native, no-op on WASM/freestanding
+const log = if (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)
+    struct {
+        // No-op logger for WASM/freestanding
+        pub fn debug(comptime fmt: []const u8, args: anytype) void {
+            _ = fmt;
+            _ = args;
+        }
+    }
+else
+    std.log.scoped(.changes_vtab);
 
 // Type conversion between vtab's opaque types and api's opaque types.
 // Both represent the same underlying SQLite types, just declared separately.
@@ -1052,6 +1064,12 @@ fn changesUpdate(
         log.debug("changesUpdate: pk blob is NULL but length > 0", .{});
         return vtab.SQLITE_ERROR;
     }
+
+    // Set sync_bit to 1 to gate off triggers during merge operations.
+    // This prevents infinite loops where merge writes would trigger clock updates.
+    // The guard ensures sync_bit is reset to 0 even if we return early due to errors.
+    const guard = sync_bit.SyncBitGuard.init();
+    defer guard.deinit();
 
     // Get table name as slice for helper functions
     const table_slice = std.mem.span(table_name.?);
