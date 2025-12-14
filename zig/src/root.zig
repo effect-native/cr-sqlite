@@ -4,11 +4,13 @@
 //! See `research/zig-cr/` for design documents.
 
 pub const codec = @import("codec.zig");
+pub const compare_values = @import("compare_values.zig");
 pub const ffi = @import("ffi/root.zig");
 pub const changes_vtab = @import("changes_vtab.zig");
 pub const pack_columns = @import("pack_columns.zig");
 pub const rows_impacted = @import("rows_impacted.zig");
 pub const site_identity = @import("site_identity.zig");
+pub const merge_insert = @import("merge_insert.zig");
 pub const sqlite = struct {
     /// Writable virtual table infrastructure
     pub const vtab = @import("sqlite/vtab.zig");
@@ -42,10 +44,14 @@ test {
     _ = sqlite.vtab;
     // Run changes_vtab tests
     _ = changes_vtab;
+    // Run compare_values tests
+    _ = compare_values;
     // Run pack_columns tests
     _ = pack_columns;
     // Run rows_impacted tests
     _ = rows_impacted;
     // Run site_identity tests
     _ = site_identity;
+    // Run merge_insert tests
+    _ = merge_insert;
 }
