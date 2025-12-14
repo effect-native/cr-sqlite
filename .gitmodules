@@ -9,3 +9,6 @@
 [submodule ".refs/ghostty"]
 	path = .refs/ghostty
 	url = https://github.com/ghostty-org/ghostty.git
+[submodule ".refs/tigerbeetle"]
+	path = .refs/tigerbeetle
+	url = git@github.com:tigerbeetle/tigerbeetle.git
