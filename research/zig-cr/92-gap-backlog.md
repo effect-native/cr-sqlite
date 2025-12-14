@@ -12,7 +12,7 @@
 
 **Task map (what to run in parallel next)**:
 - Perf hotspots: `.tasks/backlog/TASK-029-performance-hotspot-closure.md`
-- Windows `.dll`: `.tasks/backlog/TASK-030-windows-dll-build.md`
+- Windows `.dll`: ✅ COMPLETE (see `.tasks/done/TASK-030-windows-dll-build.md`)
 - npm native packaging (Zig artifacts): `.tasks/backlog/TASK-034-npm-package-zig-native.md`
 - Web phase-2 (TS-gated): `.tasks/backlog/TASK-031-web-service-worker-fallback.md`, `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 - Mobile embedding guide: `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
@@ -185,15 +185,15 @@
 ### 1. Performance Optimizations
 **Source**: `research/zig-cr/11-performance-hotspots.md`
 **Priority**: Medium
-**Status**: ✅ Core integration complete (Round 23)
+**Status**: ✅ All performance optimizations complete (Round 26)
 
 - [x] Statement caching infrastructure (`zig/src/stmt_cache.zig`)
 - [x] `discoverTablesCached` enabled in `changes_vtab.zig` ✅
 - [x] Per-table merge statement caching (`TableMergeStmts` in `merge_insert.zig`) ✅
 - [x] Wire `TableMergeStmts` into changes_vtab write path ✅ (Round 23)
-- [ ] Schema version invalidation caching (`PRAGMA schema_version`) — `.tasks/backlog/TASK-029-performance-hotspot-closure.md`
-- [ ] `PRAGMA data_version` check amortization (per-transaction flag) — `.tasks/backlog/TASK-029-performance-hotspot-closure.md`
-- [ ] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`) — `.tasks/backlog/TASK-029-performance-hotspot-closure.md`
+- [x] Schema version invalidation caching (`PRAGMA schema_version`) ✅ — `.tasks/active/TASK-029-performance-hotspot-closure.md`
+- [x] `PRAGMA data_version` check amortization (per-transaction flag) ✅ — `.tasks/active/TASK-029-performance-hotspot-closure.md`
+- [x] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`) ✅ — `.tasks/active/TASK-029-performance-hotspot-closure.md`
 
 ### 2. Fractional Indexing UDFs
 **Source**: `research/zig-cr/07-fractindex-rust.md`
@@ -216,8 +216,8 @@
 - [x] Browser test coverage for multi-tab scenarios (18 tests passing)
 - [x] OPFS storage integration (`opfs-sahpool` VFS) ✅
 - [x] Provider re-election on tab close ✅
-- [ ] Service Worker fallback for environments without SharedWorker — `.tasks/backlog/TASK-031-web-service-worker-fallback.md` (TS-gated by `.wishes/stop-before-typescript.md`)
-- [ ] Subscribe/reactive queries in RPC interface — `.tasks/backlog/TASK-032-web-reactive-subscriptions.md` (TS-gated by `.wishes/stop-before-typescript.md`)
+- [ ] Service Worker fallback for environments without SharedWorker — `.tasks/backlog/TASK-031-web-service-worker-fallback.md` (blocked on `.tasks/backlog/TASK-038-add-effect-native-submodules.md`)
+- [ ] Subscribe/reactive queries in RPC interface — `.tasks/backlog/TASK-032-web-reactive-subscriptions.md` (blocked on `.tasks/backlog/TASK-038-add-effect-native-submodules.md`)
 
 ### 4. C Test Harness (Oracle Validation)
 **Source**: `research/zig-cr/10-test-oracle.md`
@@ -245,7 +245,7 @@
   - macOS arm64 native tests
   - WASM build verification
 - [x] macOS universal binary (aarch64 + x86_64) ✅ (Round 26) — `.tasks/done/TASK-026-A-macos-universal-binary.md`
-- [ ] Windows `.dll` build — `.tasks/backlog/TASK-030-windows-dll-build.md`
+- [x] Windows `.dll` build ✅ (Round 27) — `.tasks/done/TASK-030-windows-dll-build.md`
 - [ ] iOS/Android static embedding guide — `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
 - [ ] **npm package updates for Zig-built extensions** — High priority for release — `.tasks/backlog/TASK-034-npm-package-zig-native.md`
 
@@ -285,7 +285,7 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 ### Medium Priority
 3. ~~`crsql_fract_as_ordered`~~ — ✅ DONE (Round 21)
 4. ~~macOS universal binary~~ — ✅ DONE (Round 26) — tracked by `.tasks/done/TASK-026-A-macos-universal-binary.md`
-5. Windows `.dll` build — tracked by `.tasks/backlog/TASK-030-windows-dll-build.md`
+5. ~~Windows `.dll` build~~ — ✅ DONE (Round 27) — tracked by `.tasks/done/TASK-030-windows-dll-build.md`
 6. ~~Statement cache integration into hot paths~~ — ✅ DONE (Round 22-23)
 7. ~~Wire `TableMergeStmts` into changes_vtab write path~~ — ✅ DONE (Round 23)
 8. Cross-platform sync validation — ✅ DONE (Round 23)

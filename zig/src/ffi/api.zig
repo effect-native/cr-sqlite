@@ -467,6 +467,36 @@ pub fn prepare_v2(
     return func(db, zSql, nByte, ppStmt, pzTail);
 }
 
+/// Prepare flags for sqlite3_prepare_v3
+pub const SQLITE_PREPARE_PERSISTENT: c_uint = 0x01;
+pub const SQLITE_PREPARE_NORMALIZE: c_uint = 0x02;
+pub const SQLITE_PREPARE_NO_VTAB: c_uint = 0x04;
+
+/// Wrapper for sqlite3_prepare_v3
+/// Prepares a SQL statement with additional flags.
+/// Use SQLITE_PREPARE_PERSISTENT for long-lived statements that will be
+/// executed many times. This hint tells SQLite to avoid using lookaside
+/// memory for the prepared statement.
+pub fn prepare_v3(
+    db: ?*c.sqlite3,
+    zSql: [*c]const u8,
+    nByte: c_int,
+    prepFlags: c_uint,
+    ppStmt: *?*c.sqlite3_stmt,
+    pzTail: ?*[*c]const u8,
+) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    // Try prepare_v3 first, fall back to prepare_v2 if not available
+    if (api.*.prepare_v3) |func| {
+        return func(db, zSql, nByte, prepFlags, ppStmt, pzTail);
+    } else if (api.*.prepare_v2) |func_v2| {
+        // Fallback: ignore flags and use prepare_v2
+        return func_v2(db, zSql, nByte, ppStmt, pzTail);
+    }
+    return SQLITE_MISUSE;
+}
+
 /// Wrapper for sqlite3_step
 /// Executes one step of a prepared statement.
 pub fn step(pStmt: ?*c.sqlite3_stmt) c_int {

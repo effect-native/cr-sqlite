@@ -145,6 +145,12 @@ const ChangesVTab = extern struct {
     // Table name that merge_stmts is cached for (null-terminated, heap allocated)
     merge_stmts_table_ptr: ?[*]u8 = null,
     merge_stmts_table_len: usize = 0,
+
+    // Schema-version keyed cache for CRR table list.
+    // Avoids re-querying sqlite_master on every xFilter when schema hasn't changed.
+    cached_table_names_ptr: ?*anyopaque = null,
+    cached_table_names_len: usize = 0,
+    cached_schema_version: i64 = -1,
 };
 
 // =============================================================================
@@ -362,6 +368,8 @@ fn changesDisconnect(pVTab: ?*vtab.VTab) callconv(.c) c_int {
         }
         // Free merge statement cache if allocated
         freeMergeStmts(pChangesVTab);
+        // Free cached table names if allocated
+        freeCachedTableNames(pChangesVTab);
         sqliteFree(vt);
     }
     return vtab.SQLITE_OK;
@@ -553,6 +561,70 @@ fn discoverTables(cursor: *ChangesCursor, db: ?*vtab.sqlite3) !void {
     cursor.table_count = count;
 }
 
+/// Copy table names from vtab cache to cursor.
+/// Used when schema version hasn't changed and we can reuse cached names.
+fn copyTableNamesToCursor(cursor: *ChangesCursor, cached_names: [][]u8) !void {
+    // Free any existing tables on cursor
+    freeCursorTables(cursor);
+
+    if (cached_names.len == 0) {
+        cursor.table_count = 0;
+        return;
+    }
+
+    const allocator = getCursorAllocator();
+
+    // Allocate array for cursor's copy of names
+    const names = allocator.alloc([]u8, cached_names.len) catch return error.OutOfMemory;
+    errdefer allocator.free(names);
+
+    // Copy each name
+    for (cached_names, 0..) |cached_name, i| {
+        const name_copy = allocator.alloc(u8, cached_name.len) catch return error.OutOfMemory;
+        @memcpy(name_copy, cached_name);
+        names[i] = name_copy;
+    }
+
+    setCursorTableNames(cursor, names);
+    cursor.table_count = cached_names.len;
+}
+
+/// Discover tables and update both cursor and vtab cache.
+/// Called when schema version has changed and we need to refresh the cache.
+fn discoverTablesCachedWithInvalidation(cursor: *ChangesCursor, pVTab: *ChangesVTab, cache: *stmt_cache.StmtCache) !void {
+    // Check schema version and update cache state
+    _ = cache.checkSchemaVersion() catch {};
+    const schema_version = cache.getSchemaVersion();
+
+    // Discover tables using the existing cached query method
+    try discoverTablesCached(cursor, cache);
+
+    // Now copy cursor's table names to vtab cache for future use
+    if (getCursorTableNames(cursor)) |cursor_names| {
+        if (cursor_names.len > 0) {
+            const allocator = std.heap.page_allocator;
+
+            // Allocate vtab cache copy
+            const vtab_names = allocator.alloc([]u8, cursor_names.len) catch return;
+            errdefer allocator.free(vtab_names);
+
+            // Copy each name to vtab cache
+            for (cursor_names, 0..) |name, i| {
+                const name_copy = allocator.alloc(u8, name.len) catch {
+                    // Clean up partial allocation
+                    for (vtab_names[0..i]) |n| allocator.free(n);
+                    allocator.free(vtab_names);
+                    return;
+                };
+                @memcpy(name_copy, name);
+                vtab_names[i] = name_copy;
+            }
+
+            setCachedTableNames(pVTab, vtab_names, schema_version);
+        }
+    }
+}
+
 /// Cached version of discoverTables using StmtCache for better performance.
 ///
 /// Uses the `select_clock_tables` slot in the cache to avoid re-preparing
@@ -564,9 +636,9 @@ fn discoverTablesCached(cursor: *ChangesCursor, cache: *stmt_cache.StmtCache) !v
 
     const allocator = getCursorAllocator();
 
-    // Query for clock tables using cached statement
+    // Query for clock tables using cached persistent statement
     // Note: CLOCK_TABLES_SELECT uses tbl_name, but cache uses 'name' - use a compatible query
-    const stmt = try stmt_cache.prepareOnce(
+    const stmt = try stmt_cache.prepareOncePersistent(
         cache.db,
         "SELECT tbl_name FROM sqlite_master WHERE type='table' AND tbl_name LIKE '%__crsql_clock' ORDER BY tbl_name",
         &cache.select_clock_tables,
@@ -838,12 +910,24 @@ fn changesFilter(
         cursor.filter_site_id_type = site_id_filter_type;
     }
 
-    // Discover all CRR tables (use cached version if available for better performance)
+    // Discover all CRR tables using schema-version keyed cache for optimal performance.
+    // This avoids re-querying sqlite_master on every xFilter when schema hasn't changed.
     if (pVTab.cache) |cache| {
-        discoverTablesCached(cursor, cache) catch {
-            cursor.is_eof = true;
-            return vtab.SQLITE_OK;
-        };
+        // Check if we have a valid cached table list
+        const schema_version = cache.getSchemaVersion();
+        if (getCachedTableNames(pVTab, schema_version)) |cached_names| {
+            // Schema unchanged, copy cached names to cursor
+            copyTableNamesToCursor(cursor, cached_names) catch {
+                cursor.is_eof = true;
+                return vtab.SQLITE_OK;
+            };
+        } else {
+            // Schema changed or no cache - rediscover and cache
+            discoverTablesCachedWithInvalidation(cursor, pVTab, cache) catch {
+                cursor.is_eof = true;
+                return vtab.SQLITE_OK;
+            };
+        }
     } else {
         // Fallback to uncached version if cache initialization failed
         discoverTables(cursor, db) catch {
@@ -1134,6 +1218,52 @@ fn changesRowid(pCursor: ?*vtab.VTabCursor, pRowid: *i64) callconv(.c) c_int {
     pRowid.* = slab_offset + cursor.current_row_in_table;
 
     return vtab.SQLITE_OK;
+}
+
+// =============================================================================
+// Schema-Version Keyed Table Cache Helpers
+// =============================================================================
+
+/// Free the cached table names from the vtab.
+fn freeCachedTableNames(pVTab: *ChangesVTab) void {
+    const allocator = std.heap.page_allocator;
+
+    if (pVTab.cached_table_names_ptr != null and pVTab.cached_table_names_len > 0) {
+        const names_ptr: [*][]u8 = @ptrCast(@alignCast(pVTab.cached_table_names_ptr));
+        const names = names_ptr[0..pVTab.cached_table_names_len];
+        for (names) |name| {
+            allocator.free(name);
+        }
+        allocator.free(names);
+    }
+
+    pVTab.cached_table_names_ptr = null;
+    pVTab.cached_table_names_len = 0;
+    pVTab.cached_schema_version = -1;
+}
+
+/// Get cached table names if schema version hasn't changed.
+/// Returns null if cache is stale or empty.
+fn getCachedTableNames(pVTab: *ChangesVTab, current_schema_version: i64) ?[][]u8 {
+    if (pVTab.cached_table_names_ptr == null or pVTab.cached_table_names_len == 0) {
+        return null;
+    }
+    if (pVTab.cached_schema_version != current_schema_version) {
+        // Schema changed, cache is stale
+        return null;
+    }
+    const ptr: [*][]u8 = @ptrCast(@alignCast(pVTab.cached_table_names_ptr));
+    return ptr[0..pVTab.cached_table_names_len];
+}
+
+/// Store table names in the vtab cache with schema version key.
+fn setCachedTableNames(pVTab: *ChangesVTab, names: [][]u8, schema_version: i64) void {
+    // Free old cache first
+    freeCachedTableNames(pVTab);
+
+    pVTab.cached_table_names_ptr = @ptrCast(names.ptr);
+    pVTab.cached_table_names_len = names.len;
+    pVTab.cached_schema_version = schema_version;
 }
 
 // =============================================================================

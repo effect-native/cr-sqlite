@@ -41,8 +41,7 @@ Post-MVP items not yet implemented:
 - Performance: `PRAGMA schema_version` caching, `SQLITE_PREPARE_PERSISTENT`
 - Web: Service Worker fallback (for environments without SharedWorker)
 - Web: Reactive query subscriptions in RPC interface
-- Packaging: Windows `.dll` build, iOS/Android static embedding guides
-- Packaging: macOS universal binary (aarch64 + x86_64)
+- Packaging: iOS/Android static embedding guides
 
 ## Build Instructions
 
@@ -77,6 +76,29 @@ nix run nixpkgs#zig -- build wasm
 Output:
 - `zig-out/lib/libcrsqlite.a` - Static library for embedding
 - `zig-out/lib/crsqlite.wasm` - Standalone WASM object
+
+### Windows Build
+
+```bash
+cd zig
+
+# GNU target (MinGW ABI)
+nix run nixpkgs#zig -- build -Dtarget=x86_64-windows-gnu
+
+# MSVC target (Windows SDK ABI)
+nix run nixpkgs#zig -- build -Dtarget=x86_64-windows-msvc
+```
+
+Output: `zig-out/bin/crsqlite.dll` (exports `sqlite3_crsqlite_init`)
+
+### macOS Universal Binary
+
+```bash
+cd zig
+make universal
+```
+
+Output: `zig-out-universal/lib/libcrsqlite.dylib` (aarch64 + x86_64)
 
 ## Test Instructions
 
