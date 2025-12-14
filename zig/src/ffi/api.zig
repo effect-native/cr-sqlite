@@ -529,6 +529,16 @@ pub fn column_bytes(pStmt: ?*c.sqlite3_stmt, iCol: c_int) c_int {
     return func(pStmt, iCol);
 }
 
+/// Wrapper for sqlite3_column_value
+/// Returns the column value as an unprotected sqlite3_value object.
+/// The returned value is valid only until the next sqlite3_step() or finalize().
+pub fn column_value(pStmt: ?*c.sqlite3_stmt, iCol: c_int) ?*c.sqlite3_value {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.column_value orelse return null;
+    return func(pStmt, iCol);
+}
+
 // =============================================================================
 // Bind Functions (for prepared statements)
 // =============================================================================

@@ -447,7 +447,7 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     // Column order: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
     // Exclude sentinel rows (col_name = '-1') from output - they're metadata only
     var sql_buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE col_name != '-1'", .{table_name}) catch {
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
         return vtab.SQLITE_ERROR;
     };
 
@@ -706,11 +706,14 @@ fn changesColumn(
             }
         },
         COL_VAL => {
-            // Fetch actual value from base table using col_name
-            if (table_name) |name| {
-                const col_name_ptr = columnTextFromStmt(stmt, 1);
-                if (col_name_ptr) |cn| {
-                    const col_name_slice = std.mem.span(cn);
+            // Check if this is a sentinel row (col_name = '-1')
+            const col_name_ptr = columnTextFromStmt(stmt, 1);
+            if (col_name_ptr) |cn| {
+                const col_name_slice = std.mem.span(cn);
+                if (std.mem.eql(u8, col_name_slice, "-1")) {
+                    // Sentinel rows have NULL value
+                    resultNull(ctx);
+                } else if (table_name) |name| {
                     fetchColumnValue(db, name, col_name_slice, cursor.current_pk, ctx);
                 } else {
                     resultNull(ctx);
@@ -753,8 +756,21 @@ fn changesColumn(
             }
         },
         COL_CL => {
-            // Causal length: fetch from sentinel row (col_name = '-1')
-            if (table_name) |name| {
+            // If this IS the sentinel row, col_version is the causal length
+            const col_name_ptr = columnTextFromStmt(stmt, 1);
+            if (col_name_ptr) |cn| {
+                const col_name_slice = std.mem.span(cn);
+                if (std.mem.eql(u8, col_name_slice, "-1")) {
+                    // We ARE the sentinel - col_version IS cl
+                    resultInt64(ctx, columnInt64FromStmt(stmt, 2));
+                } else if (table_name) |name| {
+                    // Regular column - fetch from sentinel
+                    const cl = fetchCausalLength(db, name, cursor.current_pk);
+                    resultInt64(ctx, cl);
+                } else {
+                    resultInt64(ctx, 0);
+                }
+            } else if (table_name) |name| {
                 const cl = fetchCausalLength(db, name, cursor.current_pk);
                 resultInt64(ctx, cl);
             } else {
@@ -962,11 +978,36 @@ fn changesUpdate(
         if (col_version > local_col_version) {
             remote_wins = true;
         } else if (col_version == local_col_version) {
-            // Version tied, compare values
-            // For MVP, we need to get local value and compare
-            // This requires another query - for now, use simple rule:
-            // If versions exactly equal, local wins (no-op)
-            remote_wins = false;
+            // Version tied, compare values (larger value wins)
+            // Get remote value from argv[5]
+            const remote_value = toApiValue(argv[5]);
+
+            // Fetch local value for comparison
+            var local_value_buf: [1024]u8 = undefined;
+            if (std.fmt.bufPrintZ(&local_value_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE rowid = ?", .{ cid_slice, table_slice })) |local_value_sql| {
+                var local_stmt: ?*api.sqlite3_stmt = null;
+                if (api.prepare_v2(api_db, local_value_sql, -1, &local_stmt, null) == api.SQLITE_OK) {
+                    defer _ = api.finalize(local_stmt);
+                    _ = api.bind_int64(local_stmt, 1, pk_rowid);
+
+                    if (api.step(local_stmt) == api.SQLITE_ROW) {
+                        // Compare using compare_values module
+                        const local_sqlite_value = api.column_value(local_stmt, 0);
+                        const cmp = compare_values.compareSqliteValues(remote_value, local_sqlite_value);
+                        if (cmp > 0) {
+                            // Remote value is larger, remote wins
+                            remote_wins = true;
+                        }
+                        // If cmp <= 0, local wins (remote_wins stays false)
+                    } else {
+                        // No local row, remote wins
+                        remote_wins = true;
+                    }
+                }
+                // If prepare failed, local wins (conservative)
+            } else |_| {
+                // Buffer overflow, local wins (conservative)
+            }
         }
         // If col_version < local_col_version, local wins (remote_wins stays false)
     }
