@@ -1,0 +1,64 @@
+{
+  "name": "@crsqlite/browser",
+  "version": "0.1.0",
+  "description": "CR-SQLite for browsers - CRDT-based SQLite replication with multi-tab support",
+  "type": "module",
+  "main": "crsql-multitab.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./crsql-multitab.js"
+    },
+    "./coordinator": {
+      "types": "./index.d.ts",
+      "default": "./coordinator.js"
+    },
+    "./provider": {
+      "types": "./index.d.ts",
+      "default": "./provider.js"
+    },
+    "./sql-wasm": {
+      "default": "./sql-wasm.js"
+    },
+    "./sql-wasm.wasm": {
+      "default": "./sql-wasm.wasm"
+    }
+  },
+  "files": [
+    "*.js",
+    "*.wasm",
+    "*.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "sqlite",
+    "crdt",
+    "replication",
+    "wasm",
+    "browser",
+    "cr-sqlite",
+    "crsqlite",
+    "conflict-free",
+    "multi-tab",
+    "shared-worker"
+  ],
+  "author": "Tom Aylott",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/effect-native/cr-sqlite.git",
+    "directory": "zig/browser-dist"
+  },
+  "homepage": "https://github.com/effect-native/cr-sqlite#readme",
+  "bugs": {
+    "url": "https://github.com/effect-native/cr-sqlite/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false
+}

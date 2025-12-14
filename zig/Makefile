@@ -10,7 +10,7 @@
 #   make help         - Show this help
 
 .PHONY: all test test-unit test-parity test-browser build clean help \
-        _test-unit _test-parity _test-browser
+        _test-unit _test-parity _test-browser dist
 
 # ANSI colors for output
 CYAN := \033[36m
@@ -156,6 +156,21 @@ test:
 	else \
 		echo "$(GREEN)$(BOLD)All tests PASSED$(RESET)"; \
 	fi
+
+# Package browser distribution files
+# Copies built files from browser-test/fixtures to browser-dist for npm publishing
+dist:
+	@echo "$(CYAN)$(BOLD)Packaging browser distribution...$(RESET)"
+	@mkdir -p browser-dist
+	@cp browser-test/fixtures/crsql-multitab.js browser-dist/
+	@cp browser-test/fixtures/coordinator.js browser-dist/
+	@cp browser-test/fixtures/provider.js browser-dist/
+	@cp browser-test/fixtures/sql-wasm.js browser-dist/
+	@cp browser-test/fixtures/sql-wasm.wasm browser-dist/
+	@echo "$(GREEN)Copied to browser-dist/:$(RESET)"
+	@ls -la browser-dist/
+	@echo ""
+	@echo "$(GREEN)$(BOLD)Browser distribution ready for npm publish$(RESET)"
 
 # Clean build artifacts
 clean:

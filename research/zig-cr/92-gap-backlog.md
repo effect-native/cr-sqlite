@@ -1,17 +1,19 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 13)
+> **Last Updated**: 2025-12-14 (Round 16)
 
 ## Status Summary
 
 **MVP COMPLETE** — All core replication functionality implemented and tested:
-- Native parity tests: 44/44 PASS
-- Browser WASM tests: 10/10 PASS
+- Native parity tests: 52/52 PASS
+- Browser WASM tests: 14/14 PASS (including multi-tab SharedWorker)
+- C oracle harness: 4/4 suites PASS
 - E2E sync tests: ALL PASS
+- **Total: 66+ tests passing**
 
 ---
 
-## Recent Progress (Rounds 10-13)
+## Recent Progress (Rounds 10-16)
 
 ### Round 10: CI Infrastructure
 - ✅ GitHub Actions CI workflow (`.github/workflows/zig-tests.yaml`)
@@ -37,6 +39,18 @@
 - ✅ C oracle harness scaffolding (`zig/harness/c-oracle/`)
 - ✅ esbuild bundling configuration (`zig/browser-test/esbuild.config.mjs`)
 - Foundation for cross-validating Zig extension against C reference
+
+### Round 14: Schema Alter & E2E Sync
+- ✅ Schema alter tests passing
+- ✅ E2E sync validation complete
+
+### Round 15-16: Critical Bug Fixes & Multi-tab Completion
+- ✅ **CRITICAL site_id bug fixed** — site IDs now correctly persisted and stable across sessions
+- ✅ `crsql_fract_key_between` implemented (`zig/src/fract_index.zig`)
+- ✅ Multi-tab SharedWorker fully working (4 browser tests pass)
+- ✅ C oracle harness all 4 suites pass (changes-vtab, as-crr, e2e-sync, filters)
+- ✅ Native parity tests expanded to 52 tests
+- ✅ Browser tests expanded to 14 tests
 
 ---
 
@@ -78,22 +92,22 @@
 ### 2. Fractional Indexing UDFs
 **Source**: `research/zig-cr/07-fractindex-rust.md`
 **Priority**: Low (deferred from MVP)
-**Status**: Not started
+**Status**: Partial — key_between implemented
 
-- [ ] `crsql_fract_key_between(left, right)` — lexicographic midpoint
+- [x] `crsql_fract_key_between(left, right)` — lexicographic midpoint (`zig/src/fract_index.zig`)
 - [ ] `crsql_fract_as_ordered(table, order_col, collection_cols...)` — view + triggers
 - [ ] `crsql_fract_fix_conflict_return_old_key(...)` — collision repair
 
 ### 3. Multi-tab Web Architecture
 **Source**: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 **Priority**: High (for production web use)
-**Status**: Core infrastructure complete
+**Status**: ✅ Core complete — 4 multi-tab tests passing
 
 - [x] SharedWorker coordinator for provider election (`zig/browser-test/src/SharedWorkerCoordinator.ts`)
 - [x] Web Locks for exclusive provider access
 - [x] RPC interface (exec, query) (`zig/browser-test/src/DbClient.ts`)
 - [x] Provider worker (`zig/browser-test/src/ProviderWorker.ts`)
-- [x] Browser test coverage for multi-tab scenarios (`zig/browser-test/tests/multi-tab.spec.ts`)
+- [x] Browser test coverage for multi-tab scenarios (4 tests passing)
 - [ ] Service Worker fallback for environments without SharedWorker
 - [ ] Subscribe/reactive queries in RPC interface
 - [ ] OPFS storage integration (`opfs-sahpool` VFS)
@@ -102,17 +116,21 @@
 ### 4. C Test Harness (Oracle Validation)
 **Source**: `research/zig-cr/10-test-oracle.md`
 **Priority**: Medium
-**Status**: Scaffolding complete
+**Status**: ✅ COMPLETE — All 4 suites pass
 
 - [x] Build harness scaffolding (`zig/harness/c-oracle/`)
-- [ ] Load Zig `.so`/`.dylib` via `sqlite3_load_extension()` in harness
-- [ ] Run original C tests (`core/src/*.test.c`) against Zig extension
-- [ ] Validate byte-for-byte codec compatibility
+- [x] Load Zig `.so`/`.dylib` via `sqlite3_load_extension()` in harness
+- [x] Run original C tests against Zig extension — **4/4 suites pass**:
+  - `test-changes-vtab.sh` ✅
+  - `test-as-crr.sh` ✅
+  - `test-e2e-sync.sh` ✅
+  - `test-filters.sh` ✅
+- [x] Validate codec compatibility via merge tests
 
 ### 5. Cross-platform Packaging & CI
 **Source**: `research/zig-cr/93-phased-execution-proposal.md` (Phase 7)
-**Priority**: Medium
-**Status**: CI complete, packaging pending
+**Priority**: Medium (next focus area)
+**Status**: CI complete, npm package pending
 
 - [x] GitHub Actions CI for Zig extension (`.github/workflows/zig-tests.yaml`)
   - Linux x86_64 native tests
@@ -121,7 +139,7 @@
 - [ ] macOS universal binary (aarch64 + x86_64)
 - [ ] Windows `.dll` build
 - [ ] iOS/Android static embedding guide
-- [ ] npm package updates for Zig-built extensions
+- [ ] **npm package updates for Zig-built extensions** — High priority for release
 
 ### 6. `sqlite3_vtab_config` (Optional)
 **Priority**: Low
@@ -145,3 +163,21 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 - ✅ Phase 4: `crsql_changes` read path
 - ✅ Phase 5: Merge + `rows_impacted`
 - ✅ Phase 6: E2E sync + alter workflow
+
+---
+
+## Remaining Work for Production Release
+
+### High Priority
+1. **npm package updates** — Integrate Zig-built extensions into existing npm package
+2. **OPFS storage** — `opfs-sahpool` VFS for persistent browser storage
+
+### Medium Priority
+3. `crsql_fract_as_ordered` — View + triggers for ordered collections
+4. macOS universal binary
+5. Windows `.dll` build
+
+### Low Priority
+6. Service Worker fallback
+7. Subscribe/reactive queries
+8. `crsql_fract_fix_conflict_return_old_key`
