@@ -3,6 +3,11 @@
 ## Goal
 Assess what it would take to re-implement the legacy CR-SQLite extension (C + Rust) in Zig, with a clear path to an MVP loadable extension and an explicit backlog of missing pieces.
 
+## Current Status
+- MVP is complete in `zig/` (acceptance: `core/src/*.test.c`, plus Zig/browser harness suites).
+- Canonical gap tracking: `research/zig-cr/92-gap-backlog.md`.
+- Executable backlog for subagents: `.tasks/backlog/`.
+
 This research is intentionally *parallelized*:
 - Many small, focused agents each produce one markdown report.
 - A short synthesis step merges them into a single implementation roadmap.

@@ -55,6 +55,64 @@ What to do.
 
 This project is undergoing a major rewrite from C/Rust to Zig. The following workflow governs how work proceeds.
 
+### "Update tasks" (Backlog Refresh Loop)
+
+When Tom says **"update tasks"**, he means: re-run the same backlog-refresh process that keeps `zig/`, `research/zig-cr/*`, `.tasks/`, and `.wishes/` in sync.
+
+**Input reality (what exists today):**
+- Implementation: `zig/`
+- Current gap ledger: `research/zig-cr/92-gap-backlog.md`
+- Work queue: `.tasks/backlog/`, `.tasks/active/`, `.tasks/done/`
+- Product-owner inbox: `.wishes/` (and `.wishes/blocked-on-tom/`)
+
+**Procedure (do this in order):**
+1. Read all inbox wishes: list `.wishes/*.md` (not subdirs) and extract constraints/requests.
+2. Read task cards: list `.tasks/{active,backlog,done}/` and skim each card’s Description + Acceptance Criteria.
+3. Reconcile `zig/` vs `research/zig-cr/*`:
+   - Use `research/zig-cr/90-feature-matrix.md` and `research/zig-cr/93-phased-execution-proposal.md` as “what we intended”.
+   - Use the current `zig/` tree and test harnesses as “what we actually built”.
+4. Identify gaps as explicit backlog items:
+   - If a gap is not already owned by a `.tasks/backlog/TASK-*.md`, create one.
+   - Every task card must declare: Files to Modify, Acceptance Criteria, and links back to the parent docs.
+5. Make relationships impossible to miss (bidirectional linking):
+   - Add/refresh links in `research/zig-cr/92-gap-backlog.md` so each unchecked item points at its owning task card.
+   - Ensure each task card has a “Parent Docs / Cross-links” section pointing back to `research/zig-cr/92-gap-backlog.md` and any proposal doc.
+6. Mark TS-gated work clearly:
+   - If a gap is TypeScript-heavy and Tom has not opted in, keep it as a task card but mark it blocked or annotate “TS-gated by `.wishes/stop-before-typescript.md`”.
+7. If a wish is now satisfied, move it to `.wishes/done/` and append completion notes.
+
+**Output of "update tasks":**
+- `research/zig-cr/92-gap-backlog.md` updated with links and status notes
+- New/updated cards in `.tasks/backlog/` with unambiguous ownership
+- Clear list of what can be delegated concurrently next
+
+### "Delegate work" (Concurrent Subagent Assignments)
+
+When Tom says **"delegate work"**, he means: take a curated subset of `.tasks/backlog/` and assign them to multiple concurrent subagents without overlapping file edits.
+
+**Rules:**
+- No overlapping file edits across assigned tasks.
+- Each subagent owns exactly one task card.
+- Each subagent updates its own task card (checkboxes + progress log) as it works.
+- Orchestrator moves cards between folders (`backlog → active → done`).
+
+**Procedure:**
+1. Pick the highest-impact set of tasks that can run in parallel (disjoint file sets).
+2. For each selected task:
+   - Move `./.tasks/backlog/TASK-XXX-*.md` → `./.tasks/active/TASK-XXX-*.md`.
+   - Launch a subagent with the task card as the *entire* prompt context.
+   - Instruct the subagent to:
+     - Only touch the listed files.
+     - Keep diffs small and focused.
+     - Update the task card as it goes (status + progress log + completion notes).
+     - If blocked, mark Blocked with a concrete reason and a proposed next step.
+3. When subagents finish:
+   - Review changes.
+   - Move task cards to `.tasks/done/` and ensure completion notes include date + commit hash.
+   - Update `research/zig-cr/92-gap-backlog.md` to reflect the completed work and keep links current.
+
+**Tip:** `.tasks/active/` may be changing while you read it. Don’t stop; take a snapshot (current listing + quick skim), then proceed with reconciliation and update work.
+
 ### Continuous Integration Loop
 
 ```

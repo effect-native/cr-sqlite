@@ -227,6 +227,8 @@ GAN adversary note: tests prefer `site_id IS crsql_site_id()` over `!=`. Mirror 
 
 ## Phase 7 — Linux packaging (second priority, but run in parallel once Phase 2 exists)
 
+> Note: Phase 0–6 are now complete in `zig/` per `research/zig-cr/92-gap-backlog.md`. Remaining work is tracked via `.tasks/backlog/`.
+
 ### Deliverables
 - `crsqlite-linux-x86_64.so` and later `crsqlite-linux-aarch64.so`
 - A linux test harness that loads the `.so` and runs the existing C tests.

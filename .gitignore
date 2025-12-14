@@ -16,6 +16,7 @@ target/
 .tmp
 .tmp
 zig-out/
+zig-out-*/
 zig/*.a
 zig/*.o
 
