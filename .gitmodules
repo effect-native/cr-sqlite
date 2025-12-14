@@ -27,3 +27,12 @@
 [submodule ".refs/solid_cable"]
 	path = .refs/solid_cable
 	url = git@github.com:rails/solid_cable.git
+[submodule ".refs/effect"]
+	path = .refs/effect
+	url = git@github.com:Effect-TS/effect.git
+[submodule ".refs/effect-smol"]
+	path = .refs/effect-smol
+	url = git@github.com:Effect-TS/effect-smol.git
+[submodule "effect-native"]
+	path = effect-native
+	url = git@github.com:effect-native/effect-native.git

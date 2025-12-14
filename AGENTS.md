@@ -51,6 +51,21 @@ What to do.
 
 ---
 
+## TypeScript Work Rule
+
+**All TypeScript work happens in the `effect-native/` submodule.**
+
+When working on TypeScript code:
+1. Navigate to `effect-native/` directory
+2. Follow the spec-first workflow defined in `effect-native/.specs/AGENTS.md`
+3. Use the patterns and conventions documented in `effect-native/AGENTS.md`
+
+Reference submodules for Effect ecosystem:
+- `.refs/effect` — Effect-TS core library
+- `.refs/effect-smol` — Effect-TS smol variant
+
+---
+
 ## Zig CR-SQLite Rewrite: Orchestration Workflow
 
 This project is undergoing a major rewrite from C/Rust to Zig. The following workflow governs how work proceeds.
