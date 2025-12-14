@@ -10,6 +10,7 @@
 #   - test-rowid-slab.sh: Rowid slab allocation
 #   - test-alter.sh: crsql_begin_alter/crsql_commit_alter schema changes
 #   - test-noops.sh: No-op changes do not advance clocks (CRDT property)
+#   - test-fract.sh: Fractional indexing (crsql_fract_key_between)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -452,6 +453,26 @@ else
         echo "  Noop tests: $NOOP_PASS passed, $NOOP_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + NOOP_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + NOOP_FAIL))
+    fi
+fi
+
+# Run fractional indexing tests
+echo "Running test-fract.sh..."
+if bash "$SCRIPT_DIR/test-fract.sh" > "$TMPFILE" 2>&1; then
+    FRACT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FRACT_PASS=0
+    echo "  Fract tests: $FRACT_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + FRACT_PASS))
+else
+    EXIT_CODE=$?
+    if grep -q "SKIPPED" "$TMPFILE" || grep -q "not yet implemented" "$TMPFILE"; then
+        echo "  Fract tests: SKIPPED (crsql_fract_key_between not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 8))
+    else
+        FRACT_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || FRACT_FAIL=0
+        FRACT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FRACT_PASS=0
+        echo "  Fract tests: $FRACT_PASS passed, $FRACT_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + FRACT_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + FRACT_FAIL))
     fi
 fi
 

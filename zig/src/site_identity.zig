@@ -168,9 +168,16 @@ fn loadSiteId(db: ?*api.sqlite3) bool {
 
 /// Initialize site ID from database. Creates table if needed.
 /// Must be called during extension initialization with a valid db connection.
+///
+/// IMPORTANT: This function always loads/creates the site_id from the database,
+/// even if a previous database was already initialized. Each database connection
+/// has its own site_id stored in its own crsql_site_id table. The global cache
+/// is updated to reflect the CURRENT database's site_id.
 pub fn initSiteId(db: ?*api.sqlite3) bool {
     if (db == null) return false;
-    if (site_id_initialized) return true;
+    // NOTE: We intentionally do NOT check site_id_initialized here.
+    // Each database has its own site_id, so we must load it fresh for each db.
+    // The global_site_id cache is updated to the current db's site_id.
 
     const success = if (!hasTable(db, TBL_SITE_ID))
         createSiteIdTable(db)
@@ -184,17 +191,15 @@ pub fn initSiteId(db: ?*api.sqlite3) bool {
 }
 
 /// Get or create ordinal for a site_id blob.
-/// Local site (matching global_site_id) is always ordinal 0.
+/// Local site is always ordinal 0.
 /// Remote sites get ordinals on demand via INSERT...RETURNING.
+///
+/// Note: We don't compare against global_site_id since it may be stale
+/// when multiple databases are open. Instead, we just do a database lookup.
 pub fn getOrCreateSiteOrdinal(db: ?*api.sqlite3, site_id_blob: []const u8) ?i64 {
     if (db == null or site_id_blob.len != 16) return null;
 
-    // Check if this is the local site
-    if (std.mem.eql(u8, site_id_blob, &global_site_id)) {
-        return 0;
-    }
-
-    // Try to find existing ordinal
+    // Look up the ordinal by site_id blob - this handles both local and remote sites
     const select_sql = "SELECT ordinal FROM \"crsql_site_id\" WHERE site_id = ?";
     var stmt: ?*api.sqlite3_stmt = null;
     var rc = api.prepare_v2(db, select_sql, -1, &stmt, null);
@@ -209,7 +214,7 @@ pub fn getOrCreateSiteOrdinal(db: ?*api.sqlite3, site_id_blob: []const u8) ?i64 
         return api.column_int64(stmt, 0);
     }
 
-    // Not found - insert new entry
+    // Not found - insert new entry (this is a remote site)
     const insert_sql = "INSERT INTO \"crsql_site_id\" (site_id) VALUES (?) RETURNING ordinal";
     var insert_stmt: ?*api.sqlite3_stmt = null;
     rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
@@ -232,20 +237,16 @@ pub fn getOrCreateSiteOrdinal(db: ?*api.sqlite3, site_id_blob: []const u8) ?i64 
 /// the StmtCache's pre-cached `select_site_ordinal` and `insert_site_ordinal`.
 /// This is significantly faster for merge operations that process many changes.
 ///
-/// Local site (matching global_site_id) is always ordinal 0 (fast path).
-/// Remote sites get ordinals on demand via INSERT...RETURNING.
+/// Note: We don't use a global_site_id fast path since it may be stale
+/// when multiple databases are open. The database lookup handles all cases.
 pub fn getOrCreateSiteOrdinalCached(
     cache: *stmt_cache.StmtCache,
     site_id_blob: []const u8,
 ) !?i64 {
     if (cache.db == null or site_id_blob.len != 16) return null;
 
-    // Fast path: local site is always ordinal 0
-    if (std.mem.eql(u8, site_id_blob, &global_site_id)) {
-        return 0;
-    }
-
-    // Try to find existing ordinal using cached statement
+    // Look up ordinal by site_id blob using cached statement
+    // This handles both local and remote sites correctly
     const select_stmt = try stmt_cache.prepareOnce(
         cache.db,
         "SELECT ordinal FROM \"crsql_site_id\" WHERE site_id = ?",
@@ -261,7 +262,7 @@ pub fn getOrCreateSiteOrdinalCached(
         return api.column_int64(select_stmt, 0);
     }
 
-    // Not found - insert new entry using cached statement
+    // Not found - insert new entry (remote site) using cached statement
     const insert_stmt = try stmt_cache.prepareOnce(
         cache.db,
         "INSERT INTO \"crsql_site_id\" (site_id) VALUES (?) RETURNING ordinal",
@@ -281,14 +282,15 @@ pub fn getOrCreateSiteOrdinalCached(
 
 /// Get site_id blob for a given ordinal.
 /// Returns null if not found.
+///
+/// IMPORTANT: This always queries the database to get the correct site_id
+/// for THAT specific database connection. This is essential when multiple
+/// databases are open in the same process, as each has its own site_id.
 pub fn getSiteIdByOrdinal(db: ?*api.sqlite3, ordinal: i64) ?[16]u8 {
     if (db == null) return null;
 
-    // Fast path for local site
-    if (ordinal == 0 and site_id_initialized) {
-        return global_site_id;
-    }
-
+    // Always query the database - don't use global cache
+    // Each database has its own site_id, so we must look it up from that database
     const sql = "SELECT site_id FROM \"crsql_site_id\" WHERE ordinal = ?";
     var stmt: ?*api.sqlite3_stmt = null;
     var rc = api.prepare_v2(db, sql, -1, &stmt, null);
@@ -313,6 +315,9 @@ pub fn getSiteIdByOrdinal(db: ?*api.sqlite3, ordinal: i64) ?[16]u8 {
 }
 
 /// Implementation of crsql_site_id() SQL function
+/// Always queries the database directly to get the site_id for THIS connection.
+/// This ensures each database returns its own unique site_id even when
+/// multiple databases are open in the same process.
 fn crsqlSiteIdFunc(
     pCtx: ?*api.sqlite3_context,
     argc: c_int,
@@ -324,11 +329,34 @@ fn crsqlSiteIdFunc(
         return;
     }
 
-    if (!site_id_initialized) {
-        api.result_error(pCtx, "site_id not initialized", -1);
+    // Get the database handle for THIS connection
+    const db = api.context_db_handle(pCtx);
+    if (db == null) {
+        api.result_error(pCtx, "could not get database handle", -1);
         return;
     }
-    api.result_blob(pCtx, &global_site_id, 16, api.getTransientDestructor());
+
+    // Query the site_id directly from this database's crsql_site_id table
+    const sql = "SELECT site_id FROM \"crsql_site_id\" WHERE ordinal = 0";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) {
+        api.result_error(pCtx, "site_id table not found - extension not initialized", -1);
+        return;
+    }
+    defer _ = api.finalize(stmt);
+
+    rc = api.step(stmt);
+    if (rc == api.SQLITE_ROW) {
+        const blob = api.column_blob(stmt, 0);
+        const bytes = api.column_bytes(stmt, 0);
+        if (blob != null and bytes == 16) {
+            api.result_blob(pCtx, blob, 16, api.getTransientDestructor());
+            return;
+        }
+    }
+
+    api.result_error(pCtx, "site_id not found in database", -1);
 }
 
 /// Implementation of crsql_db_version() SQL function
