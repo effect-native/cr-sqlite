@@ -70,6 +70,33 @@ This project is undergoing a major rewrite from C/Rust to Zig. The following wor
 10. While not yet done, goto step 1
 ```
 
+### Subagent Task Management
+
+Task cards live in `.tasks/` folder:
+
+```
+.tasks/
+├── README.md           # Instructions for task management
+├── backlog/            # Planned tasks ready for next round
+│   └── TASK-XXX-*.md   # Task cards waiting to be assigned
+├── active/             # Currently assigned tasks (move here when assigning)
+│   └── TASK-XXX-*.md   # Tasks being worked on
+└── done/               # Completed tasks archive
+    └── TASK-XXX-*.md   # With completion notes
+```
+
+**Orchestrator workflow**:
+1. Create task cards in `.tasks/backlog/`
+2. Move to `.tasks/active/` when assigning to subagent
+3. Subagent updates progress in the task card
+4. Move to `.tasks/done/` when complete
+
+**Subagent workflow**:
+1. Read assigned task from `.tasks/active/`
+2. Update status checkboxes and progress log
+3. Commit task card updates with code changes
+4. Mark complete when done (orchestrator moves file)
+
 ### Document Organization
 
 ```
