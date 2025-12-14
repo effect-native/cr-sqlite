@@ -25,6 +25,19 @@ fn crsqlZigVersionFunc(
     api.result_text(pCtx, CRSQL_ZIG_VERSION, -1, api.SQLITE_STATIC);
 }
 
+/// Implementation of `crsql_finalize()` SQL function.
+/// Cleanup function called before closing a database connection.
+/// For now this is a stub that returns OK - real cleanup will be added
+/// when we have per-connection state (ExtData) to clean up.
+fn crsqlFinalizeFunc(
+    pCtx: ?*api.sqlite3_context,
+    _: c_int,
+    _: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    // Stub: return OK (null result means success for this function)
+    api.result_null(pCtx);
+}
+
 /// Register all CR-SQLite functions with the database connection.
 fn registerFunctions(db: ?*api.sqlite3) c_int {
     // Register crsql_zig_version() - a 0-argument scalar function
@@ -47,6 +60,20 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_changes virtual table
     rc = changes_vtab.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_finalize() - cleanup function
+    rc = api.create_function_v2(
+        db,
+        "crsql_finalize",
+        0,
+        api.SQLITE_UTF8,
+        null,
+        &crsqlFinalizeFunc,
+        null,
+        null,
+        null,
+    );
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

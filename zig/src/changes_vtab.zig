@@ -431,10 +431,12 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 
     const table_name = table_names.?[cursor.current_table_idx];
 
-    // Build query: SELECT pk, cid, val, col_version, db_version, site_id, cl, seq, rowid FROM <table>__crsql_clock
-    // We use a stack buffer for the SQL
+    // Build query: SELECT pk, col_name, col_version, db_version, site_id, seq FROM <table>__crsql_clock
+    // Note: clock table is WITHOUT ROWID, so we synthesize rowid from pk
+    // The columns val and cl require joining with base table/pks - for now we return what we have
+    // Column order: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
     var sql_buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, cid, val, col_version, db_version, site_id, cl, seq, rowid FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
         return vtab.SQLITE_ERROR;
     };
 
@@ -454,8 +456,8 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
         if (cursor.clock_stmt) |stmt| {
             const rc = stepStmt(stmt);
             if (rc == vtab.SQLITE_ROW) {
-                // Got a row - read the rowid from the clock table
-                cursor.current_row_in_table = columnInt64FromStmt(stmt, 8); // rowid is last column
+                // Got a row - increment row counter within current table
+                cursor.current_row_in_table += 1;
                 cursor.is_eof = false;
                 return vtab.SQLITE_OK;
             } else if (rc == vtab.SQLITE_DONE) {
@@ -463,6 +465,7 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
                 _ = finalizeStmt(stmt);
                 cursor.clock_stmt = null;
                 cursor.current_table_idx += 1;
+                cursor.current_row_in_table = 0; // Reset row counter for new table
 
                 if (cursor.current_table_idx >= cursor.table_count) {
                     cursor.is_eof = true;
