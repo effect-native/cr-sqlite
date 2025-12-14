@@ -18,3 +18,7 @@ target/
 zig-out/
 zig/*.a
 zig/*.o
+
+# WASM build artifacts
+zig/wasm-build/build/
+zig/wasm-build/dist/
