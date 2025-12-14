@@ -38,10 +38,13 @@ A pure Zig port of [CR-SQLite](https://github.com/vlcn-io/cr-sqlite), providing 
 ### Known Limitations
 
 Post-MVP items not yet implemented:
-- Performance: `PRAGMA schema_version` caching, `SQLITE_PREPARE_PERSISTENT`
 - Web: Service Worker fallback (for environments without SharedWorker)
-- Web: Reactive query subscriptions in RPC interface
+- Web: Reactive query subscriptions / notifications surface
 - Packaging: iOS/Android static embedding guides
+
+Notes:
+- Performance hotspot work is complete (see `research/zig-cr/92-gap-backlog.md`).
+- Native packaging is in progress; see `research/zig-cr/103-release-planning-proposal.md`.
 
 ## Build Instructions
 
