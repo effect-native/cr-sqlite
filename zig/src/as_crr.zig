@@ -74,11 +74,27 @@ fn crsqlAsCrrFunc(
         return;
     }
 
-    // Create triggers - Phase 1: INSERT trigger only
+    // Create triggers - INSERT trigger
     if (createInsertTrigger(db, table_name_ptr)) |_| {
         // Success
     } else |_| {
         api.result_error(pCtx, "crsql_as_crr: failed to create insert trigger", -1);
+        return;
+    }
+
+    // Create triggers - UPDATE trigger
+    if (createUpdateTrigger(db, table_name_ptr)) |_| {
+        // Success
+    } else |_| {
+        api.result_error(pCtx, "crsql_as_crr: failed to create update trigger", -1);
+        return;
+    }
+
+    // Create triggers - DELETE trigger
+    if (createDeleteTrigger(db, table_name_ptr)) |_| {
+        // Success
+    } else |_| {
+        api.result_error(pCtx, "crsql_as_crr: failed to create delete trigger", -1);
         return;
     }
 
@@ -258,6 +274,153 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\    (NEW.rowid, '-1', 1, 1, 0, 0);
         \\END;
     , .{table_name}) catch return error.BufferOverflow;
+
+    // Null-terminate the SQL
+    const sql_len = fbs.pos;
+    if (sql_len >= SQL_BUF_SIZE) {
+        return error.BufferOverflow;
+    }
+    buf[sql_len] = 0;
+
+    const sql: [*:0]const u8 = @ptrCast(&buf);
+    const rc = api.exec(db, sql, null, null, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+}
+
+/// Create the UPDATE trigger that captures column changes.
+/// - Only fires when at least one non-PK column has changed
+/// - Creates clock entries for each changed non-PK column
+/// - Increments col_version for each changed column
+fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    // Get table column information
+    const info = try getTableInfo(db, table_name);
+    if (info.count == 0) {
+        return error.NoColumns;
+    }
+
+    // Count non-PK columns
+    var non_pk_count: usize = 0;
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            non_pk_count += 1;
+        }
+    }
+
+    // If there are no non-PK columns, no UPDATE trigger needed
+    if (non_pk_count == 0) {
+        return;
+    }
+
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+
+    // Trigger header with WHEN clause
+    writer.print(
+        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
+        \\AFTER UPDATE ON "{s}"
+        \\FOR EACH ROW WHEN
+        \\  
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build WHEN clause: OLD.col IS NOT NEW.col OR ...
+    var first_when = true;
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            if (!first_when) {
+                writer.writeAll(" OR ") catch return error.BufferOverflow;
+            }
+            writer.print("OLD.\"{s}\" IS NOT NEW.\"{s}\"", .{
+                col.name[0..col.name_len],
+                col.name[0..col.name_len],
+            }) catch return error.BufferOverflow;
+            first_when = false;
+        }
+    }
+
+    writer.writeAll("\nBEGIN\n") catch return error.BufferOverflow;
+
+    // Generate clock entry for each non-PK column (only when changed)
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            // Non-PK column - create/update clock entry when changed
+            writer.print(
+                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
+                \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+                \\  SELECT
+                \\    NEW.rowid,
+                \\    '{s}',
+                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = NEW.rowid AND col_name = '{s}'), 0) + 1,
+                \\    1,
+                \\    0,
+                \\    0
+                \\  WHERE OLD."{s}" IS NOT NEW."{s}";
+                \\
+            , .{
+                table_name,
+                col.name[0..col.name_len],
+                table_name,
+                col.name[0..col.name_len],
+                col.name[0..col.name_len],
+                col.name[0..col.name_len],
+            }) catch return error.BufferOverflow;
+        }
+    }
+
+    writer.writeAll("END;") catch return error.BufferOverflow;
+
+    // Null-terminate the SQL
+    const sql_len = fbs.pos;
+    if (sql_len >= SQL_BUF_SIZE) {
+        return error.BufferOverflow;
+    }
+    buf[sql_len] = 0;
+
+    const sql: [*:0]const u8 = @ptrCast(&buf);
+    const rc = api.exec(db, sql, null, null, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+}
+
+/// Create the DELETE trigger that marks rows as deleted.
+/// Semantics (from core/rs/core/src/local_writes/after_delete.rs):
+/// 1. Update (or create) sentinel row with col_name = '-1'
+///    - First delete: col_version = 2 (even = deleted)
+///    - Subsequent: col_version += 1
+/// 2. Drop all clock entries except the sentinel
+fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+
+    // Trigger header
+    // Note: Unlike Rust which uses `WHEN crsql_internal_sync_bit() = 0`,
+    // we omit that check since we don't have the sync bit infrastructure yet.
+    writer.print(
+        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
+        \\AFTER DELETE ON "{s}"
+        \\BEGIN
+        \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
+        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
+        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\  SELECT
+        \\    OLD.rowid,
+        \\    '-1',
+        \\    COALESCE(
+        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE pk = OLD.rowid AND col_name = '-1'),
+        \\      2
+        \\    ),
+        \\    1,
+        \\    0,
+        \\    0;
+        \\  -- Drop all clock entries except the sentinel
+        \\  DELETE FROM "{s}__crsql_clock"
+        \\  WHERE pk = OLD.rowid AND col_name IS NOT '-1';
+        \\END;
+    , .{ table_name, table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
 
     // Null-terminate the SQL
     const sql_len = fbs.pos;

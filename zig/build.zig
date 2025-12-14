@@ -31,6 +31,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    root_mod.addAnonymousImport("merge_integration", .{
+        .root_source_file = b.path("test/merge_integration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Static library for embedding
     const static_lib = b.addLibrary(.{
         .name = "crsql",

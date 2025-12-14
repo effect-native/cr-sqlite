@@ -11,6 +11,7 @@ const as_crr = @import("../as_crr.zig");
 const changes_vtab = @import("../changes_vtab.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
+const site_identity = @import("../site_identity.zig");
 
 /// CR-SQLite Zig implementation version string.
 /// This is returned by the `crsql_zig_version()` SQL function.
@@ -84,6 +85,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_rows_impacted() function and commit hook
     rc = rows_impacted.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_site_id() and crsql_db_version() functions
+    rc = site_identity.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

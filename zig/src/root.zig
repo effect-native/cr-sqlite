@@ -8,6 +8,7 @@ pub const ffi = @import("ffi/root.zig");
 pub const changes_vtab = @import("changes_vtab.zig");
 pub const pack_columns = @import("pack_columns.zig");
 pub const rows_impacted = @import("rows_impacted.zig");
+pub const site_identity = @import("site_identity.zig");
 pub const sqlite = struct {
     /// Writable virtual table infrastructure
     pub const vtab = @import("sqlite/vtab.zig");
@@ -29,6 +30,11 @@ test "oracles compile" {
     try @import("std").testing.expect(true);
 }
 
+test "merge_integration tests" {
+    // Run merge integration tests (oracle-based, document expected behavior)
+    _ = @import("merge_integration");
+}
+
 test {
     // Run all ffi tests
     _ = ffi;
@@ -40,4 +46,6 @@ test {
     _ = pack_columns;
     // Run rows_impacted tests
     _ = rows_impacted;
+    // Run site_identity tests
+    _ = site_identity;
 }
