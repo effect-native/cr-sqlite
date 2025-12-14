@@ -46,6 +46,8 @@ pub const SQLITE_ROW = c.SQLITE_ROW;
 /// Text encoding flags for create_function
 pub const SQLITE_UTF8 = c.SQLITE_UTF8;
 pub const SQLITE_DETERMINISTIC = c.SQLITE_DETERMINISTIC;
+pub const SQLITE_INNOCUOUS = c.SQLITE_INNOCUOUS;
+pub const SQLITE_DIRECTONLY = c.SQLITE_DIRECTONLY;
 
 /// SQLite value type codes (returned by sqlite3_value_type)
 pub const SQLITE_INTEGER = c.SQLITE_INTEGER;

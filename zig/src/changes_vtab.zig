@@ -120,6 +120,9 @@ const ChangesCursor = extern struct {
     // The pointed-to memory is managed separately with page_allocator
     table_names_ptr: ?*anyopaque,
     table_names_len: usize,
+
+    // Current row's pk value (for lookups in pks table and base table)
+    current_pk: i64,
 };
 
 /// Helper to get the allocator (always page_allocator for cursor allocations)
@@ -433,10 +436,11 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 
     // Build query: SELECT pk, col_name, col_version, db_version, site_id, seq FROM <table>__crsql_clock
     // Note: clock table is WITHOUT ROWID, so we synthesize rowid from pk
-    // The columns val and cl require joining with base table/pks - for now we return what we have
+    // The columns val and cl require joining with base table/pks - fetched separately in changesColumn
     // Column order: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
+    // Exclude sentinel rows (col_name = '-1') from output - they're metadata only
     var sql_buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE col_name != '-1'", .{table_name}) catch {
         return vtab.SQLITE_ERROR;
     };
 
@@ -459,6 +463,8 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
                 // Got a row - increment row counter within current table
                 cursor.current_row_in_table += 1;
                 cursor.is_eof = false;
+                // Store the current pk for lookups
+                cursor.current_pk = columnInt64FromStmt(stmt, 0);
                 return vtab.SQLITE_OK;
             } else if (rc == vtab.SQLITE_DONE) {
                 // Current table exhausted, move to next
@@ -545,6 +551,104 @@ fn changesEof(pCursor: ?*vtab.VTabCursor) callconv(.c) c_int {
     return if (cursor.is_eof) 1 else 0;
 }
 
+/// Fetch the packed pks blob from __crsql_pks table
+/// Returns the blob directly via sqlite3_result_blob
+fn fetchPksBlob(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64, ctx: ?*api.sqlite3_context) void {
+    var sql_buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pks FROM \"{s}__crsql_pks\" WHERE pk = ?", .{table_name}) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+    defer _ = finalizeStmt(stmt);
+
+    if (api.bind_int64(stmt, 1, pk) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+
+    if (stepStmt(stmt) == vtab.SQLITE_ROW) {
+        const blob = columnBlobFromStmt(stmt, 0);
+        const len = columnBytesFromStmt(stmt, 0);
+        resultBlob(ctx, blob, len, api.getTransientDestructor());
+    } else {
+        resultNull(ctx);
+    }
+}
+
+/// Fetch the actual column value from the base table
+/// col_name is the column name to fetch, rowid is the pk from clock table
+fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []const u8, rowid: i64, ctx: ?*api.sqlite3_context) void {
+    var sql_buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE rowid = ?", .{ col_name, table_name }) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+    defer _ = finalizeStmt(stmt);
+
+    if (api.bind_int64(stmt, 1, rowid) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+
+    if (stepStmt(stmt) == vtab.SQLITE_ROW) {
+        // Return based on actual type
+        const col_type = columnTypeFromStmt(stmt, 0);
+        switch (col_type) {
+            api.SQLITE_INTEGER => resultInt64(ctx, columnInt64FromStmt(stmt, 0)),
+            api.SQLITE_FLOAT => resultDouble(ctx, columnDoubleFromStmt(stmt, 0)),
+            api.SQLITE_TEXT => {
+                const text = columnTextFromStmt(stmt, 0);
+                if (text) |t| {
+                    resultText(ctx, t, columnBytesFromStmt(stmt, 0), api.getTransientDestructor());
+                } else {
+                    resultNull(ctx);
+                }
+            },
+            api.SQLITE_BLOB => {
+                resultBlob(ctx, columnBlobFromStmt(stmt, 0), columnBytesFromStmt(stmt, 0), api.getTransientDestructor());
+            },
+            else => resultNull(ctx),
+        }
+    } else {
+        resultNull(ctx);
+    }
+}
+
+/// Fetch the causal length from the sentinel row (col_name = '-1')
+fn fetchCausalLength(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64) i64 {
+    var sql_buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch {
+        return 0;
+    };
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
+        return 0;
+    }
+    defer _ = finalizeStmt(stmt);
+
+    if (api.bind_int64(stmt, 1, pk) != vtab.SQLITE_OK) {
+        return 0;
+    }
+
+    if (stepStmt(stmt) == vtab.SQLITE_ROW) {
+        return columnInt64FromStmt(stmt, 0);
+    }
+    return 0;
+}
+
 /// xColumn - Return column value
 fn changesColumn(
     pCursor: ?*vtab.VTabCursor,
@@ -552,33 +656,40 @@ fn changesColumn(
     col: c_int,
 ) callconv(.c) c_int {
     const cursor: *ChangesCursor = @ptrCast(@alignCast(pCursor orelse return vtab.SQLITE_ERROR));
+    const pVTab: *ChangesVTab = @ptrCast(@alignCast(cursor.base.pVtab orelse return vtab.SQLITE_ERROR));
+    const db = pVTab.db;
     const stmt = cursor.clock_stmt orelse return vtab.SQLITE_ERROR;
 
     // Convert context for API calls
     const ctx = toApiCtx(pCtx);
 
+    // Get current table name for lookups
+    const table_names = getCursorTableNames(cursor);
+    const table_name: ?[]u8 = if (table_names) |names| blk: {
+        break :blk if (cursor.current_table_idx < names.len) names[cursor.current_table_idx] else null;
+    } else null;
+
+    // Clock table query columns: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
+
     switch (col) {
         COL_TABLE => {
             // Return the base table name
-            if (getCursorTableNames(cursor)) |names| {
-                if (cursor.current_table_idx < names.len) {
-                    const name = names[cursor.current_table_idx];
-                    resultText(ctx, name.ptr, @intCast(name.len), api.getTransientDestructor());
-                } else {
-                    resultNull(ctx);
-                }
+            if (table_name) |name| {
+                resultText(ctx, name.ptr, @intCast(name.len), api.getTransientDestructor());
             } else {
                 resultNull(ctx);
             }
         },
         COL_PK => {
-            // pk is column 0 in clock table query
-            const blob = columnBlobFromStmt(stmt, 0);
-            const len = columnBytesFromStmt(stmt, 0);
-            resultBlob(ctx, blob, len, api.getTransientDestructor());
+            // Fetch packed pks blob from __crsql_pks table
+            if (table_name) |name| {
+                fetchPksBlob(db, name, cursor.current_pk, ctx);
+            } else {
+                resultNull(ctx);
+            }
         },
         COL_CID => {
-            // cid is column 1
+            // cid is col_name from clock table (column 1)
             const text = columnTextFromStmt(stmt, 1);
             if (text) |t| {
                 const len = columnBytesFromStmt(stmt, 1);
@@ -588,46 +699,64 @@ fn changesColumn(
             }
         },
         COL_VAL => {
-            // val is column 2 - ANY type, preserve type
-            const col_type = columnTypeFromStmt(stmt, 2);
-            switch (col_type) {
-                api.SQLITE_INTEGER => resultInt64(ctx, columnInt64FromStmt(stmt, 2)),
-                api.SQLITE_FLOAT => resultDouble(ctx, columnDoubleFromStmt(stmt, 2)),
-                api.SQLITE_TEXT => {
-                    const text = columnTextFromStmt(stmt, 2);
-                    if (text) |t| {
-                        resultText(ctx, t, columnBytesFromStmt(stmt, 2), api.getTransientDestructor());
-                    } else {
-                        resultNull(ctx);
-                    }
-                },
-                api.SQLITE_BLOB => {
-                    resultBlob(ctx, columnBlobFromStmt(stmt, 2), columnBytesFromStmt(stmt, 2), api.getTransientDestructor());
-                },
-                else => resultNull(ctx),
+            // Fetch actual value from base table using col_name
+            if (table_name) |name| {
+                const col_name_ptr = columnTextFromStmt(stmt, 1);
+                if (col_name_ptr) |cn| {
+                    const col_name_slice = std.mem.span(cn);
+                    fetchColumnValue(db, name, col_name_slice, cursor.current_pk, ctx);
+                } else {
+                    resultNull(ctx);
+                }
+            } else {
+                resultNull(ctx);
             }
         },
         COL_COL_VERSION => {
-            // col_version is column 3
-            resultInt64(ctx, columnInt64FromStmt(stmt, 3));
+            // col_version is column 2 in clock table query
+            resultInt64(ctx, columnInt64FromStmt(stmt, 2));
         },
         COL_DB_VERSION => {
-            // db_version is column 4
-            resultInt64(ctx, columnInt64FromStmt(stmt, 4));
+            // db_version is column 3 in clock table query
+            resultInt64(ctx, columnInt64FromStmt(stmt, 3));
         },
         COL_SITE_ID => {
-            // site_id is column 5
-            const blob = columnBlobFromStmt(stmt, 5);
-            const len = columnBytesFromStmt(stmt, 5);
-            resultBlob(ctx, blob, len, api.getTransientDestructor());
+            // site_id is column 4 in clock table query
+            // Our clock table stores site_id as INTEGER (0 for local).
+            // The crsql_changes schema expects a 16-byte BLOB.
+            // Check column type: if INTEGER and value is 0, return 16-byte zero blob
+            const col_type = columnTypeFromStmt(stmt, 4);
+            if (col_type == api.SQLITE_INTEGER) {
+                // Integer site_id (0 = local) -> return 16-byte zero blob
+                const zero_blob: [16]u8 = .{0} ** 16;
+                resultBlob(ctx, &zero_blob, 16, api.getTransientDestructor());
+            } else if (col_type == api.SQLITE_BLOB) {
+                const blob = columnBlobFromStmt(stmt, 4);
+                const len = columnBytesFromStmt(stmt, 4);
+                if (blob != null and len > 0) {
+                    resultBlob(ctx, blob, len, api.getTransientDestructor());
+                } else {
+                    const zero_blob: [16]u8 = .{0} ** 16;
+                    resultBlob(ctx, &zero_blob, 16, api.getTransientDestructor());
+                }
+            } else {
+                // NULL or other type -> return 16-byte zero blob
+                const zero_blob: [16]u8 = .{0} ** 16;
+                resultBlob(ctx, &zero_blob, 16, api.getTransientDestructor());
+            }
         },
         COL_CL => {
-            // cl is column 6
-            resultInt64(ctx, columnInt64FromStmt(stmt, 6));
+            // Causal length: fetch from sentinel row (col_name = '-1')
+            if (table_name) |name| {
+                const cl = fetchCausalLength(db, name, cursor.current_pk);
+                resultInt64(ctx, cl);
+            } else {
+                resultInt64(ctx, 0);
+            }
         },
         COL_SEQ => {
-            // seq is column 7
-            resultInt64(ctx, columnInt64FromStmt(stmt, 7));
+            // seq is column 5 in clock table query
+            resultInt64(ctx, columnInt64FromStmt(stmt, 5));
         },
         else => {
             resultNull(ctx);

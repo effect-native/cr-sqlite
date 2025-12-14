@@ -14,7 +14,24 @@ const api = @import("ffi/api.zig");
 const MAX_TABLE_NAME_LEN = 1024;
 
 /// SQL buffer size for DDL generation
-const SQL_BUF_SIZE = 4096;
+const SQL_BUF_SIZE = 8192;
+
+/// Maximum number of columns we support
+const MAX_COLUMNS = 64;
+
+/// Column information from PRAGMA table_info
+const ColumnInfo = struct {
+    name: [128]u8,
+    name_len: usize,
+    pk_index: c_int, // 0 = not a PK, 1+ = PK position
+};
+
+/// Table information gathered from PRAGMA table_info
+const TableInfo = struct {
+    columns: [MAX_COLUMNS]ColumnInfo,
+    count: usize,
+    pk_count: usize,
+};
 
 /// Implementation of `crsql_as_crr(table_name)` SQL function.
 /// Creates the clock table, pks table, and triggers for a given table.
@@ -125,31 +142,131 @@ fn createPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
 }
 
+/// Query PRAGMA table_info to get column information
+fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
+    var info = TableInfo{
+        .columns = undefined,
+        .count = 0,
+        .pk_count = 0,
+    };
+
+    // Prepare PRAGMA table_info query
+    var pragma_buf: [256]u8 = undefined;
+    const pragma_sql = std.fmt.bufPrintZ(&pragma_buf, "PRAGMA table_info(\"{s}\")", .{table_name}) catch return error.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    const rc = api.prepare_v2(db, pragma_sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    while (api.step(stmt) == api.SQLITE_ROW) {
+        if (info.count >= MAX_COLUMNS) {
+            return error.TooManyColumns;
+        }
+
+        // Column 1 is name
+        const name_ptr = api.column_text(stmt, 1) orelse continue;
+        const name_slice = std.mem.span(name_ptr);
+
+        if (name_slice.len >= 128) {
+            return error.ColumnNameTooLong;
+        }
+
+        var col = &info.columns[info.count];
+        @memcpy(col.name[0..name_slice.len], name_slice);
+        col.name_len = name_slice.len;
+
+        // Column 5 is pk (0 = not PK, 1+ = PK index)
+        const pk_val = api.column_int64(stmt, 5);
+        col.pk_index = @intCast(pk_val);
+        if (col.pk_index > 0) {
+            info.pk_count += 1;
+        }
+
+        info.count += 1;
+    }
+
+    return info;
+}
+
 /// Create the INSERT trigger that captures new rows.
-/// For Phase 1, we use hardcoded defaults for db_version, site_id, seq.
-///
-/// This is a simplified version - real implementation needs to:
-/// - Query table_info to get column names
-/// - Generate clock entries for each non-PK column
-/// - Pack actual PK values
+/// - Packs PK column values using crsql_pack_columns()
+/// - Creates clock entries for each non-PK column
+/// - Creates sentinel row ('-1') for row creation tracking
 fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    // Get table column information
+    const info = try getTableInfo(db, table_name);
+    if (info.count == 0) {
+        return error.NoColumns;
+    }
+
     var buf: [SQL_BUF_SIZE]u8 = undefined;
-    
-    // Phase 1: Minimal trigger that just records the rowid and a sentinel
-    // Real implementation would iterate over non-PK columns
-    const sql = std.fmt.bufPrintZ(&buf,
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+
+    // Trigger header
+    writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_itrig"
         \\AFTER INSERT ON "{s}"
         \\BEGIN
         \\  INSERT OR REPLACE INTO "{s}__crsql_pks" ("pk", "pks")
-        \\  VALUES (NEW.rowid, X'00');
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock" 
-        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  VALUES 
-        \\    (NEW.rowid, '-sentinel-', 1, 1, 0, 0);
-        \\END;
-    , .{table_name, table_name, table_name, table_name}) catch return error.BufferOverflow;
+        \\  VALUES (NEW.rowid, crsql_pack_columns(
+    , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
 
+    // Build crsql_pack_columns arguments from PK columns in order
+    // PK columns are ordered by their pk_index (1-indexed)
+    var pk_written: usize = 0;
+    var pk_order: usize = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        // Find column with this pk_index
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll("));\n") catch return error.BufferOverflow;
+
+    // Generate clock entry for each non-PK column
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            // Non-PK column - create clock entry
+            writer.print(
+                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
+                \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+                \\  VALUES
+                \\    (NEW.rowid, '{s}', 1, 1, 0, 0);
+                \\
+            , .{ table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
+        }
+    }
+
+    // Sentinel row for row creation tracking
+    writer.print(
+        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
+        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\  VALUES
+        \\    (NEW.rowid, '-1', 1, 1, 0, 0);
+        \\END;
+    , .{table_name}) catch return error.BufferOverflow;
+
+    // Null-terminate the SQL
+    const sql_len = fbs.pos;
+    if (sql_len >= SQL_BUF_SIZE) {
+        return error.BufferOverflow;
+    }
+    buf[sql_len] = 0;
+
+    const sql: [*:0]const u8 = @ptrCast(&buf);
     const rc = api.exec(db, sql, null, null, null);
     if (rc != api.SQLITE_OK) {
         return error.SqliteError;

@@ -176,7 +176,7 @@ pub const vectors = [_]TestVector{
     // NOTE: Upstream uses `num_bytes_needed_i64` which checks the i64 bit-pattern.
     // For negative values, the high bytes are non-zero due to sign extension, so
     // the encoder uses 8 bytes.
-    // -2500000 as i64 = 0xFFFFFFFFFFD9F3C0
+    // -2500000 as i64 = 0xFFFFFFFFFFD9DA60 (verified with python3: hex(-2500000 & 0xFFFFFFFFFFFFFFFF))
     // =========================================================================
     .{
         .name = "negative_integer",
@@ -184,7 +184,7 @@ pub const vectors = [_]TestVector{
         .packed_bytes = &[_]u8{
             0x01, // num_columns = 1
             0x41, // type_byte: (8 << 3) | 1 = 65 -> intlen=8, type=integer
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xD9, 0xF3, 0xC0, // -2500000 as big-endian signed (8 bytes)
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xD9, 0xDA, 0x60, // -2500000 as big-endian signed (8 bytes)
         },
         .expected_columns = &[_]ExpectedColumn{
             .{ .col_type = .integer, .int_value = -2500000 },

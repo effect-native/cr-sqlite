@@ -9,6 +9,7 @@ const std = @import("std");
 const api = @import("api.zig");
 const as_crr = @import("../as_crr.zig");
 const changes_vtab = @import("../changes_vtab.zig");
+const pack_columns = @import("../pack_columns.zig");
 
 /// CR-SQLite Zig implementation version string.
 /// This is returned by the `crsql_zig_version()` SQL function.
@@ -74,6 +75,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
         null,
         null,
     );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_pack_columns() function
+    rc = pack_columns.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;
