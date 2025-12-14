@@ -137,6 +137,14 @@ const ChangesVTab = extern struct {
     // Statement cache for improved performance (nullable, graceful fallback if init fails)
     cache: ?*stmt_cache.StmtCache,
     // Table info is stored per-cursor since we need to query it fresh each time
+
+    // Per-table merge statement cache for write path optimization.
+    // Stored as pointer to allow extern struct compatibility.
+    // Caches statements for the most recently accessed table during sync.
+    merge_stmts_ptr: ?*anyopaque = null,
+    // Table name that merge_stmts is cached for (null-terminated, heap allocated)
+    merge_stmts_table_ptr: ?[*]u8 = null,
+    merge_stmts_table_len: usize = 0,
 };
 
 // =============================================================================
@@ -352,6 +360,8 @@ fn changesDisconnect(pVTab: ?*vtab.VTab) callconv(.c) c_int {
         if (pChangesVTab.cache) |cache| {
             cache.deinit();
         }
+        // Free merge statement cache if allocated
+        freeMergeStmts(pChangesVTab);
         sqliteFree(vt);
     }
     return vtab.SQLITE_OK;
@@ -1127,6 +1137,71 @@ fn changesRowid(pCursor: ?*vtab.VTabCursor, pRowid: *i64) callconv(.c) c_int {
 }
 
 // =============================================================================
+// Merge Statement Cache Helpers
+// =============================================================================
+
+/// Free the cached merge statements and table name from the vtab.
+fn freeMergeStmts(pVTab: *ChangesVTab) void {
+    const allocator = std.heap.page_allocator;
+
+    if (pVTab.merge_stmts_ptr) |ptr| {
+        var stmts: *merge_insert.TableMergeStmts = @ptrCast(@alignCast(ptr));
+        stmts.deinit();
+        allocator.destroy(stmts);
+        pVTab.merge_stmts_ptr = null;
+    }
+
+    if (pVTab.merge_stmts_table_ptr) |table_ptr| {
+        allocator.free(table_ptr[0..pVTab.merge_stmts_table_len]);
+        pVTab.merge_stmts_table_ptr = null;
+        pVTab.merge_stmts_table_len = 0;
+    }
+}
+
+/// Get or create cached merge statements for a table.
+/// If the table name differs from the cached one, creates new cache.
+/// Returns null on allocation failure (caller should fall back to uncached).
+fn getOrCreateMergeStmts(pVTab: *ChangesVTab, table_name: []const u8) ?*merge_insert.TableMergeStmts {
+    const allocator = std.heap.page_allocator;
+
+    // Check if we already have a cache for this table
+    if (pVTab.merge_stmts_ptr != null and pVTab.merge_stmts_table_ptr != null) {
+        const cached_table = pVTab.merge_stmts_table_ptr.?[0..pVTab.merge_stmts_table_len];
+        if (std.mem.eql(u8, cached_table, table_name)) {
+            // Same table, reuse existing cache
+            return @ptrCast(@alignCast(pVTab.merge_stmts_ptr));
+        }
+        // Different table, free old cache
+        freeMergeStmts(pVTab);
+    }
+
+    // Allocate and copy table name (TableMergeStmts borrows the slice)
+    const table_copy = allocator.alloc(u8, table_name.len) catch return null;
+    @memcpy(table_copy, table_name);
+    pVTab.merge_stmts_table_ptr = table_copy.ptr;
+    pVTab.merge_stmts_table_len = table_name.len;
+
+    // Create new TableMergeStmts
+    const stmts_ptr = allocator.create(merge_insert.TableMergeStmts) catch {
+        allocator.free(table_copy);
+        pVTab.merge_stmts_table_ptr = null;
+        pVTab.merge_stmts_table_len = 0;
+        return null;
+    };
+
+    stmts_ptr.* = merge_insert.TableMergeStmts.init(toApiDb(pVTab.db), table_copy) catch {
+        allocator.destroy(stmts_ptr);
+        allocator.free(table_copy);
+        pVTab.merge_stmts_table_ptr = null;
+        pVTab.merge_stmts_table_len = 0;
+        return null;
+    };
+
+    pVTab.merge_stmts_ptr = stmts_ptr;
+    return stmts_ptr;
+}
+
+// =============================================================================
 // xUpdate - INSERT/UPDATE/DELETE handler
 // =============================================================================
 
@@ -1241,13 +1316,26 @@ fn changesUpdate(
     const table_slice = std.mem.span(table_name.?);
     const cid_slice = std.mem.span(cid.?);
 
+    // Get or create cached merge statements for this table (graceful fallback if fails)
+    const merge_stmts = getOrCreateMergeStmts(pChangesVTab, table_slice);
+
     // Step 1: Find the pk (rowid) from the packed blob
     const pk_ptr: [*]const u8 = @ptrCast(pk_blob orelse {
         log.debug("changesUpdate: pk_blob is NULL", .{});
         return vtab.SQLITE_ERROR;
     });
     const api_db = toApiDb(vtab_db);
-    const pk_rowid = merge_insert.findPkFromBlob(api_db, table_slice, pk_ptr, @intCast(pk_len)) catch |err| {
+
+    // Use cached findPkFromBlob if available, fall back to uncached
+    const find_pk_result = blk: {
+        if (merge_stmts) |stmts| {
+            break :blk merge_insert.findPkFromBlobCached(stmts, pk_ptr, @intCast(pk_len));
+        } else {
+            break :blk merge_insert.findPkFromBlob(api_db, table_slice, pk_ptr, @intCast(pk_len));
+        }
+    };
+
+    const pk_rowid = find_pk_result catch |err| {
         // If row doesn't exist locally, we need to INSERT it
         if (err == merge_insert.MergeError.NoRows) {
             // Handle sentinel operations (cid = "-1") for non-existent rows
@@ -1273,24 +1361,45 @@ fn changesUpdate(
                 return vtab.SQLITE_ERROR;
             };
 
-            // Step 1b: Insert into __crsql_pks table
-            merge_insert.insertIntoPksTable(api_db, table_slice, new_pk, pk_ptr, @intCast(pk_len)) catch {
-                log.debug("changesUpdate: insertIntoPksTable failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            // Step 1b: Insert into __crsql_pks table (use cached if available)
+            if (merge_stmts) |stmts| {
+                merge_insert.insertIntoPksTableCached(stmts, new_pk, pk_ptr, @intCast(pk_len)) catch {
+                    log.debug("changesUpdate: insertIntoPksTableCached failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            } else {
+                merge_insert.insertIntoPksTable(api_db, table_slice, new_pk, pk_ptr, @intCast(pk_len)) catch {
+                    log.debug("changesUpdate: insertIntoPksTable failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            }
 
-            // Step 1c: Insert clock entry for the column
+            // Step 1c: Insert clock entry for the column (use cached if available)
             const site_id_ptr_insert: ?[*]const u8 = @ptrCast(site_id_blob);
-            merge_insert.setWinnerClock(api_db, table_slice, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
-                log.debug("changesUpdate: setWinnerClock for new row failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            if (merge_stmts) |stmts| {
+                merge_insert.setWinnerClockCached(stmts, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClockCached for new row failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            } else {
+                merge_insert.setWinnerClock(api_db, table_slice, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClock for new row failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            }
 
-            // Step 1d: Insert sentinel clock entry with the incoming cl
-            merge_insert.setWinnerClock(api_db, table_slice, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
-                log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            // Step 1d: Insert sentinel clock entry with the incoming cl (use cached if available)
+            if (merge_stmts) |stmts| {
+                merge_insert.setWinnerClockCached(stmts, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClockCached for sentinel failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            } else {
+                merge_insert.setWinnerClock(api_db, table_slice, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            }
 
             // Increment rows impacted
             rows_impacted.incrementRowsImpacted();
@@ -1302,10 +1411,19 @@ fn changesUpdate(
         return vtab.SQLITE_ERROR;
     };
 
-    // Step 2: Get local causal length
-    const local_cl = merge_insert.getLocalCl(api_db, table_slice, pk_rowid) catch {
-        log.debug("changesUpdate: getLocalCl failed", .{});
-        return vtab.SQLITE_ERROR;
+    // Step 2: Get local causal length (use cached if available)
+    const local_cl = blk: {
+        if (merge_stmts) |stmts| {
+            break :blk merge_insert.getLocalClCached(stmts, pk_rowid) catch {
+                log.debug("changesUpdate: getLocalClCached failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            break :blk merge_insert.getLocalCl(api_db, table_slice, pk_rowid) catch {
+                log.debug("changesUpdate: getLocalCl failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
     };
 
     // Step 3: CL gating - if remote CL is less than local, reject immediately
@@ -1325,26 +1443,47 @@ fn changesUpdate(
             const is_delete = (@mod(cl, 2) == 0); // Even CL = deleted state
 
             if (is_delete) {
-                // Delete from base table first
-                merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
-                    log.debug("changesUpdate: deleteFromBaseTable failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
+                // Delete from base table first (use cached if available)
+                if (merge_stmts) |stmts| {
+                    merge_insert.deleteFromBaseTableCached(stmts, pk_rowid) catch {
+                        log.debug("changesUpdate: deleteFromBaseTableCached failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                } else {
+                    merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
+                        log.debug("changesUpdate: deleteFromBaseTable failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                }
 
-                // Drop all non-sentinel clock entries
-                merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
-                    log.debug("changesUpdate: dropNonSentinelClocks failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
+                // Drop all non-sentinel clock entries (use cached if available)
+                if (merge_stmts) |stmts| {
+                    merge_insert.dropNonSentinelClocksCached(stmts, pk_rowid) catch {
+                        log.debug("changesUpdate: dropNonSentinelClocksCached failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                } else {
+                    merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
+                        log.debug("changesUpdate: dropNonSentinelClocks failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                }
             }
             // For resurrection (odd CL), we don't delete - just update the sentinel clock.
             // The actual row data will come from separate column change entries.
 
-            // Update the sentinel clock
-            merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
-                log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            // Update the sentinel clock (use cached if available)
+            if (merge_stmts) |stmts| {
+                merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClockCached for sentinel failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            } else {
+                merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
+                    log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            }
             rows_impacted.incrementRowsImpacted();
         }
         pRowid.* = 0;
@@ -1358,7 +1497,13 @@ fn changesUpdate(
     // This handles both:
     //   - Out-of-order delivery: sentinel arrives first, updates cl to 3 (live), then column data arrives
     //   - In-order delivery: column data arrives when local_cl is still even (deleted)
-    const row_exists = merge_insert.rowExistsInBaseTable(api_db, table_slice, pk_rowid) catch false;
+    const row_exists = blk: {
+        if (merge_stmts) |stmts| {
+            break :blk merge_insert.rowExistsInBaseTableCached(stmts, pk_rowid) catch false;
+        } else {
+            break :blk merge_insert.rowExistsInBaseTable(api_db, table_slice, pk_rowid) catch false;
+        }
+    };
     const incoming_is_live = @mod(cl, 2) == 1; // odd cl = live state
 
     if (!row_exists and incoming_is_live) {
@@ -1369,17 +1514,25 @@ fn changesUpdate(
         const resurrect_value = toApiValue(argv[5]);
 
         // Re-insert into base table using the existing pk (the pks entry still exists)
+        // Note: insertRowForResurrection not cached - requires dynamic column name
         merge_insert.insertRowForResurrection(api_db, table_slice, pk_rowid, cid_slice, resurrect_value) catch {
             log.debug("changesUpdate: insertRowForResurrection failed", .{});
             return vtab.SQLITE_ERROR;
         };
 
-        // Update clock entry for the column
+        // Update clock entry for the column (use cached if available)
         const site_id_ptr_res: ?[*]const u8 = @ptrCast(site_id_blob);
-        merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
-            log.debug("changesUpdate: setWinnerClock for resurrection failed", .{});
-            return vtab.SQLITE_ERROR;
-        };
+        if (merge_stmts) |stmts| {
+            merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClockCached for resurrection failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock for resurrection failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
 
         rows_impacted.incrementRowsImpacted();
         pRowid.* = 0;
@@ -1387,10 +1540,19 @@ fn changesUpdate(
     }
 
     // Step 5: For column updates, check if remote wins
-    // Get local col_version for this specific column
-    const local_col_version = merge_insert.getLocalColVersion(api_db, table_slice, pk_rowid, cid_slice) catch {
-        log.debug("changesUpdate: getLocalColVersion failed", .{});
-        return vtab.SQLITE_ERROR;
+    // Get local col_version for this specific column (use cached if available)
+    const local_col_version = blk: {
+        if (merge_stmts) |stmts| {
+            break :blk merge_insert.getLocalColVersionCached(stmts, pk_rowid, cid_slice) catch {
+                log.debug("changesUpdate: getLocalColVersionCached failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            break :blk merge_insert.getLocalColVersion(api_db, table_slice, pk_rowid, cid_slice) catch {
+                log.debug("changesUpdate: getLocalColVersion failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
     };
 
     // Determine winner based on merge rules:
@@ -1459,12 +1621,19 @@ fn changesUpdate(
         return vtab.SQLITE_ERROR;
     };
 
-    // Update clock table
+    // Update clock table (use cached if available)
     const site_id_ptr: ?[*]const u8 = @ptrCast(site_id_blob);
-    merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
-        log.debug("changesUpdate: setWinnerClock failed", .{});
-        return vtab.SQLITE_ERROR;
-    };
+    if (merge_stmts) |stmts| {
+        merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
+            log.debug("changesUpdate: setWinnerClockCached failed", .{});
+            return vtab.SQLITE_ERROR;
+        };
+    } else {
+        merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
+            log.debug("changesUpdate: setWinnerClock failed", .{});
+            return vtab.SQLITE_ERROR;
+        };
+    }
 
     // Advance db_version to at least the incoming db_version when remote wins
     // This ensures crsql_db_version() reflects that a real change was applied

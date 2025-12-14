@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 22)
+> **Last Updated**: 2025-12-14 (Round 23)
 
 ## Status Summary
 
@@ -95,6 +95,18 @@
 - ✅ Root README updated with "Browser Usage" section
 - 📋 Service Worker fallback researched (defer to Phase 2)
 
+### Round 23: Statement Cache Wiring & Cross-Platform Validation
+- ✅ `TableMergeStmts` wired into `changes_vtab.zig` write path
+  - All 8 merge hot-path functions now use cached statements
+  - Per-table cache with automatic invalidation on table change
+  - Graceful fallback to uncached on allocation failure
+- ✅ Cross-platform sync compatibility test (`zig/harness/test-cross-platform-compat.sh`)
+  - Validates Zig ↔ Rust/C wire format compatibility
+  - Tests: bidirectional sync, PK blob format, Lamport clocks, NULL handling, tombstones
+  - **Result: 100% compatible**
+- 📋 macOS universal binary approach documented (lipo-based)
+- 📋 Reactive query subscriptions researched (defer to Phase 2)
+
 ---
 
 ## Completed Items (Rounds 1-9)
@@ -123,12 +135,12 @@
 ### 1. Performance Optimizations
 **Source**: `research/zig-cr/11-performance-hotspots.md`
 **Priority**: Medium
-**Status**: Core integration complete (Round 22)
+**Status**: ✅ Core integration complete (Round 23)
 
 - [x] Statement caching infrastructure (`zig/src/stmt_cache.zig`)
 - [x] `discoverTablesCached` enabled in `changes_vtab.zig` ✅
 - [x] Per-table merge statement caching (`TableMergeStmts` in `merge_insert.zig`) ✅
-- [ ] Wire `TableMergeStmts` into changes_vtab write path
+- [x] Wire `TableMergeStmts` into changes_vtab write path ✅ (Round 23)
 - [ ] Schema version invalidation caching (`PRAGMA schema_version`)
 - [ ] `PRAGMA data_version` check amortization (per-transaction flag)
 - [ ] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`)
@@ -220,12 +232,13 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 
 ### Medium Priority
 3. ~~`crsql_fract_as_ordered`~~ — ✅ DONE (Round 21)
-4. macOS universal binary
+4. macOS universal binary (approach documented, ready to implement)
 5. Windows `.dll` build
-6. ~~Statement cache integration into hot paths~~ — ✅ DONE (Round 22)
-7. Wire `TableMergeStmts` into changes_vtab write path
+6. ~~Statement cache integration into hot paths~~ — ✅ DONE (Round 22-23)
+7. ~~Wire `TableMergeStmts` into changes_vtab write path~~ — ✅ DONE (Round 23)
+8. Cross-platform sync validation — ✅ DONE (Round 23)
 
 ### Low Priority
-8. Service Worker fallback (researched, defer to Phase 2)
-9. Subscribe/reactive queries
-10. ~~`crsql_fract_fix_conflict_return_old_key`~~ — ✅ DONE (Round 21)
+9. Service Worker fallback (researched, defer to Phase 2)
+10. Subscribe/reactive queries (researched, defer to Phase 2)
+11. ~~`crsql_fract_fix_conflict_return_old_key`~~ — ✅ DONE (Round 21)
