@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 21)
+> **Last Updated**: 2025-12-14 (Round 22)
 
 ## Status Summary
 
@@ -84,6 +84,17 @@
 - ✅ **All C oracle tests now pass: 20/20 (100%)**
 - ✅ **Total test count: 154/154 (100%)**
 
+### Round 22: Performance & npm Package
+- ✅ `discoverTablesCached` enabled in `changes_vtab.zig` (was implemented but unused!)
+- ✅ `TableMergeStmts` per-table statement cache in `merge_insert.zig`
+  - 8 cached function variants for hot paths
+  - Lazy statement preparation
+  - No allocator needed (stack-allocated SQL buffers)
+- ✅ npm package renamed to `@effect-native/libcrsql-browser`
+- ✅ Browser package README updated with usage docs
+- ✅ Root README updated with "Browser Usage" section
+- 📋 Service Worker fallback researched (defer to Phase 2)
+
 ---
 
 ## Completed Items (Rounds 1-9)
@@ -112,11 +123,12 @@
 ### 1. Performance Optimizations
 **Source**: `research/zig-cr/11-performance-hotspots.md`
 **Priority**: Medium
-**Status**: Infrastructure complete, integration pending
+**Status**: Core integration complete (Round 22)
 
 - [x] Statement caching infrastructure (`zig/src/stmt_cache.zig`)
-- [ ] Integrate stmt_cache into union query generation
-- [ ] Integrate stmt_cache into clock writes
+- [x] `discoverTablesCached` enabled in `changes_vtab.zig` ✅
+- [x] Per-table merge statement caching (`TableMergeStmts` in `merge_insert.zig`) ✅
+- [ ] Wire `TableMergeStmts` into changes_vtab write path
 - [ ] Schema version invalidation caching (`PRAGMA schema_version`)
 - [ ] `PRAGMA data_version` check amortization (per-transaction flag)
 - [ ] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`)
@@ -203,16 +215,17 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 ## Remaining Work for Production Release
 
 ### High Priority
-1. **npm package updates** — Integrate Zig-built extensions into existing npm package
+1. ~~**npm package updates**~~ — ✅ DONE (Round 22) - `@effect-native/libcrsql-browser` ready
 2. ~~**OPFS storage**~~ — ✅ DONE (`opfs-sahpool` VFS integrated)
 
 ### Medium Priority
 3. ~~`crsql_fract_as_ordered`~~ — ✅ DONE (Round 21)
 4. macOS universal binary
 5. Windows `.dll` build
-6. Statement cache integration into hot paths
+6. ~~Statement cache integration into hot paths~~ — ✅ DONE (Round 22)
+7. Wire `TableMergeStmts` into changes_vtab write path
 
 ### Low Priority
-7. Service Worker fallback
-8. Subscribe/reactive queries
-9. ~~`crsql_fract_fix_conflict_return_old_key`~~ — ✅ DONE (Round 21)
+8. Service Worker fallback (researched, defer to Phase 2)
+9. Subscribe/reactive queries
+10. ~~`crsql_fract_fix_conflict_return_old_key`~~ — ✅ DONE (Round 21)

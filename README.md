@@ -106,6 +106,21 @@ const db = new Database('my-app.db');
 db.loadExtension(pathToCRSQLiteExtension);
 ```
 
+## Browser Usage
+
+For browser environments, use the companion package:
+
+```bash
+npm install @effect-native/libcrsql-browser
+```
+
+The browser package provides:
+- WASM-based SQLite with CR-SQLite extension
+- Multi-tab coordination via SharedWorker
+- Automatic provider election across tabs
+
+See [@effect-native/libcrsql-browser](https://www.npmjs.com/package/@effect-native/libcrsql-browser) for full documentation.
+
 ## React Native
 
 This package is for **Node.js/Bun server environments only**. For React Native, use:

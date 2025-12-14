@@ -1,5 +1,5 @@
 {
-  "name": "@crsqlite/browser",
+  "name": "@effect-native/libcrsql-browser",
   "version": "0.1.0",
   "description": "CR-SQLite for browsers - CRDT-based SQLite replication with multi-tab support",
   "type": "module",

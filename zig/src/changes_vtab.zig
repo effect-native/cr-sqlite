@@ -134,6 +134,8 @@ const MAX_TABLES = 256;
 const ChangesVTab = extern struct {
     base: vtab.VTab,
     db: ?*vtab.sqlite3,
+    // Statement cache for improved performance (nullable, graceful fallback if init fails)
+    cache: ?*stmt_cache.StmtCache,
     // Table info is stored per-cursor since we need to query it fresh each time
 };
 
@@ -335,6 +337,9 @@ fn changesConnect(
     @memset(std.mem.asBytes(pVTab), 0);
     pVTab.db = db;
 
+    // Initialize statement cache for performance (graceful fallback if init fails)
+    pVTab.cache = stmt_cache.StmtCache.init(toApiDb(db)) catch null;
+
     ppVTab.* = &pVTab.base;
     return vtab.SQLITE_OK;
 }
@@ -342,6 +347,11 @@ fn changesConnect(
 /// xDisconnect - Release the virtual table connection
 fn changesDisconnect(pVTab: ?*vtab.VTab) callconv(.c) c_int {
     if (pVTab) |vt| {
+        const pChangesVTab: *ChangesVTab = @ptrCast(@alignCast(vt));
+        // Free statement cache if it was allocated
+        if (pChangesVTab.cache) |cache| {
+            cache.deinit();
+        }
         sqliteFree(vt);
     }
     return vtab.SQLITE_OK;
@@ -818,11 +828,19 @@ fn changesFilter(
         cursor.filter_site_id_type = site_id_filter_type;
     }
 
-    // Discover all CRR tables
-    discoverTables(cursor, db) catch {
-        cursor.is_eof = true;
-        return vtab.SQLITE_OK;
-    };
+    // Discover all CRR tables (use cached version if available for better performance)
+    if (pVTab.cache) |cache| {
+        discoverTablesCached(cursor, cache) catch {
+            cursor.is_eof = true;
+            return vtab.SQLITE_OK;
+        };
+    } else {
+        // Fallback to uncached version if cache initialization failed
+        discoverTables(cursor, db) catch {
+            cursor.is_eof = true;
+            return vtab.SQLITE_OK;
+        };
+    }
 
     if (cursor.table_count == 0) {
         cursor.is_eof = true;

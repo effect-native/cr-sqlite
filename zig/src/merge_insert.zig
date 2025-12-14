@@ -2,6 +2,20 @@
 //!
 //! These functions execute the SQL statements needed for merge operations.
 //! They are called from changes_vtab.changesUpdate.
+//!
+//! ## Statement Caching
+//!
+//! Hot path functions like `getLocalCl`, `getLocalColVersion`, `setWinnerClock`,
+//! and `findPkFromBlob` are called on every incoming change during sync.
+//! For a sync with 1000 changes, this means ~4000+ prepare/finalize cycles.
+//!
+//! The `TableMergeStmts` struct provides per-table statement caching to reduce
+//! this to ~4 prepares per table. Callers can:
+//! 1. Create a `TableMergeStmts` for each table being processed
+//! 2. Use the cached variants: `getLocalClCached`, `setWinnerClockCached`, etc.
+//! 3. Call `deinit()` when done with the table
+//!
+//! The original uncached functions remain available for backwards compatibility.
 
 const std = @import("std");
 const api = @import("ffi/api.zig");
@@ -13,6 +27,150 @@ pub const MergeError = error{
     BufferOverflow,
     DecodeError,
     NoRows,
+};
+
+// =============================================================================
+// Per-Table Statement Cache
+// =============================================================================
+
+/// Per-table cached statements for merge operations.
+///
+/// During sync, the same SQL patterns are executed thousands of times per table,
+/// differing only in bound parameters. This struct caches the prepared statements
+/// for a single table, allowing reuse across multiple merge operations.
+///
+/// Usage:
+/// ```zig
+/// var stmts = TableMergeStmts.init(db, "my_table") catch return error;
+/// defer stmts.deinit();
+///
+/// // Use cached functions
+/// const cl = try getLocalClCached(&stmts, pk);
+/// try setWinnerClockCached(&stmts, pk, col_name, ...);
+/// ```
+pub const TableMergeStmts = struct {
+    db: ?*api.sqlite3,
+
+    /// Table name (borrowed reference, must outlive this struct)
+    table_name: []const u8,
+
+    // Cached statements - null until first use, then reused
+
+    /// SELECT col_version FROM "{table}__crsql_clock" WHERE pk = ? AND col_name = '-1'
+    get_cl_stmt: ?*api.sqlite3_stmt = null,
+
+    /// SELECT 1 FROM "{table}__crsql_clock" WHERE pk = ? LIMIT 1
+    row_exists_stmt: ?*api.sqlite3_stmt = null,
+
+    /// SELECT col_version FROM "{table}__crsql_clock" WHERE pk = ? AND col_name = ?
+    get_col_version_stmt: ?*api.sqlite3_stmt = null,
+
+    /// INSERT OR REPLACE INTO "{table}__crsql_clock" (...) VALUES (?, ?, ?, ?, ?, ?)
+    set_winner_clock_stmt: ?*api.sqlite3_stmt = null,
+
+    /// SELECT pk FROM "{table}__crsql_pks" WHERE pks = ?
+    find_pk_stmt: ?*api.sqlite3_stmt = null,
+
+    /// SELECT 1 FROM "{table}" WHERE rowid = ? LIMIT 1
+    row_exists_base_stmt: ?*api.sqlite3_stmt = null,
+
+    /// DELETE FROM "{table}" WHERE rowid = ?
+    delete_base_stmt: ?*api.sqlite3_stmt = null,
+
+    /// DELETE FROM "{table}__crsql_clock" WHERE pk = ? AND col_name != '-1'
+    drop_non_sentinel_stmt: ?*api.sqlite3_stmt = null,
+
+    /// INSERT INTO "{table}__crsql_pks" (pk, pks) VALUES (?, ?)
+    insert_pks_stmt: ?*api.sqlite3_stmt = null,
+
+    // SQL buffers for dynamically-generated queries
+    // These are built once during init or on first use
+
+    sql_get_cl: [256]u8 = undefined,
+    sql_row_exists: [256]u8 = undefined,
+    sql_get_col_version: [256]u8 = undefined,
+    sql_set_winner_clock: [512]u8 = undefined,
+    sql_find_pk: [256]u8 = undefined,
+    sql_row_exists_base: [256]u8 = undefined,
+    sql_delete_base: [256]u8 = undefined,
+    sql_drop_non_sentinel: [256]u8 = undefined,
+    sql_insert_pks: [256]u8 = undefined,
+
+    /// Initialize statement cache for a table.
+    /// Statements are lazily prepared on first use.
+    ///
+    /// The table_name slice must remain valid for the lifetime of this struct.
+    pub fn init(db: ?*api.sqlite3, table_name: []const u8) MergeError!TableMergeStmts {
+        var self = TableMergeStmts{
+            .db = db,
+            .table_name = table_name,
+        };
+
+        // Pre-format SQL strings (they're used repeatedly)
+        _ = std.fmt.bufPrintZ(&self.sql_get_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_row_exists, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE pk = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_get_col_version, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_set_winner_clock,
+            \\INSERT OR REPLACE INTO "{s}__crsql_clock"
+            \\  ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+            \\VALUES (?, ?, ?, ?, ?, ?)
+        , .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_find_pk, "SELECT pk FROM \"{s}__crsql_pks\" WHERE pks = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_row_exists_base, "SELECT 1 FROM \"{s}\" WHERE rowid = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_delete_base, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_drop_non_sentinel, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+
+        _ = std.fmt.bufPrintZ(&self.sql_insert_pks, "INSERT INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, ?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+        return self;
+    }
+
+    /// Release all cached statements.
+    pub fn deinit(self: *TableMergeStmts) void {
+        if (self.get_cl_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.row_exists_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.get_col_version_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.set_winner_clock_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.find_pk_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.row_exists_base_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.delete_base_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.drop_non_sentinel_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.insert_pks_stmt) |stmt| _ = api.finalize(stmt);
+
+        self.get_cl_stmt = null;
+        self.row_exists_stmt = null;
+        self.get_col_version_stmt = null;
+        self.set_winner_clock_stmt = null;
+        self.find_pk_stmt = null;
+        self.row_exists_base_stmt = null;
+        self.delete_base_stmt = null;
+        self.drop_non_sentinel_stmt = null;
+        self.insert_pks_stmt = null;
+    }
+
+    /// Helper to get or prepare a statement.
+    fn getOrPrepare(self: *TableMergeStmts, slot: *?*api.sqlite3_stmt, sql: [*:0]const u8) MergeError!*api.sqlite3_stmt {
+        if (slot.*) |existing| {
+            // Reset for reuse
+            _ = api.reset(existing);
+            return existing;
+        }
+
+        var stmt: ?*api.sqlite3_stmt = null;
+        if (api.prepare_v2(self.db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+
+        slot.* = stmt;
+        return stmt.?;
+    }
 };
 
 /// Get the local causal length (cl) for a row.
@@ -502,11 +660,168 @@ pub fn insertRowForResurrection(
 }
 
 // =============================================================================
+// Cached Variants (Hot Path Optimization)
+// =============================================================================
+
+/// Get the local causal length (cl) for a row using cached statement.
+/// Returns 0 if no local row exists.
+///
+/// This is the cached variant of `getLocalCl` for use with `TableMergeStmts`.
+pub fn getLocalClCached(stmts: *TableMergeStmts, pk: i64) MergeError!i64 {
+    const stmt = try stmts.getOrPrepare(&stmts.get_cl_stmt, @ptrCast(&stmts.sql_get_cl));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+
+    // No sentinel - check if row exists at all using cached statement
+    const exists_stmt = try stmts.getOrPrepare(&stmts.row_exists_stmt, @ptrCast(&stmts.sql_row_exists));
+    _ = api.bind_int64(exists_stmt, 1, pk);
+
+    if (api.step(exists_stmt) == api.SQLITE_ROW) {
+        return 1; // Row exists but no explicit CL, default to 1 (created)
+    }
+
+    return 0; // No local row
+}
+
+/// Get the local col_version for a specific column using cached statement.
+/// Returns 0 if no local entry exists.
+///
+/// This is the cached variant of `getLocalColVersion` for use with `TableMergeStmts`.
+pub fn getLocalColVersionCached(stmts: *TableMergeStmts, pk: i64, col_name: []const u8) MergeError!i64 {
+    const stmt = try stmts.getOrPrepare(&stmts.get_col_version_stmt, @ptrCast(&stmts.sql_get_col_version));
+
+    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+
+    return 0;
+}
+
+/// Update clock table entry for a column using cached statement.
+///
+/// This is the cached variant of `setWinnerClock` for use with `TableMergeStmts`.
+pub fn setWinnerClockCached(
+    stmts: *TableMergeStmts,
+    pk: i64,
+    col_name: []const u8,
+    col_version: i64,
+    db_version: i64,
+    site_id_blob: ?[*]const u8,
+    site_id_len: usize,
+    seq: i64,
+) MergeError!void {
+    const stmt = try stmts.getOrPrepare(&stmts.set_winner_clock_stmt, @ptrCast(&stmts.sql_set_winner_clock));
+
+    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
+    _ = api.bind_int64(stmt, 3, col_version);
+    _ = api.bind_int64(stmt, 4, db_version);
+
+    if (site_id_blob) |sid| {
+        _ = api.bind_blob(stmt, 5, sid, @intCast(site_id_len), api.getTransientDestructor());
+    } else {
+        _ = api.bind_int64(stmt, 5, 0); // Local site_id = 0
+    }
+
+    _ = api.bind_int64(stmt, 6, seq);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Find the pk (rowid) from a packed PK blob using cached statement.
+///
+/// This is the cached variant of `findPkFromBlob` for use with `TableMergeStmts`.
+pub fn findPkFromBlobCached(
+    stmts: *TableMergeStmts,
+    pk_blob: [*]const u8,
+    pk_blob_len: usize,
+) MergeError!i64 {
+    const stmt = try stmts.getOrPrepare(&stmts.find_pk_stmt, @ptrCast(&stmts.sql_find_pk));
+
+    _ = api.bind_blob(stmt, 1, pk_blob, @intCast(pk_blob_len), api.getTransientDestructor());
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+
+    return MergeError.NoRows;
+}
+
+/// Check if a row exists in the base table by rowid using cached statement.
+///
+/// This is the cached variant of `rowExistsInBaseTable` for use with `TableMergeStmts`.
+pub fn rowExistsInBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!bool {
+    const stmt = try stmts.getOrPrepare(&stmts.row_exists_base_stmt, @ptrCast(&stmts.sql_row_exists_base));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    return api.step(stmt) == api.SQLITE_ROW;
+}
+
+/// Delete row from base table by rowid using cached statement.
+///
+/// This is the cached variant of `deleteFromBaseTable` for use with `TableMergeStmts`.
+pub fn deleteFromBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+    const stmt = try stmts.getOrPrepare(&stmts.delete_base_stmt, @ptrCast(&stmts.sql_delete_base));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Drop all clock entries except sentinel (-1) using cached statement.
+///
+/// This is the cached variant of `dropNonSentinelClocks` for use with `TableMergeStmts`.
+pub fn dropNonSentinelClocksCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+    const stmt = try stmts.getOrPrepare(&stmts.drop_non_sentinel_stmt, @ptrCast(&stmts.sql_drop_non_sentinel));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Insert into __crsql_pks table using cached statement.
+///
+/// This is the cached variant of `insertIntoPksTable` for use with `TableMergeStmts`.
+pub fn insertIntoPksTableCached(
+    stmts: *TableMergeStmts,
+    pk: i64,
+    pks_blob: [*]const u8,
+    pks_len: usize,
+) MergeError!void {
+    const stmt = try stmts.getOrPrepare(&stmts.insert_pks_stmt, @ptrCast(&stmts.sql_insert_pks));
+
+    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_blob(stmt, 2, pks_blob, @intCast(pks_len), api.getTransientDestructor());
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
 test "module compiles" {
-    // Basic compile test
+    // Basic compile test - uncached functions
     _ = getLocalCl;
     _ = getLocalColVersion;
     _ = updateBaseTableColumn;
@@ -518,4 +833,28 @@ test "module compiles" {
     _ = insertIntoBaseTable;
     _ = insertIntoPksTable;
     _ = insertRowForResurrection;
+
+    // Cached variants
+    _ = getLocalClCached;
+    _ = getLocalColVersionCached;
+    _ = setWinnerClockCached;
+    _ = findPkFromBlobCached;
+    _ = rowExistsInBaseTableCached;
+    _ = deleteFromBaseTableCached;
+    _ = dropNonSentinelClocksCached;
+    _ = insertIntoPksTableCached;
+}
+
+test "TableMergeStmts struct has expected fields" {
+    // Verify the struct layout matches what we designed
+    const stmts = TableMergeStmts{
+        .db = null,
+        .table_name = "test",
+    };
+    try std.testing.expectEqual(@as(?*api.sqlite3, null), stmts.db);
+    try std.testing.expectEqualStrings("test", stmts.table_name);
+    try std.testing.expectEqual(@as(?*api.sqlite3_stmt, null), stmts.get_cl_stmt);
+    try std.testing.expectEqual(@as(?*api.sqlite3_stmt, null), stmts.get_col_version_stmt);
+    try std.testing.expectEqual(@as(?*api.sqlite3_stmt, null), stmts.set_winner_clock_stmt);
+    try std.testing.expectEqual(@as(?*api.sqlite3_stmt, null), stmts.find_pk_stmt);
 }

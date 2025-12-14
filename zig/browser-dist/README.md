@@ -1,6 +1,8 @@
-# @crsqlite/browser
+# @effect-native/libcrsql-browser
 
 CR-SQLite for browsers - CRDT-based SQLite replication with multi-tab support.
+
+Part of the [@effect-native/libcrsql](https://github.com/effect-native/cr-sqlite) family. For Node.js/Bun server environments, use `@effect-native/libcrsql` instead.
 
 ## Features
 
@@ -12,13 +14,13 @@ CR-SQLite for browsers - CRDT-based SQLite replication with multi-tab support.
 ## Installation
 
 ```bash
-npm install @crsqlite/browser
+npm install @effect-native/libcrsql-browser
 ```
 
 ## Quick Start
 
 ```typescript
-import { DbClient } from '@crsqlite/browser';
+import { DbClient } from '@effect-native/libcrsql-browser';
 
 // Create a database client
 const db = new DbClient({ dbName: 'myapp' });
@@ -142,13 +144,13 @@ The package includes three files that need to be served:
 // vite.config.ts
 export default {
   optimizeDeps: {
-    exclude: ['@crsqlite/browser']
+    exclude: ['@effect-native/libcrsql-browser']
   },
   build: {
     rollupOptions: {
       output: {
         manualChunks: {
-          'crsqlite-workers': ['@crsqlite/browser']
+          'crsqlite-workers': ['@effect-native/libcrsql-browser']
         }
       }
     }
@@ -161,9 +163,9 @@ export default {
 You may need to copy the worker files to your public directory:
 
 ```bash
-cp node_modules/@crsqlite/browser/coordinator.js public/
-cp node_modules/@crsqlite/browser/provider.js public/
-cp node_modules/@crsqlite/browser/sql-wasm.wasm public/
+cp node_modules/@effect-native/libcrsql-browser/coordinator.js public/
+cp node_modules/@effect-native/libcrsql-browser/provider.js public/
+cp node_modules/@effect-native/libcrsql-browser/sql-wasm.wasm public/
 ```
 
 ## Browser Support
@@ -209,6 +211,11 @@ interface RunResult {
   lastInsertRowId: number;
 }
 ```
+
+## Related Packages
+
+- **[@effect-native/libcrsql](https://www.npmjs.com/package/@effect-native/libcrsql)** - CR-SQLite for Node.js/Bun server environments
+- [CR-SQLite](https://github.com/vlcn-io/cr-sqlite) - The upstream CR-SQLite project
 
 ## License
 

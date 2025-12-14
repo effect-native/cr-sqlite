@@ -1,5 +1,5 @@
 /**
- * @crsqlite/browser - CR-SQLite for browsers with multi-tab support
+ * @effect-native/libcrsql-browser - CR-SQLite for browsers with multi-tab support
  *
  * This package provides CRDT-based SQLite replication for browser environments,
  * with automatic multi-tab coordination via SharedWorker.
@@ -45,7 +45,7 @@ export interface RunResult {
  *
  * @example
  * ```typescript
- * import { DbClient } from '@crsqlite/browser';
+ * import { DbClient } from '@effect-native/libcrsql-browser';
  *
  * const db = new DbClient({ dbName: 'myapp' });
  * await db.ready();
