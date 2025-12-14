@@ -1,5 +1,11 @@
 # 99-threadsafe-sqlite-proposals
 
+## Related
+
+- Node/Bun/Deno multi-process analog: [`100-proposal-node-multiprocess-crsqlite-mesh.md`](./100-proposal-node-multiprocess-crsqlite-mesh.md)
+- Universal TS packaging idea: [`101-proposal-universal-crsqlite-mt-js.md`](./101-proposal-universal-crsqlite-mt-js.md)
+- Browser multi-tab references: [`96-proposal-multitab-wasm-sqlite-crsqlite.md`](./96-proposal-multitab-wasm-sqlite-crsqlite.md), [`97-proposal-multitab-crsqlite-mesh.md`](./97-proposal-multitab-crsqlite-mesh.md)
+
 ## Goal
 
 Make SQLite “threadsafe-by-default” in the only way that actually scales under write contention:
