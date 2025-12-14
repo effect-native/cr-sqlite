@@ -269,5 +269,23 @@
             gnumake
           ]; 
         };
+        
+        # Dev shell with Emscripten for WASM builds
+        devShells.wasm = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            emscripten
+            zig
+            python3
+          ];
+          shellHook = ''
+            echo "WASM build environment ready!"
+            echo "  - emcc: $(emcc --version | head -1)"
+            echo "  - zig:  $(zig version)"
+            echo ""
+            echo "Build steps:"
+            echo "  1. cd zig && zig build wasm"
+            echo "  2. ./zig/wasm-build/build-sqlite-wasm.sh"
+          '';
+        };
       });
 }
