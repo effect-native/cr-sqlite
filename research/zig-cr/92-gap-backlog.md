@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 25)
+> **Last Updated**: 2025-12-14 (Round 26)
 
 ## Status Summary
 
@@ -124,6 +124,21 @@
   - Seq resets to 0 on commit/rollback
 - ✅ **Clock edge cases test now passes: 7/7**
 
+### Round 26: Universal Binary, Docs, Realistic Tests
+- ✅ **macOS universal binary**: `make universal` target added to `zig/Makefile`
+  - Builds aarch64 + x86_64 with separate `--prefix` outputs
+  - Combines with `lipo -create` into `zig-out-universal/lib/libcrsqlite.dylib`
+  - Verified: `lipo -info` shows both architectures
+- ✅ **Docs alignment**: `zig/README.md` updated to reflect 154/154 tests passing
+  - C oracle tests: 20/20 (was incorrectly showing "partial")
+  - `crsql_begin_alter` / `crsql_commit_alter` listed as implemented
+  - Known Limitations reflects actual remaining gaps
+- ✅ **Realistic scenario tests**: 3 new shell tests in `zig/harness/`
+  - `test-realistic-sync.sh` - Multi-device sync (Alice/Bob todo list)
+  - `test-realistic-collab.sh` - Concurrent edit conflict resolution
+  - `test-realistic-offline.sh` - Offline-first field worker pattern
+  - All serve as executable documentation per `.wishes/spec-first-RGRTDD.md`
+
 ---
 
 ## Completed Items (Rounds 1-9)
@@ -211,7 +226,7 @@
   - Linux x86_64 native tests
   - macOS arm64 native tests
   - WASM build verification
-- [ ] macOS universal binary (aarch64 + x86_64)
+- [x] macOS universal binary (aarch64 + x86_64) ✅ (Round 26)
 - [ ] Windows `.dll` build
 - [ ] iOS/Android static embedding guide
 - [ ] **npm package updates for Zig-built extensions** — High priority for release
@@ -249,7 +264,7 @@ The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
 
 ### Medium Priority
 3. ~~`crsql_fract_as_ordered`~~ — ✅ DONE (Round 21)
-4. macOS universal binary (approach documented, ready to implement)
+4. ~~macOS universal binary~~ — ✅ DONE (Round 26)
 5. Windows `.dll` build
 6. ~~Statement cache integration into hot paths~~ — ✅ DONE (Round 22-23)
 7. ~~Wire `TableMergeStmts` into changes_vtab write path~~ — ✅ DONE (Round 23)
