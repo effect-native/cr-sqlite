@@ -182,10 +182,165 @@ fn dropTriggers(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
 }
 
+/// Detect if primary key columns have changed between the table schema and the pks index.
+/// Returns true if there's any difference (column added/removed from PK).
+/// Reference: `core/rs/core/src/alter.rs` lines 49-71
+fn detectPkChanges(db: ?*api.sqlite3, table_name: [*:0]const u8) !bool {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    // First check if the pks index exists. If it doesn't, we can't detect PK changes.
+    // This happens when the table was created with crsql_as_crr before the index was added.
+    const check_sql = std.fmt.bufPrintZ(&buf,
+        \\SELECT count(*) FROM sqlite_master WHERE type='index' AND name='{s}__crsql_pks_pks'
+    , .{table_name}) catch return error.BufferOverflow;
+
+    var check_stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, check_sql, -1, &check_stmt, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(check_stmt);
+
+    if (api.step(check_stmt) != api.SQLITE_ROW) {
+        return error.SqliteError;
+    }
+
+    const index_exists = api.column_int64(check_stmt, 0) > 0;
+    if (!index_exists) {
+        // Index doesn't exist, can't detect PK changes - assume no change
+        return false;
+    }
+
+    // Query to detect PK column differences:
+    // 1. Find PK columns in table that are NOT in the pks index
+    // 2. UNION with columns in pks index that are NOT table PKs (excluding 'col_name')
+    // If count > 0, PKs have changed
+    const sql = std.fmt.bufPrintZ(&buf,
+        \\SELECT count(name) FROM (
+        \\  SELECT name FROM pragma_table_info('{s}')
+        \\    WHERE pk > 0 AND name NOT IN
+        \\      (SELECT name FROM pragma_index_info('{s}__crsql_pks_pks'))
+        \\  UNION SELECT name FROM pragma_index_info('{s}__crsql_pks_pks') WHERE name NOT IN
+        \\    (SELECT name FROM pragma_table_info('{s}') WHERE pk > 0) AND name != 'col_name'
+        \\)
+    , .{ table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    if (api.step(stmt) != api.SQLITE_ROW) {
+        return error.SqliteError;
+    }
+
+    const pk_diff = api.column_int64(stmt, 0);
+    return pk_diff > 0;
+}
+
+/// Drop and recreate clock and pks tables when PK columns have changed.
+/// Reference: `core/rs/core/src/alter.rs` lines 65-71
+fn recreateClockAndPksTables(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    // Drop clock table
+    var sql = std.fmt.bufPrintZ(&buf, "DROP TABLE \"{s}__crsql_clock\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Drop pks table
+    sql = std.fmt.bufPrintZ(&buf, "DROP TABLE \"{s}__crsql_pks\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Recreate clock table
+    sql = std.fmt.bufPrintZ(&buf,
+        \\CREATE TABLE IF NOT EXISTS "{s}__crsql_clock" (
+        \\  "pk" INTEGER NOT NULL,
+        \\  "col_name" TEXT NOT NULL,
+        \\  "col_version" INTEGER NOT NULL,
+        \\  "db_version" INTEGER NOT NULL,
+        \\  "site_id" INTEGER NOT NULL DEFAULT 0,
+        \\  "seq" INTEGER NOT NULL,
+        \\  PRIMARY KEY ("pk", "col_name")
+        \\) WITHOUT ROWID
+    , .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Recreate pks table with index on PK columns
+    // The pks table needs an index named {table}__crsql_pks_pks on the PK columns
+    sql = std.fmt.bufPrintZ(&buf,
+        \\CREATE TABLE IF NOT EXISTS "{s}__crsql_pks" (
+        \\  "pk" INTEGER PRIMARY KEY,
+        \\  "pks" BLOB NOT NULL
+        \\)
+    , .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Create the pks index on the PK columns from the main table
+    // This index is what detectPkChanges compares against
+    const info = try getTableInfo(db, table_name);
+
+    // Build the index creation SQL with PK columns
+    var idx_buf: [SQL_BUF_SIZE]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&idx_buf);
+    const writer = fbs.writer();
+
+    writer.print("CREATE UNIQUE INDEX IF NOT EXISTS \"{s}__crsql_pks_pks\" ON \"{s}__crsql_pks\" (", .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Add PK columns in order
+    var pk_written: usize = 0;
+    var pk_order: usize = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")") catch return error.BufferOverflow;
+
+    const idx_len = fbs.pos;
+    if (idx_len >= SQL_BUF_SIZE) {
+        return error.BufferOverflow;
+    }
+    idx_buf[idx_len] = 0;
+
+    const idx_sql: [*:0]const u8 = @ptrCast(&idx_buf);
+    if (api.exec(db, idx_sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+}
+
 /// Clean up clock entries for columns that no longer exist after ALTER TABLE.
 /// Reference: `core/rs/core/src/alter.rs` compact_post_alter
 fn compactPostAlter(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    // First check if primary key columns have changed
+    // If so, we need to drop and recreate the clock and pks tables
+    const pk_changed = detectPkChanges(db, table_name) catch false;
+    if (pk_changed) {
+        try recreateClockAndPksTables(db, table_name);
+        // After recreating tables, no need to clean up old entries - tables are fresh
+        // But still need to save pre_compact_dbversion
+        try savePreCompactDbVersion(db);
+        return;
+    }
 
     // Delete clock entries for columns that no longer exist in the table
     // Keep the sentinel row (col_name = '-1') as it tracks row existence
@@ -198,6 +353,87 @@ fn compactPostAlter(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
         return error.SqliteError;
     }
+
+    // Delete orphaned clock entries (rows deleted from base table)
+    // but preserve tombstones (sentinel rows with even col_version)
+    try deleteOrphanedClockEntries(db, table_name);
+
+    // Delete orphaned PK lookasides that no longer map to anything in the clock table
+    try deleteOrphanedPkLookasides(db, table_name);
+
+    // Save pre_compact_dbversion to ensure db_version doesn't go backwards after compaction
+    try savePreCompactDbVersion(db);
+}
+
+/// Delete clock entries that no longer have corresponding rows in the base table,
+/// BUT preserve tombstones (sentinel rows with even col_version).
+/// Reference: `core/rs/core/src/alter.rs` lines 89-131
+fn deleteOrphanedClockEntries(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    // Delete clock entries where:
+    //   - col_name != '-1' (not a sentinel), OR
+    //   - col_name = '-1' AND col_version is odd (not a tombstone, since even = deleted)
+    // AND there's no corresponding row in the base table (checked via rowid)
+    //
+    // The pk column in __crsql_clock stores the rowid of the base table row.
+    // We check if that rowid still exists in the base table.
+    const sql = std.fmt.bufPrintZ(&buf,
+        \\DELETE FROM "{s}__crsql_clock" 
+        \\WHERE (col_name != '-1' OR (col_name = '-1' AND col_version % 2 != 0))
+        \\  AND pk NOT IN (SELECT rowid FROM "{s}")
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+}
+
+/// Delete PK lookaside entries that no longer have corresponding clock entries.
+/// Reference: `core/rs/core/src/alter.rs` lines 134-140
+fn deleteOrphanedPkLookasides(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    const sql = std.fmt.bufPrintZ(&buf,
+        \\DELETE FROM "{s}__crsql_pks" WHERE pk NOT IN (
+        \\  SELECT pk FROM "{s}__crsql_clock"
+        \\)
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+}
+
+/// Save the current db_version to crsql_master as pre_compact_dbversion.
+/// This ensures that after compaction (which may delete clock entries),
+/// the db_version doesn't regress below this floor.
+/// Reference: `core/rs/core/src/alter.rs` lines 143-148
+fn savePreCompactDbVersion(db: ?*api.sqlite3) !void {
+    // Get current db_version
+    const get_version_sql = "SELECT crsql_db_version()";
+    var get_stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, get_version_sql, -1, &get_stmt, null);
+    if (rc != api.SQLITE_OK) return error.SqliteError;
+    defer _ = api.finalize(get_stmt);
+
+    rc = api.step(get_stmt);
+    if (rc != api.SQLITE_ROW) return error.SqliteError;
+
+    const current_db_version = api.column_int64(get_stmt, 0);
+
+    // Insert or replace into crsql_master
+    const insert_sql = "INSERT OR REPLACE INTO crsql_master (key, value) VALUES ('pre_compact_dbversion', ?)";
+    var insert_stmt: ?*api.sqlite3_stmt = null;
+    rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
+    if (rc != api.SQLITE_OK) return error.SqliteError;
+    defer _ = api.finalize(insert_stmt);
+
+    rc = api.bind_int64(insert_stmt, 1, current_db_version);
+    if (rc != api.SQLITE_OK) return error.SqliteError;
+
+    rc = api.step(insert_stmt);
+    if (rc != api.SQLITE_DONE and rc != api.SQLITE_ROW) return error.SqliteError;
 }
 
 /// Backfill clock entries for columns that exist in the table but not in the clock table.
@@ -573,4 +809,20 @@ test "compactPostAlter generates valid SQL" {
     , .{ "test_table", "test_table" }) catch unreachable;
     try std.testing.expect(std.mem.indexOf(u8, sql, "test_table__crsql_clock") != null);
     try std.testing.expect(std.mem.indexOf(u8, sql, "pragma_table_info") != null);
+}
+
+test "detectPkChanges generates valid SQL" {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf,
+        \\SELECT count(name) FROM (
+        \\  SELECT name FROM pragma_table_info('{s}')
+        \\    WHERE pk > 0 AND name NOT IN
+        \\      (SELECT name FROM pragma_index_info('{s}__crsql_pks_pks'))
+        \\  UNION SELECT name FROM pragma_index_info('{s}__crsql_pks_pks') WHERE name NOT IN
+        \\    (SELECT name FROM pragma_table_info('{s}') WHERE pk > 0) AND name != 'col_name'
+        \\)
+    , .{ "test_table", "test_table", "test_table", "test_table" }) catch unreachable;
+    try std.testing.expect(std.mem.indexOf(u8, sql, "pragma_table_info") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sql, "pragma_index_info") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sql, "test_table__crsql_pks_pks") != null);
 }
