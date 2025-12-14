@@ -1,8 +1,3 @@
-// src/shared/constants.ts
-var LOCK_PREFIX = "crsqlite:";
-var PROVIDER_LOCK = (dbName) => `${LOCK_PREFIX}provider:${dbName}`;
-var DEFAULT_DB_NAME = "default";
-
 // src/coordinator/shared-worker.ts
 var clients = /* @__PURE__ */ new Map();
 var currentProviderId = null;
@@ -29,7 +24,7 @@ self.onconnect = (event) => {
   console.log("[SharedWorker] Sent connected message to", clientId);
   tryBecomeProvider(clientId);
 };
-async function tryBecomeProvider(clientId) {
+function tryBecomeProvider(clientId) {
   const client = clients.get(clientId);
   if (!client) return;
   if (currentProviderId) {
@@ -42,23 +37,8 @@ async function tryBecomeProvider(clientId) {
     client.port.postMessage(notification);
     return;
   }
-  try {
-    await navigator.locks.request(
-      PROVIDER_LOCK(DEFAULT_DB_NAME),
-      { mode: "exclusive", ifAvailable: true },
-      async (lock) => {
-        if (lock) {
-          electProvider(clientId);
-          await new Promise(() => {
-          });
-        } else {
-          console.log("[SharedWorker] Lock not available for", clientId, ", waiting for provider...");
-        }
-      }
-    );
-  } catch (e) {
-    console.error("[SharedWorker] Lock request failed:", e);
-  }
+  console.log("[SharedWorker] Telling client to try becoming provider:", clientId);
+  client.port.postMessage({ type: "try-become-provider" });
 }
 function electProvider(clientId) {
   const client = clients.get(clientId);
@@ -85,6 +65,16 @@ function processPendingRequests() {
   }
 }
 function handleClientMessage(clientId, msg) {
+  if ("type" in msg && msg.type === "disconnect") {
+    console.log("[SharedWorker] Received disconnect message from", clientId);
+    handleClientDisconnect(clientId);
+    return;
+  }
+  if ("type" in msg && msg.type === "became-provider") {
+    console.log("[SharedWorker] Client became provider:", clientId);
+    electProvider(clientId);
+    return;
+  }
   if ("type" in msg && msg.type === "forward-response") {
     handleProviderResponse(msg);
     return;

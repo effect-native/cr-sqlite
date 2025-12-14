@@ -93,13 +93,14 @@ self.onconnect = (event: MessageEvent) => {
 };
 
 /**
- * Attempt to make a client the database provider using Web Locks
- *
- * Uses Web Locks API with ifAvailable to attempt non-blocking lock acquisition.
- * If the lock is acquired, this client becomes the provider and holds the lock
- * indefinitely (until tab closes).
+ * Tell a client to attempt to become the database provider.
+ * 
+ * The client will try to acquire the Web Lock. If successful, it will
+ * send a 'became-provider' message back to us. This ensures the lock
+ * is held by the client tab (not the SharedWorker), so when the tab
+ * closes, the lock is automatically released.
  */
-async function tryBecomeProvider(clientId: ClientId): Promise<void> {
+function tryBecomeProvider(clientId: ClientId): void {
   const client = clients.get(clientId);
   if (!client) return;
 
@@ -115,30 +116,9 @@ async function tryBecomeProvider(clientId: ClientId): Promise<void> {
     return;
   }
 
-  try {
-    await navigator.locks.request(
-      PROVIDER_LOCK(DEFAULT_DB_NAME),
-      { mode: 'exclusive', ifAvailable: true },
-      async (lock) => {
-        if (lock) {
-          // Lock acquired - this client becomes the provider
-          electProvider(clientId);
-
-          // Hold lock forever by never resolving
-          // Lock is automatically released when tab closes
-          await new Promise<void>(() => {
-            // Never resolves - holds lock until tab disconnects
-          });
-        } else {
-          // Lock not available - another client is trying to become provider
-          // This can happen during a race condition. Wait a bit and check again.
-          console.log('[SharedWorker] Lock not available for', clientId, ', waiting for provider...');
-        }
-      }
-    );
-  } catch (e) {
-    console.error('[SharedWorker] Lock request failed:', e);
-  }
+  // Tell client to try to acquire the lock
+  console.log('[SharedWorker] Telling client to try becoming provider:', clientId);
+  client.port.postMessage({ type: 'try-become-provider' });
 }
 
 /**
@@ -181,13 +161,37 @@ function processPendingRequests(): void {
   }
 }
 
+/** Message sent by client when tab is closing */
+interface DisconnectMessage {
+  type: 'disconnect';
+}
+
+/** Message sent by client when it acquires the provider lock */
+interface BecameProviderMessage {
+  type: 'became-provider';
+}
+
 /**
  * Handle messages from connected clients
  */
 function handleClientMessage(
   clientId: ClientId,
-  msg: RpcRequest | ForwardResponseMessage
+  msg: RpcRequest | ForwardResponseMessage | DisconnectMessage | BecameProviderMessage
 ): void {
+  // Check if this is an explicit disconnect message
+  if ('type' in msg && msg.type === 'disconnect') {
+    console.log('[SharedWorker] Received disconnect message from', clientId);
+    handleClientDisconnect(clientId);
+    return;
+  }
+
+  // Check if this client became the provider
+  if ('type' in msg && msg.type === 'became-provider') {
+    console.log('[SharedWorker] Client became provider:', clientId);
+    electProvider(clientId);
+    return;
+  }
+
   // Check if this is a response from the provider
   if ('type' in msg && msg.type === 'forward-response') {
     handleProviderResponse(msg as ForwardResponseMessage);

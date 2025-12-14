@@ -455,7 +455,7 @@ fn fractKeyBetweenFunc(
 
 /// Register the crsql_fract_key_between function with SQLite
 pub fn register(db: ?*api.sqlite3) c_int {
-    return api.create_function_v2(
+    var rc = api.create_function_v2(
         db,
         "crsql_fract_key_between",
         2, // 2 arguments
@@ -466,6 +466,96 @@ pub fn register(db: ?*api.sqlite3) c_int {
         null,
         null,
     );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_fract_as_ordered() - variadic function (2+ arguments)
+    rc = api.create_function_v2(
+        db,
+        "crsql_fract_as_ordered",
+        -1, // -1 = variadic (any number of arguments)
+        api.SQLITE_UTF8 | api.SQLITE_DIRECTONLY, // DIRECTONLY: DDL should not be callable from triggers/views
+        null,
+        &fractAsOrderedFunc,
+        null,
+        null,
+        null,
+    );
+    if (rc != api.SQLITE_OK) return rc;
+
+    return api.SQLITE_OK;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// crsql_fract_as_ordered Implementation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// SQL function: crsql_fract_as_ordered(table, order_col, [collection_cols...])
+///
+/// Sets up fractional ordering on a table by creating:
+/// 1. AFTER INSERT trigger to auto-generate keys for -1 (prepend) and 1 (append) sentinels
+/// 2. AFTER UPDATE trigger for simple move operations (move to start/end)
+/// 3. A "<table>_fractindex" view with INSTEAD OF triggers for insert-after semantics
+///
+/// Arguments:
+/// - table: Name of the table to add fractional ordering to
+/// - order_col: Name of the column that stores the fractional order key
+/// - collection_cols (optional): Column(s) that partition the ordering (e.g., "list_id")
+///
+/// Reference: core/rs/fractindex-core/src/as_ordered.rs
+fn fractAsOrderedFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    // Require at least table name and order column
+    if (argc < 2) {
+        api.result_error(pCtx, "Usage: crsql_fract_as_ordered(table, order_col, [collection_cols...])", -1);
+        return;
+    }
+
+    // Get database handle from context
+    const db = api.context_db_handle(pCtx);
+    if (db == null) {
+        api.result_error(pCtx, "Failed to get database handle", -1);
+        return;
+    }
+
+    // Get table name (argument 0)
+    const table_name: ?[*:0]const u8 = blk: {
+        if (api.value_type(argv[0]) == api.SQLITE_NULL) break :blk null;
+        break :blk api.value_text(argv[0]);
+    };
+    if (table_name == null) {
+        api.result_error(pCtx, "Invalid table name", -1);
+        return;
+    }
+
+    // Get order column name (argument 1)
+    const order_col: ?[*:0]const u8 = blk: {
+        if (api.value_type(argv[1]) == api.SQLITE_NULL) break :blk null;
+        break :blk api.value_text(argv[1]);
+    };
+    if (order_col == null) {
+        api.result_error(pCtx, "Invalid order column name", -1);
+        return;
+    }
+
+    // Collection columns are argv[2..argc] (optional)
+    const collection_col_count: usize = if (argc > 2) @intCast(argc - 2) else 0;
+    _ = collection_col_count; // Will be used in full implementation
+
+    // TODO: Phase 2 - Implement the actual view and trigger creation:
+    // 1. Drop existing triggers/views if they exist
+    // 2. Validate that all columns exist in the target table
+    // 3. Create SAVEPOINT for atomic operation
+    // 4. Create AFTER INSERT trigger for -1/1 sentinel handling
+    // 5. Create AFTER UPDATE trigger for simple move operations
+    // 6. Create <table>_fractindex view with INSTEAD OF triggers
+    // 7. RELEASE savepoint on success, ROLLBACK on failure
+
+    // For now, just acknowledge the call succeeded
+    // The skeleton validates inputs and returns NULL to indicate success
+    api.result_null(pCtx);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

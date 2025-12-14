@@ -16,6 +16,7 @@ import {
   createErrorResponse,
   RPC_TIMEOUT_MS,
   SHARED_WORKER_PATH,
+  PROVIDER_LOCK,
 } from '../shared';
 
 export interface DbClientOptions {
@@ -47,6 +48,13 @@ export class DbClient {
     { clientId: string; requestId: RequestId }
   >();
 
+  // Track whether database has been opened (for failover recovery)
+  private databaseOpened = false;
+
+  // Provider polling interval (for detecting provider loss)
+  private providerPollInterval: ReturnType<typeof setInterval> | null = null;
+  private static readonly PROVIDER_POLL_INTERVAL_MS = 1000;
+
   readonly dbName: string;
 
   constructor(options: DbClientOptions) {
@@ -67,7 +75,18 @@ export class DbClient {
 
     this.port.onmessage = (event) => this.handleMessage(event.data);
     this.port.start();
+
+    // Register unload handler to notify SharedWorker when tab closes
+    this.handleBeforeUnload = () => {
+      console.log('[DbClient] Tab closing, sending disconnect message');
+      this.port?.postMessage({ type: 'disconnect' });
+    };
+    globalThis.addEventListener('beforeunload', this.handleBeforeUnload);
+    // Also use pagehide which is more reliable on mobile
+    globalThis.addEventListener('pagehide', this.handleBeforeUnload);
   }
+
+  private handleBeforeUnload: () => void = () => {};
 
   private handleMessage(msg: unknown) {
     const message = msg as {
@@ -93,8 +112,17 @@ export class DbClient {
         console.log('[DbClient] Provider elected. Am I provider?', this.isProvider);
         if (this.isProvider) {
           this.initializeProviderWorker();
+          this.stopProviderPolling();
+        } else {
+          // Start polling in case provider dies without sending disconnect
+          this.startProviderPolling();
         }
         this.resolveReady();
+        break;
+
+      case 'try-become-provider':
+        console.log('[DbClient] Asked to try becoming provider');
+        this.tryAcquireProviderLock();
         break;
 
       case 'forward-request':
@@ -122,6 +150,68 @@ export class DbClient {
   }
 
   /**
+   * Start polling for provider lock availability.
+   * This handles the case where the provider dies without sending a disconnect message.
+   */
+  private startProviderPolling() {
+    if (this.providerPollInterval) return; // Already polling
+
+    console.log('[DbClient] Starting provider polling');
+    this.providerPollInterval = setInterval(() => {
+      if (!this.isProvider) {
+        this.tryAcquireProviderLock();
+      }
+    }, DbClient.PROVIDER_POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Stop polling for provider lock availability.
+   */
+  private stopProviderPolling() {
+    if (this.providerPollInterval) {
+      console.log('[DbClient] Stopping provider polling');
+      clearInterval(this.providerPollInterval);
+      this.providerPollInterval = null;
+    }
+  }
+
+  /**
+   * Attempt to acquire the provider Web Lock.
+   * If successful, notify the coordinator that we are now the provider.
+   * The lock is held for the lifetime of the tab - when the tab closes,
+   * the browser automatically releases the lock.
+   */
+  private async tryAcquireProviderLock() {
+    const lockName = PROVIDER_LOCK(this.dbName);
+    console.log('[DbClient] Trying to acquire provider lock:', lockName);
+
+    try {
+      await navigator.locks.request(
+        lockName,
+        { mode: 'exclusive', ifAvailable: true },
+        async (lock) => {
+          if (lock) {
+            console.log('[DbClient] Acquired provider lock!');
+            // Notify SharedWorker that we are now the provider
+            this.port?.postMessage({ type: 'became-provider' });
+
+            // Hold the lock indefinitely by never resolving
+            // The lock is automatically released when the tab closes
+            await new Promise<void>(() => {
+              // Never resolves - holds lock until tab closes
+            });
+          } else {
+            console.log('[DbClient] Provider lock not available');
+            // Another tab already has the lock - we'll receive provider-elected message
+          }
+        }
+      );
+    } catch (e) {
+      console.error('[DbClient] Failed to acquire provider lock:', e);
+    }
+  }
+
+  /**
    * Initialize the dedicated worker for database operations (provider only)
    */
   private initializeProviderWorker() {
@@ -136,6 +226,21 @@ export class DbClient {
     this.providerWorker.onerror = (error) => {
       console.error('[DbClient] Provider worker error:', error);
     };
+
+    // If database was previously opened, re-open it for failover recovery
+    // This ensures the new provider can serve queries immediately
+    if (this.databaseOpened) {
+      console.log('[DbClient] Re-opening database after failover:', this.dbName);
+      // Need to wait for worker to be ready before sending open request
+      // Use a small delay to ensure worker message handler is set up
+      setTimeout(() => {
+        this.sendRequestToLocalWorker(
+          createRequest('open', crypto.randomUUID(), { dbName: this.dbName })
+        ).catch((e) => {
+          console.error('[DbClient] Failed to re-open database after failover:', e);
+        });
+      }, 0);
+    }
   }
 
   /**
@@ -285,12 +390,14 @@ export class DbClient {
     await this.sendRequest(
       createRequest('open', crypto.randomUUID(), { dbName: this.dbName })
     );
+    this.databaseOpened = true;
   }
 
   async close(): Promise<void> {
     await this.sendRequest(
       createRequest('close', crypto.randomUUID(), { dbName: this.dbName })
     );
+    this.databaseOpened = false;
   }
 
   async exec(sql: string, bind?: unknown[]): Promise<{ changes: number }> {
@@ -313,6 +420,13 @@ export class DbClient {
   }
 
   disconnect() {
+    // Stop provider polling
+    this.stopProviderPolling();
+    // Remove unload listeners
+    globalThis.removeEventListener('beforeunload', this.handleBeforeUnload);
+    globalThis.removeEventListener('pagehide', this.handleBeforeUnload);
+    // Notify SharedWorker
+    this.port?.postMessage({ type: 'disconnect' });
     this.port?.close();
     this.worker = null;
     this.port = null;
