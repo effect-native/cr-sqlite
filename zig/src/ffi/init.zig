@@ -7,6 +7,8 @@
 
 const std = @import("std");
 const api = @import("api.zig");
+const as_crr = @import("../as_crr.zig");
+const changes_vtab = @import("../changes_vtab.zig");
 
 /// CR-SQLite Zig implementation version string.
 /// This is returned by the `crsql_zig_version()` SQL function.
@@ -24,7 +26,6 @@ fn crsqlZigVersionFunc(
 }
 
 /// Register all CR-SQLite functions with the database connection.
-/// Currently only registers the test function `crsql_zig_version`.
 fn registerFunctions(db: ?*api.sqlite3) c_int {
     // Register crsql_zig_version() - a 0-argument scalar function
     const rc = api.create_function_v2(

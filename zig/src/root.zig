@@ -5,6 +5,7 @@
 
 pub const codec = @import("codec.zig");
 pub const ffi = @import("ffi/root.zig");
+pub const changes_vtab = @import("changes_vtab.zig");
 pub const sqlite = struct {
     /// Writable virtual table infrastructure
     pub const vtab = @import("sqlite/vtab.zig");
@@ -31,4 +32,6 @@ test {
     _ = ffi;
     // Run all sqlite vtab tests
     _ = sqlite.vtab;
+    // Run changes_vtab tests
+    _ = changes_vtab;
 }
