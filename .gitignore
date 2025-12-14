@@ -12,3 +12,4 @@ build/
 tsconfig.tsbuildinfo
 .turbo/
 target/
+.zig-cache/
