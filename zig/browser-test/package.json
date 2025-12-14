@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node esbuild.config.mjs",
+    "build:watch": "node esbuild.config.mjs --watch",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",
+    "esbuild": "^0.24.0",
     "serve": "^14.2.0",
     "typescript": "^5.3.0"
   },

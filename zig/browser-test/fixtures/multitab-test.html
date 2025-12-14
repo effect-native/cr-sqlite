@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CR-SQLite Multi-tab Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    #status { padding: 10px; margin: 10px 0; border: 1px solid #ccc; }
+    .connected { background: #dfd; }
+    .provider { background: #ffd; }
+    .error { background: #fdd; }
+    pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>CR-SQLite Multi-tab Test</h1>
+  
+  <div id="status">Initializing...</div>
+  
+  <div>
+    <strong>Client ID:</strong> <span id="clientId">-</span><br>
+    <strong>Is Provider:</strong> <span id="isProvider">-</span><br>
+  </div>
+  
+  <h2>Query Test</h2>
+  <input type="text" id="sql" value="SELECT sqlite_version()" style="width: 300px">
+  <button id="runQuery">Run</button>
+  <pre id="result"></pre>
+
+  <!-- Load sql.js first -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+  
+  <!-- Load our CR-SQLite WASM -->
+  <script src="sql-wasm.js"></script>
+  
+  <!-- Load multi-tab client -->
+  <script type="module">
+    import { createDbClient } from './crsql-multitab.js';
+    
+    const statusEl = document.getElementById('status');
+    const clientIdEl = document.getElementById('clientId');
+    const isProviderEl = document.getElementById('isProvider');
+    const resultEl = document.getElementById('result');
+    
+    function setStatus(text, className) {
+      statusEl.textContent = text;
+      statusEl.className = className || '';
+    }
+    
+    try {
+      setStatus('Connecting to coordinator...');
+      
+      // Create database client
+      const client = createDbClient({ 
+        dbName: 'test.db',
+        coordinatorUrl: './coordinator.js'
+      });
+      
+      // Expose to window for Playwright tests
+      window.dbClient = client;
+      
+      // Wait for ready
+      await client.ready;
+      
+      clientIdEl.textContent = client.clientId || 'unknown';
+      isProviderEl.textContent = client.isDbProvider ? 'YES' : 'no';
+      
+      if (client.isDbProvider) {
+        setStatus('Connected (PROVIDER)', 'connected provider');
+      } else {
+        setStatus('Connected (client)', 'connected');
+      }
+      
+      // Open database
+      await client.open();
+      
+      // Setup query button
+      document.getElementById('runQuery').onclick = async () => {
+        const sql = document.getElementById('sql').value;
+        try {
+          const result = await client.query(sql);
+          resultEl.textContent = JSON.stringify(result, null, 2);
+        } catch (e) {
+          resultEl.textContent = 'Error: ' + e.message;
+        }
+      };
+      
+    } catch (e) {
+      setStatus('Error: ' + e.message, 'error');
+      console.error(e);
+    }
+  </script>
+</body>
+</html>

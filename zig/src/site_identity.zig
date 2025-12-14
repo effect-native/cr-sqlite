@@ -17,6 +17,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const api = @import("ffi/api.zig");
+const stmt_cache = @import("stmt_cache.zig");
 
 /// Table and index names for site_id storage
 const TBL_SITE_ID = "crsql_site_id";
@@ -214,6 +215,59 @@ pub fn getOrCreateSiteOrdinal(db: ?*api.sqlite3, site_id_blob: []const u8) ?i64 
     rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
     if (rc != api.SQLITE_OK) return null;
     defer _ = api.finalize(insert_stmt);
+
+    rc = api.bind_blob(insert_stmt, 1, site_id_blob.ptr, 16, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return null;
+
+    rc = api.step(insert_stmt);
+    if (rc == api.SQLITE_ROW) {
+        return api.column_int64(insert_stmt, 0);
+    }
+    return null;
+}
+
+/// Get or create ordinal for a site_id blob using cached statements.
+/// 
+/// Performance: Avoids re-preparing statements on every call by using
+/// the StmtCache's pre-cached `select_site_ordinal` and `insert_site_ordinal`.
+/// This is significantly faster for merge operations that process many changes.
+///
+/// Local site (matching global_site_id) is always ordinal 0 (fast path).
+/// Remote sites get ordinals on demand via INSERT...RETURNING.
+pub fn getOrCreateSiteOrdinalCached(
+    cache: *stmt_cache.StmtCache,
+    site_id_blob: []const u8,
+) !?i64 {
+    if (cache.db == null or site_id_blob.len != 16) return null;
+
+    // Fast path: local site is always ordinal 0
+    if (std.mem.eql(u8, site_id_blob, &global_site_id)) {
+        return 0;
+    }
+
+    // Try to find existing ordinal using cached statement
+    const select_stmt = try stmt_cache.prepareOnce(
+        cache.db,
+        "SELECT ordinal FROM \"crsql_site_id\" WHERE site_id = ?",
+        &cache.select_site_ordinal,
+    );
+    defer stmt_cache.resetStmt(select_stmt);
+
+    var rc = api.bind_blob(select_stmt, 1, site_id_blob.ptr, 16, api.SQLITE_STATIC);
+    if (rc != api.SQLITE_OK) return null;
+
+    rc = api.step(select_stmt);
+    if (rc == api.SQLITE_ROW) {
+        return api.column_int64(select_stmt, 0);
+    }
+
+    // Not found - insert new entry using cached statement
+    const insert_stmt = try stmt_cache.prepareOnce(
+        cache.db,
+        "INSERT INTO \"crsql_site_id\" (site_id) VALUES (?) RETURNING ordinal",
+        &cache.insert_site_ordinal,
+    );
+    defer stmt_cache.resetStmt(insert_stmt);
 
     rc = api.bind_blob(insert_stmt, 1, site_id_blob.ptr, 16, api.SQLITE_STATIC);
     if (rc != api.SQLITE_OK) return null;
