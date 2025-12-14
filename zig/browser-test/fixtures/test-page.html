@@ -27,12 +27,12 @@
       console.log(msg);
     }
 
-    // Initialize sql.js
-    async function initSqlJs() {
+    // Initialize database (using global initSqlJs from sql.js library)
+    async function initDatabase() {
       try {
         document.getElementById('status').textContent = 'Initializing sql.js...';
         
-        // Initialize sql.js with WASM
+        // Initialize sql.js with WASM (initSqlJs is global from sql-wasm.js)
         const SQL = await initSqlJs({
           locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
         });
@@ -63,7 +63,7 @@
     }
 
     // Start initialization
-    initSqlJs();
+    initDatabase();
   </script>
 </body>
 </html>
