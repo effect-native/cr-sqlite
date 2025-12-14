@@ -18,3 +18,12 @@
 [submodule ".refs/sqlite"]
 	path = .refs/sqlite
 	url = git@github.com:mackyle/sqlite.git
+[submodule ".refs/solid_queue"]
+	path = .refs/solid_queue
+	url = git@github.com:rails/solid_queue.git
+[submodule ".refs/solid_cache"]
+	path = .refs/solid_cache
+	url = git@github.com:rails/solid_cache.git
+[submodule ".refs/solid_cable"]
+	path = .refs/solid_cable
+	url = git@github.com:rails/solid_cable.git
