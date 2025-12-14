@@ -10,7 +10,8 @@
 #   make help         - Show this help
 
 .PHONY: all test test-unit test-parity test-browser build clean help \
-        _test-unit _test-parity _test-browser dist
+        _test-unit _test-parity _test-browser dist \
+        universal build-arm64 build-x64
 
 # ANSI colors for output
 CYAN := \033[36m
@@ -27,6 +28,29 @@ all: test
 build:
 	@echo "$(CYAN)$(BOLD)Building Zig extension...$(RESET)"
 	@nix run nixpkgs#zig -- build
+
+# Build aarch64 (ARM64) macOS target
+build-arm64:
+	@echo "$(CYAN)$(BOLD)Building aarch64-macos...$(RESET)"
+	@nix run nixpkgs#zig -- build -Dtarget=aarch64-macos --prefix zig-out-arm64
+	@echo "$(GREEN)Built: zig-out-arm64/lib/libcrsqlite.dylib$(RESET)"
+
+# Build x86_64 (Intel) macOS target
+build-x64:
+	@echo "$(CYAN)$(BOLD)Building x86_64-macos...$(RESET)"
+	@nix run nixpkgs#zig -- build -Dtarget=x86_64-macos --prefix zig-out-x64
+	@echo "$(GREEN)Built: zig-out-x64/lib/libcrsqlite.dylib$(RESET)"
+
+# Build macOS universal binary (aarch64 + x86_64)
+universal: build-arm64 build-x64
+	@echo "$(CYAN)$(BOLD)Creating universal binary...$(RESET)"
+	@mkdir -p zig-out-universal/lib
+	@lipo -create \
+		zig-out-arm64/lib/libcrsqlite.dylib \
+		zig-out-x64/lib/libcrsqlite.dylib \
+		-output zig-out-universal/lib/libcrsqlite.dylib
+	@echo "$(GREEN)$(BOLD)Universal binary created: zig-out-universal/lib/libcrsqlite.dylib$(RESET)"
+	@lipo -info zig-out-universal/lib/libcrsqlite.dylib
 
 # Zig unit tests
 test-unit: build
@@ -175,7 +199,7 @@ dist:
 # Clean build artifacts
 clean:
 	@echo "$(CYAN)Cleaning build artifacts...$(RESET)"
-	@rm -rf zig-out .zig-cache
+	@rm -rf zig-out zig-out-arm64 zig-out-x64 zig-out-universal .zig-cache
 	@rm -rf browser-test/node_modules
 	@rm -f ../.tmp/test-*.log ../.tmp/test-*.exit
 	@echo "$(GREEN)Clean complete$(RESET)"
@@ -192,6 +216,9 @@ help:
 	@echo ""
 	@echo "$(BOLD)Build Targets:$(RESET)"
 	@echo "  $(CYAN)make build$(RESET)        - Build the Zig extension"
+	@echo "  $(CYAN)make universal$(RESET)    - Build macOS universal binary (aarch64 + x86_64)"
+	@echo "  $(CYAN)make build-arm64$(RESET)  - Build aarch64-macos only"
+	@echo "  $(CYAN)make build-x64$(RESET)    - Build x86_64-macos only"
 	@echo "  $(CYAN)make clean$(RESET)        - Clean build artifacts"
 	@echo ""
 	@echo "$(BOLD)Other:$(RESET)"

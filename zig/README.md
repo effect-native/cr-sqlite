@@ -4,13 +4,21 @@ A pure Zig port of [CR-SQLite](https://github.com/vlcn-io/cr-sqlite), providing 
 
 ## Status
 
+**MVP COMPLETE** — 154/154 tests passing (100%)
+
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Core replication | ✅ Complete | 44 parity tests pass |
-| Browser WASM | ✅ Complete | 10 tests pass via Playwright |
-| Multi-tab web | ✅ Infrastructure complete | SharedWorker coordination |
-| Fractional indexing | ✅ `crsql_fract_key_between` | Collaborative ordering |
-| C oracle tests | 🔄 Partial | 3/4 test suites pass |
+| Core replication | ✅ Complete | 52 parity tests pass |
+| Browser WASM | ✅ Complete | 18 tests pass via Playwright |
+| Multi-tab web | ✅ Complete | SharedWorker + OPFS + re-election |
+| Fractional indexing | ✅ Complete | All UDFs implemented |
+| C oracle tests | ✅ Complete | 20/20 pass (5 suites) |
+
+**Test Breakdown:**
+- Zig unit tests: 64/64
+- Shell parity tests: 52/52
+- Browser WASM tests: 18/18
+- C oracle harness: 20/20
 
 ### Implemented Functions
 
@@ -21,13 +29,20 @@ A pure Zig port of [CR-SQLite](https://github.com/vlcn-io/cr-sqlite), providing 
 - `crsql_is_crr(table)` - Check if table is a CRR
 - `crsql_rows_impacted()` - Rows changed in current transaction
 - `crsql_finalize()` - Cleanup before close
+- `crsql_begin_alter(table)` / `crsql_commit_alter(table)` - Schema migration workflow
 - `crsql_fract_key_between(a, b)` - Fractional index generation
+- `crsql_fract_as_ordered(table, order_col, ...)` - Ordered collection view + triggers
+- `crsql_fract_fix_conflict_return_old_key(...)` - Collision repair
 - `crsql_changes` - Virtual table for sync
 
 ### Known Limitations
 
-- `crsql_begin_alter` / `crsql_commit_alter` - Not yet implemented
-- Some edge cases in C oracle test suite still failing
+Post-MVP items not yet implemented:
+- Performance: `PRAGMA schema_version` caching, `SQLITE_PREPARE_PERSISTENT`
+- Web: Service Worker fallback (for environments without SharedWorker)
+- Web: Reactive query subscriptions in RPC interface
+- Packaging: Windows `.dll` build, iOS/Android static embedding guides
+- Packaging: macOS universal binary (aarch64 + x86_64)
 
 ## Build Instructions
 
@@ -201,4 +216,6 @@ cd zig && make test
 - [CR-SQLite Documentation](https://vlcn.io/docs/cr-sqlite/intro)
 - [Wire Format Spec](../research/zig-cr/09-storage-serialization.md)
 - [Merge Semantics](../research/zig-cr/05-conflict-resolution-semantics.md)
-- [C Test Oracle](../core/src/*.test.c)
+- [Test Oracle Strategy](../research/zig-cr/10-test-oracle.md) - Behavioral contract and acceptance criteria
+- [C Test Oracle Source](../core/src/*.test.c) - Authoritative test suite
+- [Gap Backlog](../research/zig-cr/92-gap-backlog.md) - Current status and remaining work
