@@ -73,20 +73,29 @@ This project is undergoing a major rewrite from C/Rust to Zig. The following wor
 
 ### "Update tasks" (Backlog Refresh Loop)
 
-When Tom says **"update tasks"**, he means: re-run the same backlog-refresh process that keeps `zig/`, `research/zig-cr/*`, `.tasks/`, and `.wishes/` in sync.
+When Tom says **"update tasks"**, he means: re-run the same backlog-refresh process that keeps `zig/`, `research/zig-cr/*`, `effect-native/`, `.tasks/`, and `.wishes/` in sync.
 
 **Input reality (what exists today):**
-- Implementation: `zig/`
-- Current gap ledger: `research/zig-cr/92-gap-backlog.md`
+- Zig implementation: `zig/`
+- Zig gap ledger: `research/zig-cr/92-gap-backlog.md`
+- TypeScript spec + packages (Effect Native):
+  - Specs: `effect-native/.specs/`
+  - Packages: `effect-native/packages-native/`
 - Work queue: `.tasks/backlog/`, `.tasks/active/`, `.tasks/done/`
 - Product-owner inbox: `.wishes/` (and `.wishes/blocked-on-tom/`)
+- Upstream reference context (read-only): `.refs/effect/`, `.refs/effect-smol/`
 
 **Procedure (do this in order):**
 1. Read all inbox wishes: list `.wishes/*.md` (not subdirs) and extract constraints/requests.
 2. Read task cards: list `.tasks/{active,backlog,done}/` and skim each card’s Description + Acceptance Criteria.
-3. Reconcile `zig/` vs `research/zig-cr/*`:
-   - Use `research/zig-cr/90-feature-matrix.md` and `research/zig-cr/93-phased-execution-proposal.md` as “what we intended”.
-   - Use the current `zig/` tree and test harnesses as “what we actually built”.
+3. Reconcile implementation vs specs/proposals:
+   - Zig vs research proposals:
+     - Use `research/zig-cr/90-feature-matrix.md` and `research/zig-cr/93-phased-execution-proposal.md` as “what we intended”.
+     - Use the current `zig/` tree + harnesses as “what we actually built”.
+   - Effect Native (TypeScript) vs its specs:
+     - Use `effect-native/.specs/` as “what we intended”.
+     - Use `effect-native/packages-native/` as “what we actually built”.
+   - Use `.refs/effect/packages/sql/` and `.refs/effect/packages/sql-sqlite-bun/` as upstream reference context when the work touches Effect SQL integration.
 4. Identify gaps as explicit backlog items:
    - If a gap is not already owned by a `.tasks/backlog/TASK-*.md`, create one.
    - Every task card must declare: Files to Modify, Acceptance Criteria, and links back to the parent docs.
@@ -113,7 +122,8 @@ When Tom says **"delegate work"**, he means: take a curated subset of `.tasks/ba
 - Orchestrator moves cards between folders (`backlog → active → done`).
 
 **Procedure:**
-1. Pick the highest-impact set of tasks that can run in parallel (disjoint file sets).
+1. **Consult the gap backlog first**: Read `research/zig-cr/92-gap-backlog.md` to understand the current state of the project, what's complete, and what gaps remain. This file contains the authoritative "Task map" showing what can run in parallel next.
+2. Pick the highest-impact set of tasks that can run in parallel (disjoint file sets).
 2. For each selected task:
    - Move `./.tasks/backlog/TASK-XXX-*.md` → `./.tasks/active/TASK-XXX-*.md`.
    - Launch a subagent with the task card as the *entire* prompt context.
