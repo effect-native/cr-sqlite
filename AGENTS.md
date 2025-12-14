@@ -59,6 +59,7 @@ When working on TypeScript code:
 1. Navigate to `effect-native/` directory
 2. Follow the spec-first workflow defined in `effect-native/.specs/AGENTS.md`
 3. Use the patterns and conventions documented in `effect-native/AGENTS.md`
+4. Keep changes in one feet/crsqlite long running branch; git push it regularly so that work is not lost
 
 Reference submodules for Effect ecosystem:
 - `.refs/effect` — Effect-TS core library
