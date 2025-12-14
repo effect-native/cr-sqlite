@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 10)
+> **Last Updated**: 2025-12-14 (Round 13)
 
 ## Status Summary
 
@@ -8,6 +8,37 @@
 - Native parity tests: 44/44 PASS
 - Browser WASM tests: 10/10 PASS
 - E2E sync tests: ALL PASS
+
+---
+
+## Recent Progress (Rounds 10-13)
+
+### Round 10: CI Infrastructure
+- ✅ GitHub Actions CI workflow (`.github/workflows/zig-tests.yaml`)
+- Automated native tests on Linux and macOS
+- WASM build verification
+
+### Round 11: Performance Infrastructure
+- ✅ Statement caching infrastructure (`zig/src/stmt_cache.zig`)
+- Generic cache with configurable capacity
+- Reset-on-schema-change support
+- Foundation for query optimization
+
+### Round 12: Multi-tab Web Architecture
+- ✅ SharedWorker coordinator (`zig/browser-test/src/SharedWorkerCoordinator.ts`)
+- ✅ Provider worker (`zig/browser-test/src/ProviderWorker.ts`)
+- ✅ DbClient interface (`zig/browser-test/src/DbClient.ts`)
+- ✅ Multi-tab test infrastructure (`zig/browser-test/tests/multi-tab.spec.ts`)
+- Web Locks for exclusive provider access
+- RPC interface (exec, query)
+- OPFS storage integration ready
+
+### Round 13: Oracle Validation Foundation
+- ✅ C oracle harness scaffolding (`zig/harness/c-oracle/`)
+- ✅ esbuild bundling configuration (`zig/browser-test/esbuild.config.mjs`)
+- Foundation for cross-validating Zig extension against C reference
+
+---
 
 ## Completed Items (Rounds 1-9)
 
@@ -35,9 +66,11 @@
 ### 1. Performance Optimizations
 **Source**: `research/zig-cr/11-performance-hotspots.md`
 **Priority**: Medium
-**Status**: Not started
+**Status**: Infrastructure complete, integration pending
 
-- [ ] Statement caching for frequently-used queries (union query, clock writes)
+- [x] Statement caching infrastructure (`zig/src/stmt_cache.zig`)
+- [ ] Integrate stmt_cache into union query generation
+- [ ] Integrate stmt_cache into clock writes
 - [ ] Schema version invalidation caching (`PRAGMA schema_version`)
 - [ ] `PRAGMA data_version` check amortization (per-transaction flag)
 - [ ] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`)
@@ -54,31 +87,37 @@
 ### 3. Multi-tab Web Architecture
 **Source**: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 **Priority**: High (for production web use)
-**Status**: Not started
+**Status**: Core infrastructure complete
 
-- [ ] SharedWorker coordinator for provider election
+- [x] SharedWorker coordinator for provider election (`zig/browser-test/src/SharedWorkerCoordinator.ts`)
+- [x] Web Locks for exclusive provider access
+- [x] RPC interface (exec, query) (`zig/browser-test/src/DbClient.ts`)
+- [x] Provider worker (`zig/browser-test/src/ProviderWorker.ts`)
+- [x] Browser test coverage for multi-tab scenarios (`zig/browser-test/tests/multi-tab.spec.ts`)
 - [ ] Service Worker fallback for environments without SharedWorker
-- [ ] Web Locks for exclusive provider access
-- [ ] RPC interface (exec, query, subscribe)
+- [ ] Subscribe/reactive queries in RPC interface
 - [ ] OPFS storage integration (`opfs-sahpool` VFS)
 - [ ] Provider migration safety (idempotent writes)
-- [ ] Browser test coverage for multi-tab scenarios
 
 ### 4. C Test Harness (Oracle Validation)
 **Source**: `research/zig-cr/10-test-oracle.md`
 **Priority**: Medium
-**Status**: Not started
+**Status**: Scaffolding complete
 
-- [ ] Build harness to load Zig `.so`/`.dylib` via `sqlite3_load_extension()`
+- [x] Build harness scaffolding (`zig/harness/c-oracle/`)
+- [ ] Load Zig `.so`/`.dylib` via `sqlite3_load_extension()` in harness
 - [ ] Run original C tests (`core/src/*.test.c`) against Zig extension
 - [ ] Validate byte-for-byte codec compatibility
 
 ### 5. Cross-platform Packaging & CI
 **Source**: `research/zig-cr/93-phased-execution-proposal.md` (Phase 7)
 **Priority**: Medium
-**Status**: Partial (local builds work)
+**Status**: CI complete, packaging pending
 
-- [ ] GitHub Actions CI for Zig extension (Linux x86_64/aarch64)
+- [x] GitHub Actions CI for Zig extension (`.github/workflows/zig-tests.yaml`)
+  - Linux x86_64 native tests
+  - macOS arm64 native tests
+  - WASM build verification
 - [ ] macOS universal binary (aarch64 + x86_64)
 - [ ] Windows `.dll` build
 - [ ] iOS/Android static embedding guide

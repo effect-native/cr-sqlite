@@ -61,7 +61,7 @@
       // Wait for ready
       await client.ready;
       
-      clientIdEl.textContent = client.clientId || 'unknown';
+      clientIdEl.textContent = client.id || 'unknown';
       isProviderEl.textContent = client.isDbProvider ? 'YES' : 'no';
       
       if (client.isDbProvider) {

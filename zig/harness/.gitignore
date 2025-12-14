@@ -1,0 +1,4 @@
+crsql-oracle-test
+*.dSYM
+test-is-crr
+test-e2e-sync

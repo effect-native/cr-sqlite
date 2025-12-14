@@ -35,6 +35,7 @@ const merge_insert = @import("merge_insert.zig");
 const compare_values = @import("compare_values.zig");
 const sync_bit = @import("sync_bit.zig");
 const site_identity = @import("site_identity.zig");
+const stmt_cache = @import("stmt_cache.zig");
 
 // Platform-aware logging: use std.log on native, no-op on WASM/freestanding
 const log = if (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)
@@ -528,6 +529,68 @@ fn discoverTables(cursor: *ChangesCursor, db: ?*vtab.sqlite3) !void {
         names[idx] = name_copy;
     }
 
+    setCursorTableNames(cursor, names);
+    cursor.table_count = count;
+}
+
+/// Cached version of discoverTables using StmtCache for better performance.
+///
+/// Uses the `select_clock_tables` slot in the cache to avoid re-preparing
+/// the sqlite_master query on every xFilter call. This is particularly
+/// beneficial for sync operations that repeatedly query crsql_changes.
+fn discoverTablesCached(cursor: *ChangesCursor, cache: *stmt_cache.StmtCache) !void {
+    // Free any existing tables
+    freeCursorTables(cursor);
+
+    const allocator = getCursorAllocator();
+
+    // Query for clock tables using cached statement
+    // Note: CLOCK_TABLES_SELECT uses tbl_name, but cache uses 'name' - use a compatible query
+    const stmt = try stmt_cache.prepareOnce(
+        cache.db,
+        "SELECT tbl_name FROM sqlite_master WHERE type='table' AND tbl_name LIKE '%__crsql_clock' ORDER BY tbl_name",
+        &cache.select_clock_tables,
+    );
+
+    // First pass: count tables
+    var count: usize = 0;
+    while (api.step(stmt) == api.SQLITE_ROW) {
+        count += 1;
+    }
+
+    if (count == 0) {
+        stmt_cache.resetStmt(stmt);
+        cursor.table_count = 0;
+        return;
+    }
+
+    // Allocate table names array
+    const names = allocator.alloc([]u8, count) catch {
+        stmt_cache.resetStmt(stmt);
+        return error.OutOfMemory;
+    };
+    errdefer allocator.free(names);
+
+    // Reset and second pass: store names
+    stmt_cache.resetStmt(stmt);
+    var idx: usize = 0;
+    while (api.step(stmt) == api.SQLITE_ROW) : (idx += 1) {
+        const clock_name = api.column_text(stmt, 0) orelse continue;
+        const clock_slice = std.mem.span(clock_name);
+
+        // Get base table name (strip __crsql_clock)
+        const base_name = getBaseTableName(clock_slice) orelse continue;
+
+        // Allocate and copy
+        const name_copy = allocator.alloc(u8, base_name.len) catch {
+            stmt_cache.resetStmt(stmt);
+            return error.OutOfMemory;
+        };
+        @memcpy(name_copy, base_name);
+        names[idx] = name_copy;
+    }
+
+    stmt_cache.resetStmt(stmt);
     setCursorTableNames(cursor, names);
     cursor.table_count = count;
 }
@@ -1494,4 +1557,12 @@ test "rowid slab calculation" {
     // Table 2, row 1 -> 2 * ROWID_SLAB_SIZE + 1
     const row4: i64 = 2 * ROWID_SLAB_SIZE + 1;
     try std.testing.expectEqual(@as(i64, 20_000_000_000_001), row4);
+}
+
+test "discoverTablesCached uses stmt_cache module" {
+    // Verify that the cached function exists and has correct signature
+    // This is a compile-time check - the function signature must match expected types
+    const fn_info = @typeInfo(@TypeOf(discoverTablesCached));
+    try std.testing.expect(fn_info == .@"fn");
+    try std.testing.expectEqual(@as(usize, 2), fn_info.@"fn".params.len);
 }

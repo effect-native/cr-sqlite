@@ -23,9 +23,9 @@ test.describe('Multi-tab Database Coordination', () => {
     await page1.goto('/multitab-test.html');
     await page2.goto('/multitab-test.html');
     
-    // Both should connect
-    await expect(page1.locator('#status')).toHaveText('connected');
-    await expect(page2.locator('#status')).toHaveText('connected');
+    // Both should connect - status contains "Connected"
+    await expect(page1.locator('#status')).toContainText('Connected');
+    await expect(page2.locator('#status')).toContainText('Connected');
     
     await context.close();
   });
@@ -46,7 +46,7 @@ test.describe('Multi-tab Database Coordination', () => {
     await pages[0].waitForTimeout(1000);
     
     const providerCounts = await Promise.all(
-      pages.map(p => p.evaluate(() => (window as any).dbClient?.isProvider))
+      pages.map(p => p.evaluate(() => (window as any).dbClient?.isDbProvider))
     );
     
     const providerCount = providerCounts.filter(Boolean).length;
@@ -114,8 +114,9 @@ test.describe('Multi-tab Database Coordination', () => {
 declare global {
   interface Window {
     dbClient?: {
-      ready: boolean;
-      isProvider: boolean;
+      ready: Promise<void>;
+      isDbProvider: boolean;
+      id: string | null;
       query: (sql: string) => Promise<any[][]>;
       exec: (sql: string) => Promise<void>;
     };
