@@ -22,12 +22,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const lib = b.addLibrary(.{
+    // Static library for embedding
+    const static_lib = b.addLibrary(.{
         .name = "crsql",
         .linkage = .static,
         .root_module = root_mod,
     });
-    b.installArtifact(lib);
+    b.installArtifact(static_lib);
+
+    // Shared library for loadable extension (.so/.dylib)
+    // This is the primary output for use as a SQLite loadable extension
+    const shared_lib = b.addLibrary(.{
+        .name = "crsqlite",
+        .linkage = .dynamic,
+        .root_module = root_mod,
+    });
+    b.installArtifact(shared_lib);
 
     const tests = b.addTest(.{
         .name = "crsql",
