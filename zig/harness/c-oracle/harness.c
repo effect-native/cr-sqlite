@@ -50,6 +50,7 @@ int crsql_close(sqlite3 *db) {
 extern void crsqlChangesVtabRowidTestSuite(void);
 extern void crsqlChangesVtabTestSuite(void);
 extern void rowsImpactedTestSuite(void);
+extern void crsqlTestSuite(void);
 
 #define SUITE(N) if (strcmp(suite, "all") == 0 || strcmp(suite, N) == 0)
 
@@ -72,6 +73,7 @@ int main(int argc, char *argv[]) {
     SUITE("rowid") crsqlChangesVtabRowidTestSuite();
     SUITE("vtab") crsqlChangesVtabTestSuite();
     SUITE("rows_impacted") rowsImpactedTestSuite();
+    SUITE("crsql") crsqlTestSuite();
     
     printf("\n=== Tests Complete ===\n");
     return 0;

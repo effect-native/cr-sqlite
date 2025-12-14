@@ -10,6 +10,7 @@ const api = @import("api.zig");
 const as_crr = @import("../as_crr.zig");
 const changes_vtab = @import("../changes_vtab.zig");
 const finalize = @import("../finalize.zig");
+const fract_index = @import("../fract_index.zig");
 const is_crr = @import("../is_crr.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
@@ -98,6 +99,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_begin_alter() and crsql_commit_alter() functions
     rc = schema_alter.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_fract_key_between() function
+    rc = fract_index.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

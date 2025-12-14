@@ -14,7 +14,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Multi-tab Database Coordination', () => {
   
-  test.skip('two tabs can connect to SharedWorker', async ({ browser }) => {
+  test('two tabs can connect to SharedWorker', async ({ browser }) => {
     // Skip until coordinator is bundled
     const context = await browser.newContext();
     const page1 = await context.newPage();
@@ -30,7 +30,7 @@ test.describe('Multi-tab Database Coordination', () => {
     await context.close();
   });
 
-  test.skip('exactly one tab becomes provider', async ({ browser }) => {
+  test('exactly one tab becomes provider', async ({ browser }) => {
     const context = await browser.newContext();
     const pages = await Promise.all([
       context.newPage(),
@@ -55,7 +55,7 @@ test.describe('Multi-tab Database Coordination', () => {
     await context.close();
   });
 
-  test.skip('non-provider tab can query through coordinator', async ({ browser }) => {
+  test('non-provider tab can query through coordinator', async ({ browser }) => {
     const context = await browser.newContext();
     const page1 = await context.newPage();
     const page2 = await context.newPage();
@@ -81,7 +81,7 @@ test.describe('Multi-tab Database Coordination', () => {
     await context.close();
   });
 
-  test.skip('write from one tab visible in another', async ({ browser }) => {
+  test('write from one tab visible in another', async ({ browser }) => {
     const context = await browser.newContext();
     const page1 = await context.newPage();
     const page2 = await context.newPage();

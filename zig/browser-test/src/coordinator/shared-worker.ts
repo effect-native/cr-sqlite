@@ -62,6 +62,7 @@ const pendingRequests: Array<{ clientId: ClientId; request: RpcRequest }> = [];
  * Handle new tab connections to the SharedWorker
  */
 self.onconnect = (event: MessageEvent) => {
+  console.log('[SharedWorker] New connection received');
   const port = event.ports[0];
   const clientId = crypto.randomUUID() as ClientId;
 
@@ -72,8 +73,12 @@ self.onconnect = (event: MessageEvent) => {
   };
 
   clients.set(clientId, connection);
+  console.log('[SharedWorker] Client registered:', clientId, 'Total clients:', clients.size);
 
-  port.onmessage = (msg: MessageEvent) => handleClientMessage(clientId, msg.data);
+  port.onmessage = (msg: MessageEvent) => {
+    console.log('[SharedWorker] Message from client', clientId, ':', msg.data?.type || msg.data);
+    handleClientMessage(clientId, msg.data);
+  };
   port.onmessageerror = () => handleClientDisconnect(clientId);
 
   port.start();
@@ -81,6 +86,7 @@ self.onconnect = (event: MessageEvent) => {
   // Notify client of their assigned ID
   const connectedMsg: ConnectedMessage = { type: 'connected', clientId };
   port.postMessage(connectedMsg);
+  console.log('[SharedWorker] Sent connected message to', clientId);
 
   // Attempt provider election for this client
   tryBecomeProvider(clientId);
@@ -97,6 +103,18 @@ async function tryBecomeProvider(clientId: ClientId): Promise<void> {
   const client = clients.get(clientId);
   if (!client) return;
 
+  // If there's already a provider, notify this client about it
+  if (currentProviderId) {
+    console.log('[SharedWorker] Provider already exists, notifying new client:', clientId);
+    const notification: ProviderElectedNotification = {
+      type: 'provider-elected',
+      providerId: currentProviderId,
+      isYou: false,
+    };
+    client.port.postMessage(notification);
+    return;
+  }
+
   try {
     await navigator.locks.request(
       PROVIDER_LOCK(DEFAULT_DB_NAME),
@@ -111,8 +129,11 @@ async function tryBecomeProvider(clientId: ClientId): Promise<void> {
           await new Promise<void>(() => {
             // Never resolves - holds lock until tab disconnects
           });
+        } else {
+          // Lock not available - another client is trying to become provider
+          // This can happen during a race condition. Wait a bit and check again.
+          console.log('[SharedWorker] Lock not available for', clientId, ', waiting for provider...');
         }
-        // If lock is null, another tab already has it
       }
     );
   } catch (e) {

@@ -14,6 +14,8 @@ import {
   createErrorResponse,
 } from '../shared/rpc-types';
 
+console.log('[ProviderWorker] Starting...');
+
 // SQLite WASM types (simplified)
 interface SqlJsDatabase {
   run(sql: string, params?: unknown[]): void;
@@ -25,8 +27,12 @@ interface SqlJs {
   Database: new () => SqlJsDatabase;
 }
 
+// Declare the initSqlJs function that will be loaded via importScripts
+declare function initSqlJs(config?: { locateFile?: (file: string) => string }): Promise<SqlJs>;
+
 let db: SqlJsDatabase | null = null;
 let sqlJs: SqlJs | null = null;
+let sqlJsLoadPromise: Promise<SqlJs> | null = null;
 
 // Request queue for serial execution
 const requestQueue: Array<{
@@ -36,9 +42,11 @@ const requestQueue: Array<{
 let processing = false;
 
 self.onmessage = async (event: MessageEvent<RpcRequest>) => {
+  console.log('[ProviderWorker] Received request:', event.data?.type);
   const request = event.data;
 
   const response = await enqueueRequest(request);
+  console.log('[ProviderWorker] Sending response:', response.type);
   self.postMessage(response);
 };
 
@@ -89,14 +97,46 @@ async function handleRequest(request: RpcRequest): Promise<unknown> {
   }
 }
 
+async function loadSqlJs(): Promise<SqlJs> {
+  if (sqlJsLoadPromise) return sqlJsLoadPromise;
+
+  sqlJsLoadPromise = (async () => {
+    // For module workers, we need to use dynamic import or fetch the script
+    // sql.js provides an ESM build, but it's tricky to load in a worker
+    // So we'll use a workaround: fetch and eval (not ideal but works)
+
+    let initFn = (self as any).initSqlJs;
+
+    if (!initFn) {
+      console.log('[ProviderWorker] Loading sql.js via fetch + eval...');
+      const response = await fetch(
+        'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js'
+      );
+      const scriptText = await response.text();
+      // Use indirect eval to run in global scope
+      (0, eval)(scriptText);
+      initFn = (self as any).initSqlJs;
+    }
+
+    if (!initFn) {
+      throw new Error('Failed to load sql.js');
+    }
+
+    console.log('[ProviderWorker] Initializing sql.js...');
+    const sql = await initFn({
+      locateFile: (file: string) =>
+        `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`,
+    });
+    console.log('[ProviderWorker] sql.js initialized successfully');
+    return sql;
+  })();
+
+  return sqlJsLoadPromise;
+}
+
 async function handleOpen(_dbName: string): Promise<{ success: true }> {
   if (!sqlJs) {
-    // Load sql.js - assumes initSqlJs is available globally via script tag
-    const initSqlJs = (self as any).initSqlJs;
-    if (!initSqlJs) {
-      throw new Error('sql.js not loaded');
-    }
-    sqlJs = await initSqlJs();
+    sqlJs = await loadSqlJs();
   }
 
   if (db) {
@@ -104,6 +144,7 @@ async function handleOpen(_dbName: string): Promise<{ success: true }> {
   }
 
   db = new sqlJs!.Database();
+  console.log('[ProviderWorker] Database opened');
   return { success: true };
 }
 

@@ -8,6 +8,7 @@ var clients = /* @__PURE__ */ new Map();
 var currentProviderId = null;
 var pendingRequests = [];
 self.onconnect = (event) => {
+  console.log("[SharedWorker] New connection received");
   const port = event.ports[0];
   const clientId = crypto.randomUUID();
   const connection = {
@@ -16,16 +17,31 @@ self.onconnect = (event) => {
     isProvider: false
   };
   clients.set(clientId, connection);
-  port.onmessage = (msg) => handleClientMessage(clientId, msg.data);
+  console.log("[SharedWorker] Client registered:", clientId, "Total clients:", clients.size);
+  port.onmessage = (msg) => {
+    console.log("[SharedWorker] Message from client", clientId, ":", msg.data?.type || msg.data);
+    handleClientMessage(clientId, msg.data);
+  };
   port.onmessageerror = () => handleClientDisconnect(clientId);
   port.start();
   const connectedMsg = { type: "connected", clientId };
   port.postMessage(connectedMsg);
+  console.log("[SharedWorker] Sent connected message to", clientId);
   tryBecomeProvider(clientId);
 };
 async function tryBecomeProvider(clientId) {
   const client = clients.get(clientId);
   if (!client) return;
+  if (currentProviderId) {
+    console.log("[SharedWorker] Provider already exists, notifying new client:", clientId);
+    const notification = {
+      type: "provider-elected",
+      providerId: currentProviderId,
+      isYou: false
+    };
+    client.port.postMessage(notification);
+    return;
+  }
   try {
     await navigator.locks.request(
       PROVIDER_LOCK(DEFAULT_DB_NAME),
@@ -35,6 +51,8 @@ async function tryBecomeProvider(clientId) {
           electProvider(clientId);
           await new Promise(() => {
           });
+        } else {
+          console.log("[SharedWorker] Lock not available for", clientId, ", waiting for provider...");
         }
       }
     );

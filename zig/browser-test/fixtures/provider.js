@@ -7,13 +7,17 @@ function createErrorResponse(requestId, code, message) {
 }
 
 // src/provider/worker.ts
+console.log("[ProviderWorker] Starting...");
 var db = null;
 var sqlJs = null;
+var sqlJsLoadPromise = null;
 var requestQueue = [];
 var processing = false;
 self.onmessage = async (event) => {
+  console.log("[ProviderWorker] Received request:", event.data?.type);
   const request = event.data;
   const response = await enqueueRequest(request);
+  console.log("[ProviderWorker] Sending response:", response.type);
   self.postMessage(response);
 };
 async function enqueueRequest(request) {
@@ -58,18 +62,40 @@ async function handleRequest(request) {
       throw new Error(`Unknown request type: ${request.type}`);
   }
 }
+async function loadSqlJs() {
+  if (sqlJsLoadPromise) return sqlJsLoadPromise;
+  sqlJsLoadPromise = (async () => {
+    let initFn = self.initSqlJs;
+    if (!initFn) {
+      console.log("[ProviderWorker] Loading sql.js via fetch + eval...");
+      const response = await fetch(
+        "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"
+      );
+      const scriptText = await response.text();
+      (0, eval)(scriptText);
+      initFn = self.initSqlJs;
+    }
+    if (!initFn) {
+      throw new Error("Failed to load sql.js");
+    }
+    console.log("[ProviderWorker] Initializing sql.js...");
+    const sql = await initFn({
+      locateFile: (file) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+    });
+    console.log("[ProviderWorker] sql.js initialized successfully");
+    return sql;
+  })();
+  return sqlJsLoadPromise;
+}
 async function handleOpen(_dbName) {
   if (!sqlJs) {
-    const initSqlJs = self.initSqlJs;
-    if (!initSqlJs) {
-      throw new Error("sql.js not loaded");
-    }
-    sqlJs = await initSqlJs();
+    sqlJs = await loadSqlJs();
   }
   if (db) {
     db.close();
   }
   db = new sqlJs.Database();
+  console.log("[ProviderWorker] Database opened");
   return { success: true };
 }
 async function handleClose() {

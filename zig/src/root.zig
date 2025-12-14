@@ -8,6 +8,7 @@ pub const compare_values = @import("compare_values.zig");
 pub const ffi = @import("ffi/root.zig");
 pub const changes_vtab = @import("changes_vtab.zig");
 pub const finalize = @import("finalize.zig");
+pub const fract_index = @import("fract_index.zig");
 pub const pack_columns = @import("pack_columns.zig");
 pub const rows_impacted = @import("rows_impacted.zig");
 pub const site_identity = @import("site_identity.zig");
@@ -49,6 +50,8 @@ test {
     _ = changes_vtab;
     // Run compare_values tests
     _ = compare_values;
+    // Run fract_index tests
+    _ = fract_index;
     // Run pack_columns tests
     _ = pack_columns;
     // Run rows_impacted tests

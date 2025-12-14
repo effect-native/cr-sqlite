@@ -27,9 +27,14 @@ var DbClient = class {
   pendingRequests = /* @__PURE__ */ new Map();
   readyPromise;
   resolveReady;
+  // Provider-specific state
+  providerWorker = null;
+  providerWorkerUrl;
+  providerPendingRequests = /* @__PURE__ */ new Map();
   dbName;
   constructor(options) {
     this.dbName = options.dbName;
+    this.providerWorkerUrl = options.providerWorkerUrl || "./provider.js";
     this.readyPromise = new Promise((resolve) => {
       this.resolveReady = resolve;
     });
@@ -37,6 +42,7 @@ var DbClient = class {
   }
   connect(coordinatorUrl) {
     const url = coordinatorUrl || SHARED_WORKER_PATH;
+    console.log("[DbClient] Connecting to SharedWorker:", url);
     this.worker = new SharedWorker(url, { type: "module" });
     this.port = this.worker.port;
     this.port.onmessage = (event) => this.handleMessage(event.data);
@@ -44,13 +50,24 @@ var DbClient = class {
   }
   handleMessage(msg) {
     const message = msg;
+    console.log("[DbClient] Received message:", message.type, message);
     switch (message.type) {
       case "connected":
         this.clientId = message.clientId ?? null;
+        console.log("[DbClient] Connected with ID:", this.clientId);
         break;
       case "provider-elected":
         this.isProvider = message.isYou ?? false;
+        console.log("[DbClient] Provider elected. Am I provider?", this.isProvider);
+        if (this.isProvider) {
+          this.initializeProviderWorker();
+        }
         this.resolveReady();
+        break;
+      case "forward-request":
+        if (this.isProvider && message.clientId && message.request) {
+          this.handleForwardedRequest(message.clientId, message.request);
+        }
         break;
       case "result":
       case "error": {
@@ -68,6 +85,73 @@ var DbClient = class {
       }
     }
   }
+  /**
+   * Initialize the dedicated worker for database operations (provider only)
+   */
+  initializeProviderWorker() {
+    console.log("[DbClient] Initializing provider worker:", this.providerWorkerUrl);
+    this.providerWorker = new Worker(this.providerWorkerUrl, { type: "module" });
+    this.providerWorker.onmessage = (event) => {
+      console.log("[DbClient] Provider worker response:", event.data?.type, event.data?.requestId);
+      this.handleProviderWorkerResponse(event.data);
+    };
+    this.providerWorker.onerror = (error) => {
+      console.error("[DbClient] Provider worker error:", error);
+    };
+  }
+  /**
+   * Handle a forwarded request from another tab (provider only)
+   */
+  handleForwardedRequest(clientId, request) {
+    console.log("[DbClient] Handling forwarded request from", clientId, ":", request.type);
+    if (!this.providerWorker) {
+      const errorResponse = createErrorResponse(
+        request.requestId,
+        "PROVIDER_NOT_READY",
+        "Provider worker not initialized"
+      );
+      this.sendForwardResponse(clientId, errorResponse);
+      return;
+    }
+    this.providerPendingRequests.set(request.requestId, {
+      clientId,
+      requestId: request.requestId
+    });
+    this.providerWorker.postMessage(request);
+  }
+  /**
+   * Handle response from provider worker and route back to client
+   */
+  handleProviderWorkerResponse(response) {
+    const localPending = this.localPendingRequests.get(response.requestId);
+    if (localPending) {
+      this.localPendingRequests.delete(response.requestId);
+      if (response.type === "result") {
+        localPending.resolve(response.payload.result);
+      } else {
+        localPending.reject(new Error(response.payload.message));
+      }
+      return;
+    }
+    const forwardedPending = this.providerPendingRequests.get(response.requestId);
+    if (!forwardedPending) {
+      console.warn("[DbClient] Response for unknown request:", response.requestId);
+      return;
+    }
+    this.providerPendingRequests.delete(response.requestId);
+    this.sendForwardResponse(forwardedPending.clientId, response);
+  }
+  /**
+   * Send a response back to the coordinator for routing to the original client
+   */
+  sendForwardResponse(clientId, response) {
+    console.log("[DbClient] Sending forward-response for client", clientId);
+    this.port?.postMessage({
+      type: "forward-response",
+      clientId,
+      response
+    });
+  }
   get ready() {
     return this.readyPromise;
   }
@@ -79,6 +163,9 @@ var DbClient = class {
   }
   async sendRequest(request) {
     await this.ready;
+    if (this.isProvider) {
+      return this.sendRequestToLocalWorker(request);
+    }
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(request.requestId, {
         resolve,
@@ -88,6 +175,31 @@ var DbClient = class {
       setTimeout(() => {
         if (this.pendingRequests.has(request.requestId)) {
           this.pendingRequests.delete(request.requestId);
+          reject(new Error("Request timeout"));
+        }
+      }, RPC_TIMEOUT_MS);
+    });
+  }
+  // Track local requests (when we are the provider) - maps requestId to resolve/reject
+  localPendingRequests = /* @__PURE__ */ new Map();
+  /**
+   * Send request directly to local provider worker (when we are the provider)
+   */
+  sendRequestToLocalWorker(request) {
+    return new Promise((resolve, reject) => {
+      if (!this.providerWorker) {
+        reject(new Error("Provider worker not initialized"));
+        return;
+      }
+      console.log("[DbClient] Sending local request:", request.type, request.requestId);
+      this.localPendingRequests.set(request.requestId, {
+        resolve,
+        reject
+      });
+      this.providerWorker.postMessage(request);
+      setTimeout(() => {
+        if (this.localPendingRequests.has(request.requestId)) {
+          this.localPendingRequests.delete(request.requestId);
           reject(new Error("Request timeout"));
         }
       }, RPC_TIMEOUT_MS);
