@@ -1378,6 +1378,10 @@ fn changesUpdate(
         return vtab.SQLITE_ERROR;
     };
 
+    // Advance db_version to at least the incoming db_version when remote wins
+    // This ensures crsql_db_version() reflects that a real change was applied
+    _ = site_identity.nextDbVersion(db_version);
+
     // Increment rows impacted counter
     rows_impacted.incrementRowsImpacted();
 

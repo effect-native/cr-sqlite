@@ -24,7 +24,8 @@ run_test() {
     local sql="$2"
     local expected="$3"
     echo -n "Testing $name... "
-    result=$(nix run nixpkgs#sqlite -- :memory: -cmd ".load $LIB" "$sql" 2>&1)
+    # Use tail -1 to get only the last line (consistent with other test harnesses)
+    result=$(nix run nixpkgs#sqlite -- :memory: -cmd ".load $LIB" "$sql" 2>&1 | tail -1)
     if [ "$result" = "$expected" ]; then
         echo "PASS"
     else

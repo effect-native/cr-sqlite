@@ -10,6 +10,7 @@ const api = @import("api.zig");
 const as_crr = @import("../as_crr.zig");
 const changes_vtab = @import("../changes_vtab.zig");
 const finalize = @import("../finalize.zig");
+const is_crr = @import("../is_crr.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
 const schema_alter = @import("../schema_alter.zig");
@@ -65,6 +66,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_as_crr() function
     rc = as_crr.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_is_crr() function
+    rc = is_crr.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     // Register crsql_changes virtual table

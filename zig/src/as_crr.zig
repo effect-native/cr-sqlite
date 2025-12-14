@@ -98,7 +98,7 @@ fn crsqlAsCrrFunc(
         return;
     }
 
-    // Return NULL on success (like the C implementation)
+    // Return NULL on success
     api.result_null(pCtx);
 }
 
