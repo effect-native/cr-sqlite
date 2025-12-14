@@ -1,7 +1,7 @@
 # TASK-033: Mobile Static Embedding Guide (iOS + Android)
 
 ## Status
-- [ ] Planned
+- [x] Planned
 - [ ] Assigned
 - [ ] In Progress
 - [ ] Blocked (reason: ...)

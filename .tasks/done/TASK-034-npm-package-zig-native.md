@@ -1,9 +1,9 @@
 # TASK-034: npm Packaging for Zig-built Native Extensions
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
 - [x] Complete
 

@@ -1,10 +1,10 @@
 # TASK-037: zig-sqlite Upstream Feedback Capture (blocked)
 
 ## Status
-- [ ] Planned
+- [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: waiting for Tom to pick items)
+- [x] Blocked (reason: waiting for Tom to pick items / scope)
 - [ ] Complete
 
 ## Priority

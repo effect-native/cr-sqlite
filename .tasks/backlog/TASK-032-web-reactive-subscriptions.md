@@ -1,10 +1,10 @@
 # TASK-032: Web Phase-2 — Reactive Subscriptions Surface
 
 ## Status
-- [ ] Planned
+- [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [ ] Blocked (reason: ...)
+- [x] Blocked (reason: TS work must follow spec-first in `effect-native/`)
 - [ ] Complete
 
 ## Priority
@@ -16,12 +16,15 @@ subagent (general)
 ## Parent Docs / Cross-links
 - Proposal: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md` ("Notifications / subscriptions")
 - Gap backlog: `research/zig-cr/92-gap-backlog.md` (Multi-tab Web Architecture)
-- Current impl: `zig/browser-test/src/client/db-client.ts`
+- TS workflow rules: `effect-native/.specs/AGENTS.md`
+- Future spec parent (Phase 1): `effect-native/.specs/crsql-mesh-runtime/instructions.md`
 
 ## Constraint
-Likely TypeScript-heavy. Per `.wishes/stop-before-typescript.md`, do not implement without Tom explicitly opting-in.
+This work is TypeScript-heavy.
 
-If Tom has not opted-in, convert this task into a blocked task card with a short design note and a "Tom decision needed" checklist.
+Per `AGENTS.md` (TypeScript Work Rule): **all TypeScript work happens in the `effect-native/` submodule** and must follow the spec-first workflow in `effect-native/.specs/AGENTS.md`.
+
+This task stays blocked until Tom explicitly approves proceeding beyond Phase 1 specs for the browser/runtime surface.
 
 ## Description
 Provide a narrow notification/subscription surface so tab B can react when tab A writes.
@@ -29,9 +32,7 @@ Provide a narrow notification/subscription surface so tab B can react when tab A
 MVP can be a "db_version advanced" event broadcast; leave "observable queries" as optional.
 
 ## Files to Modify
-- `zig/browser-test/src/shared/rpc-types.ts`
-- `zig/browser-test/src/client/db-client.ts`
-- `zig/browser-test/src/coordinator/shared-worker.ts`
+- `effect-native/packages-native/` (exact package(s) TBD; see `effect-native/.specs/crsql-mesh-runtime/instructions.md`)
 - `research/zig-cr/92-gap-backlog.md` (status notes)
 
 ## Acceptance Criteria

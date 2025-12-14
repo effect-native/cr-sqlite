@@ -1,9 +1,9 @@
 # TASK-043: Spec Phase 1 — Changes to Existing Package: `@effect-native/crsql`
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
 - [x] Complete
 

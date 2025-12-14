@@ -1,9 +1,9 @@
 # TASK-040: Spec Phase 1 — New Package: `@effect-native/crsql-mesh-protocol`
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
 - [x] Complete
 

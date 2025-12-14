@@ -4,7 +4,7 @@
 - [x] Planned
 - [x] Assigned
 - [x] In Progress
-- [ ] Blocked (reason: ...)
+- [ ] Blocked (reason: n/a)
 - [x] Complete
 
 ## Priority
