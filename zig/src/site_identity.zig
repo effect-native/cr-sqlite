@@ -18,6 +18,10 @@ var site_id_initialized: bool = false;
 /// In production, this would query MAX(db_version) from clock tables
 var global_db_version: i64 = 0;
 
+/// Pending db_version for the current transaction
+/// Used by crsql_next_db_version() to return max(dbVersion+1, pendingDbVersion, merging_version)
+var pending_db_version: i64 = 0;
+
 /// Initialize site ID if not already done
 fn ensureSiteIdInitialized() void {
     if (!site_id_initialized) {
@@ -61,14 +65,114 @@ fn crsqlDbVersionFunc(
     api.result_int64(pCtx, global_db_version);
 }
 
+/// Implementation of crsql_next_db_version() SQL function
+/// Returns max(dbVersion+1, pendingDbVersion, optional_merging_version)
+/// Used by triggers to get the db_version for clock entries
+fn crsqlNextDbVersionFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    // Accept 0 or 1 arguments (optional merging_version)
+    if (argc > 1) {
+        api.result_error(pCtx, "crsql_next_db_version takes 0 or 1 argument", -1);
+        return;
+    }
+
+    var merging_version: ?i64 = null;
+    if (argc == 1) {
+        const arg_type = api.value_type(argv[0]);
+        if (arg_type != api.SQLITE_NULL) {
+            merging_version = api.value_int64(argv[0]);
+        }
+    }
+
+    const next_version = nextDbVersion(merging_version);
+    api.result_int64(pCtx, next_version);
+}
+
 /// Increment db_version (called after successful merge operations)
 pub fn incrementDbVersion() void {
     global_db_version += 1;
 }
 
+/// Promote pending db_version to committed db_version on commit
+/// Called by commit hook when rows were impacted
+pub fn commitDbVersion() void {
+    if (pending_db_version > global_db_version) {
+        global_db_version = pending_db_version;
+    }
+    pending_db_version = 0;
+}
+
+/// Reset pending db_version on rollback
+pub fn rollbackDbVersion() void {
+    pending_db_version = 0;
+}
+
 /// Get current db_version
 pub fn getDbVersion() i64 {
     return global_db_version;
+}
+
+/// Get or create the next db_version for the current transaction
+/// Returns max(dbVersion+1, pendingDbVersion, merging_version)
+/// This is what triggers should use for db_version
+pub fn nextDbVersion(merging_version: ?i64) i64 {
+    var ret = global_db_version + 1;
+    if (ret < pending_db_version) {
+        ret = pending_db_version;
+    }
+    if (merging_version) |mv| {
+        if (ret < mv) {
+            ret = mv;
+        }
+    }
+    pending_db_version = ret;
+    return ret;
+}
+
+/// Initialize db_version from database by querying MAX from all clock tables
+/// Should be called during extension initialization
+pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
+    if (db == null) return;
+
+    // Query to find all clock tables and get max db_version
+    // MVP: Simple approach - query sqlite_master for tables ending in __crsql_clock
+    const find_clock_tables_sql = "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%__crsql_clock'";
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, find_clock_tables_sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) {
+        return; // No clock tables or error - start at 0
+    }
+    defer _ = api.finalize(stmt);
+
+    var max_version: i64 = 0;
+
+    // For each clock table, query max(db_version)
+    while (api.step(stmt) == api.SQLITE_ROW) {
+        const table_name = api.column_text(stmt, 0) orelse continue;
+
+        // Query max db_version from this clock table
+        var version_buf: [256]u8 = undefined;
+        const version_sql = std.fmt.bufPrintZ(&version_buf, "SELECT MAX(db_version) FROM \"{s}\"", .{table_name}) catch continue;
+
+        var version_stmt: ?*api.sqlite3_stmt = null;
+        rc = api.prepare_v2(db, version_sql, -1, &version_stmt, null);
+        if (rc != api.SQLITE_OK) continue;
+        defer _ = api.finalize(version_stmt);
+
+        if (api.step(version_stmt) == api.SQLITE_ROW) {
+            const version = api.column_int64(version_stmt, 0);
+            if (version > max_version) {
+                max_version = version;
+            }
+        }
+    }
+
+    global_db_version = max_version;
+    pending_db_version = 0;
 }
 
 /// Get site ID as slice
@@ -103,6 +207,20 @@ pub fn register(db: ?*api.sqlite3) c_int {
         null,
         null,
     );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_next_db_version with -1 args to accept 0 or 1 arguments
+    rc = api.create_function_v2(
+        db,
+        "crsql_next_db_version",
+        -1, // Variable number of arguments
+        api.SQLITE_UTF8,
+        null,
+        &crsqlNextDbVersionFunc,
+        null,
+        null,
+        null,
+    );
     return rc;
 }
 
@@ -121,6 +239,88 @@ test "incrementDbVersion increases counter" {
     const before = global_db_version;
     incrementDbVersion();
     try std.testing.expectEqual(before + 1, global_db_version);
+}
+
+test "nextDbVersion returns dbVersion + 1 on first call" {
+    // Reset state for isolated test
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = 0;
+
+    const next = nextDbVersion(null);
+    try std.testing.expectEqual(@as(i64, 6), next);
+    try std.testing.expectEqual(@as(i64, 6), pending_db_version);
+}
+
+test "nextDbVersion returns pending if higher than dbVersion + 1" {
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = 10;
+
+    const next = nextDbVersion(null);
+    try std.testing.expectEqual(@as(i64, 10), next);
+}
+
+test "nextDbVersion uses merging_version if highest" {
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = 0;
+
+    const next = nextDbVersion(20);
+    try std.testing.expectEqual(@as(i64, 20), next);
+    try std.testing.expectEqual(@as(i64, 20), pending_db_version);
+}
+
+test "commitDbVersion promotes pending to global" {
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = 10;
+
+    commitDbVersion();
+
+    try std.testing.expectEqual(@as(i64, 10), global_db_version);
+    try std.testing.expectEqual(@as(i64, 0), pending_db_version);
+}
+
+test "rollbackDbVersion resets pending only" {
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = 10;
+
+    rollbackDbVersion();
+
+    try std.testing.expectEqual(@as(i64, 5), global_db_version);
+    try std.testing.expectEqual(@as(i64, 0), pending_db_version);
 }
 
 test "getSiteId returns consistent value" {

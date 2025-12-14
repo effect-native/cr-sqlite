@@ -207,6 +207,159 @@ pub fn findPkFromBlob(
     return MergeError.NoRows;
 }
 
+/// Delete row from base table by rowid.
+/// Used when merging a remote delete that wins over local state.
+pub fn deleteFromBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Drop all clock entries except sentinel (-1).
+/// Used when merging a remote delete - removes column clock entries but keeps the sentinel.
+pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Insert a new row into base table with a single column value.
+/// For MVP, assumes single-column INTEGER PRIMARY KEY that matches rowid.
+/// Decodes the first value from pk_blob to get the PK value to insert.
+/// Returns the new rowid.
+pub fn insertIntoBaseTable(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    col_name: []const u8,
+    value: ?*api.sqlite3_value,
+    pk_blob: [*]const u8,
+    pk_blob_len: usize,
+) MergeError!i64 {
+    // Decode the PK blob to get the PK value
+    // For MVP, assume single integer PK
+    const pk_slice = pk_blob[0..pk_blob_len];
+    const values = codec.unpack(std.heap.page_allocator, pk_slice) catch return MergeError.DecodeError;
+    defer {
+        for (values) |v| {
+            switch (v) {
+                .Text => |s| std.heap.page_allocator.free(s),
+                .Blob => |b| std.heap.page_allocator.free(b),
+                else => {},
+            }
+        }
+        std.heap.page_allocator.free(values);
+    }
+
+    if (values.len == 0) return MergeError.DecodeError;
+
+    // For MVP, only handle single integer PK
+    const pk_value = values[0];
+    const pk_int: i64 = switch (pk_value) {
+        .Integer => |i| i,
+        else => return MergeError.DecodeError, // Only integer PKs supported for MVP
+    };
+
+    // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
+    var buf: [1024]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    // Bind the rowid (PK value)
+    _ = api.bind_int64(stmt, 1, pk_int);
+
+    // Bind column value based on type
+    if (value) |v| {
+        const val_type = api.value_type(v);
+        switch (val_type) {
+            api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
+            api.SQLITE_FLOAT => {
+                // TODO: Add bind_double to api.zig
+                _ = api.bind_null(stmt, 2);
+            },
+            api.SQLITE_TEXT => {
+                const text = api.value_text(v);
+                const len = api.value_bytes(v);
+                if (text) |t| {
+                    _ = api.bind_text(stmt, 2, t, len, api.getTransientDestructor());
+                } else {
+                    _ = api.bind_null(stmt, 2);
+                }
+            },
+            api.SQLITE_BLOB => {
+                const blob = api.value_blob(v);
+                const len = api.value_bytes(v);
+                _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
+            },
+            else => _ = api.bind_null(stmt, 2),
+        }
+    } else {
+        _ = api.bind_null(stmt, 2);
+    }
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+
+    // Return the pk_int as the rowid (since we explicitly set it)
+    return pk_int;
+}
+
+/// Insert into __crsql_pks table mapping pk (rowid) to packed pks blob.
+pub fn insertIntoPksTable(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+    pks_blob: [*]const u8,
+    pks_len: usize,
+) MergeError!void {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, ?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_blob(stmt, 2, pks_blob, @intCast(pks_len), api.getTransientDestructor());
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -218,4 +371,8 @@ test "module compiles" {
     _ = updateBaseTableColumn;
     _ = setWinnerClock;
     _ = findPkFromBlob;
+    _ = deleteFromBaseTable;
+    _ = dropNonSentinelClocks;
+    _ = insertIntoBaseTable;
+    _ = insertIntoPksTable;
 }

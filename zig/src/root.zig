@@ -7,6 +7,7 @@ pub const codec = @import("codec.zig");
 pub const compare_values = @import("compare_values.zig");
 pub const ffi = @import("ffi/root.zig");
 pub const changes_vtab = @import("changes_vtab.zig");
+pub const finalize = @import("finalize.zig");
 pub const pack_columns = @import("pack_columns.zig");
 pub const rows_impacted = @import("rows_impacted.zig");
 pub const site_identity = @import("site_identity.zig");

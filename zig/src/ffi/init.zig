@@ -9,6 +9,7 @@ const std = @import("std");
 const api = @import("api.zig");
 const as_crr = @import("../as_crr.zig");
 const changes_vtab = @import("../changes_vtab.zig");
+const finalize = @import("../finalize.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
 const site_identity = @import("../site_identity.zig");
@@ -28,18 +29,7 @@ fn crsqlZigVersionFunc(
     api.result_text(pCtx, CRSQL_ZIG_VERSION, -1, api.SQLITE_STATIC);
 }
 
-/// Implementation of `crsql_finalize()` SQL function.
-/// Cleanup function called before closing a database connection.
-/// For now this is a stub that returns OK - real cleanup will be added
-/// when we have per-connection state (ExtData) to clean up.
-fn crsqlFinalizeFunc(
-    pCtx: ?*api.sqlite3_context,
-    _: c_int,
-    _: [*c]?*api.sqlite3_value,
-) callconv(.c) void {
-    // Stub: return OK (null result means success for this function)
-    api.result_null(pCtx);
-}
+
 
 /// Register all CR-SQLite functions with the database connection.
 fn registerFunctions(db: ?*api.sqlite3) c_int {
@@ -66,17 +56,7 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
     if (rc != api.SQLITE_OK) return rc;
 
     // Register crsql_finalize() - cleanup function
-    rc = api.create_function_v2(
-        db,
-        "crsql_finalize",
-        0,
-        api.SQLITE_UTF8,
-        null,
-        &crsqlFinalizeFunc,
-        null,
-        null,
-        null,
-    );
+    rc = finalize.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     // Register crsql_pack_columns() function

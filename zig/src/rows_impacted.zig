@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const api = @import("ffi/api.zig");
+const site_identity = @import("site_identity.zig");
 
 /// Global counter for rows impacted (MVP: single connection)
 /// Thread-safety note: This is a simple global for MVP. For multi-connection
@@ -40,11 +41,22 @@ fn rowsImpactedFunc(
     api.result_int64(pCtx, rows_impacted_counter);
 }
 
-/// Commit hook callback - resets the counter
+/// Commit hook callback - resets the counter and commits db_version
 fn commitHookCallback(pArg: ?*anyopaque) callconv(.c) c_int {
     _ = pArg;
+    // Commit db_version if any rows were impacted during this transaction
+    if (rows_impacted_counter > 0) {
+        site_identity.commitDbVersion();
+    }
     resetCounter();
     return 0; // 0 = allow commit to proceed
+}
+
+/// Rollback hook callback - resets the counter and pending db_version
+fn rollbackHookCallback(pArg: ?*anyopaque) callconv(.c) void {
+    _ = pArg;
+    site_identity.rollbackDbVersion();
+    resetCounter();
 }
 
 /// Register the UDF and commit hook
@@ -63,8 +75,11 @@ pub fn register(db: ?*api.sqlite3) c_int {
     );
     if (rc != api.SQLITE_OK) return rc;
 
-    // Install commit hook to reset counter
+    // Install commit hook to reset counter and commit db_version
     _ = api.commit_hook(db, &commitHookCallback, null);
+
+    // Install rollback hook to reset counter and pending db_version
+    _ = api.rollback_hook(db, &rollbackHookCallback, null);
 
     return api.SQLITE_OK;
 }

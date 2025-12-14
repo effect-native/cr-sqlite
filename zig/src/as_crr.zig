@@ -256,6 +256,8 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create clock entry
+            // Note: db_version is set to 1 for local writes. The commit hook
+            // will track actual db_version progression.
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
@@ -267,6 +269,8 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
 
     // Sentinel row for row creation tracking
+    // Note: db_version is set to 1 for local writes. The commit hook
+    // will track actual db_version progression.
     writer.print(
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
@@ -346,6 +350,8 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create/update clock entry when changed
+            // Note: db_version is set to 1 for local writes. The commit hook
+            // will track actual db_version progression.
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
@@ -399,6 +405,8 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     // Trigger header
     // Note: Unlike Rust which uses `WHEN crsql_internal_sync_bit() = 0`,
     // we omit that check since we don't have the sync bit infrastructure yet.
+    // Note: db_version is set to 1 for local writes. The commit hook
+    // will track actual db_version progression.
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
         \\AFTER DELETE ON "{s}"

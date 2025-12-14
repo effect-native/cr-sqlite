@@ -916,11 +916,53 @@ fn changesUpdate(
     });
     const api_db = toApiDb(vtab_db);
     const pk_rowid = merge_insert.findPkFromBlob(api_db, table_slice, pk_ptr, @intCast(pk_len)) catch |err| {
-        // If row doesn't exist locally, we need to handle this case
+        // If row doesn't exist locally, we need to INSERT it
         if (err == merge_insert.MergeError.NoRows) {
-            // No local row - remote wins by default
-            // But we can't update a non-existent row, so for MVP we skip
-            log.debug("changesUpdate: no local row found for pk blob, skipping", .{});
+            // Handle sentinel operations (cid = "-1") for non-existent rows
+            const is_sentinel_for_new = std.mem.eql(u8, cid_slice, "-1");
+            if (is_sentinel_for_new) {
+                // Sentinel for non-existent row - this is a tombstone/delete marker
+                // We need to create just the clock entry without a base table row
+                // For now, skip - the row doesn't exist and we're being told to delete it
+                log.debug("changesUpdate: sentinel for non-existent row, skipping", .{});
+                pRowid.* = 0;
+                return vtab.SQLITE_OK;
+            }
+
+            // No local row - INSERT new row
+            log.debug("changesUpdate: no local row, inserting new row", .{});
+
+            // Get the value from argv[5] (column 3: val)
+            const insert_value = toApiValue(argv[5]);
+
+            // Step 1a: Insert into base table
+            const new_pk = merge_insert.insertIntoBaseTable(api_db, table_slice, cid_slice, insert_value, pk_ptr, @intCast(pk_len)) catch {
+                log.debug("changesUpdate: insertIntoBaseTable failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Step 1b: Insert into __crsql_pks table
+            merge_insert.insertIntoPksTable(api_db, table_slice, new_pk, pk_ptr, @intCast(pk_len)) catch {
+                log.debug("changesUpdate: insertIntoPksTable failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Step 1c: Insert clock entry for the column
+            const site_id_ptr_insert: ?[*]const u8 = @ptrCast(site_id_blob);
+            merge_insert.setWinnerClock(api_db, table_slice, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock for new row failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Step 1d: Insert sentinel clock entry with the incoming cl
+            merge_insert.setWinnerClock(api_db, table_slice, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Increment rows impacted
+            rows_impacted.incrementRowsImpacted();
+
             pRowid.* = 0;
             return vtab.SQLITE_OK;
         }
@@ -945,8 +987,21 @@ fn changesUpdate(
     const is_sentinel = std.mem.eql(u8, cid_slice, "-1");
     if (is_sentinel) {
         // Sentinel operations (delete/resurrect) handled by CL comparison above
-        // If cl > local_cl, update the sentinel
+        // If cl > local_cl, update the sentinel and perform delete operations
         if (cl > local_cl) {
+            // Delete from base table first
+            merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
+                log.debug("changesUpdate: deleteFromBaseTable failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Drop all non-sentinel clock entries
+            merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
+                log.debug("changesUpdate: dropNonSentinelClocks failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+
+            // Update the sentinel clock
             merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
                 log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
                 return vtab.SQLITE_ERROR;
