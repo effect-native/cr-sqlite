@@ -303,6 +303,21 @@ Pass:
 
 ## Deliverable shape (fits the existing “universal” plan)
 
+## Work Tracking
+
+This proposal’s TypeScript follow-through is tracked via spec-first task cards in `.tasks/backlog/`:
+
+- Phase 1 package map: [`.tasks/backlog/TASK-039-spec-global-mesh-package-map.md`](../../.tasks/backlog/TASK-039-spec-global-mesh-package-map.md)
+- Protocol package spec: [`.tasks/backlog/TASK-040-spec-crsql-mesh-protocol.md`](../../.tasks/backlog/TASK-040-spec-crsql-mesh-protocol.md)
+- Core engine spec: [`.tasks/backlog/TASK-041-spec-crsql-mesh-core.md`](../../.tasks/backlog/TASK-041-spec-crsql-mesh-core.md)
+- Transport interface spec: [`.tasks/backlog/TASK-042-spec-crsql-mesh-transport.md`](../../.tasks/backlog/TASK-042-spec-crsql-mesh-transport.md)
+- Integration into `@effect-native/crsql`: [`.tasks/backlog/TASK-043-spec-crsql-mesh-integration.md`](../../.tasks/backlog/TASK-043-spec-crsql-mesh-integration.md)
+- `@effect-native/libcrsql` changes: [`.tasks/backlog/TASK-044-spec-libcrsql-next.md`](../../.tasks/backlog/TASK-044-spec-libcrsql-next.md)
+- Runtime adapter package scoping: [`.tasks/backlog/TASK-045-spec-crsql-mesh-runtime.md`](../../.tasks/backlog/TASK-045-spec-crsql-mesh-runtime.md)
+
+All TS implementation work must happen in `effect-native/` and follow `effect-native/.specs/AGENTS.md`.
+
+
 This proposal is not a separate product; it’s the “full mesh” target for the universal package from:
 
 - [`101-proposal-universal-crsqlite-mt-js.md`](./101-proposal-universal-crsqlite-mt-js.md)

@@ -11,13 +11,22 @@
 - Wishes blocked on Tom: `.wishes/blocked-on-tom/`
 
 **Task map (what to run in parallel next)**:
-- Perf hotspots: `.tasks/backlog/TASK-029-performance-hotspot-closure.md`
+- Perf hotspots: ✅ COMPLETE (see `.tasks/done/TASK-029-performance-hotspot-closure.md`)
 - Windows `.dll`: ✅ COMPLETE (see `.tasks/done/TASK-030-windows-dll-build.md`)
+- Hosted web ESM proposal: ✅ COMPLETE (see `.tasks/done/TASK-035-hosted-wasm-proposal.md`)
+- Effect submodules + TS-work rule: ✅ COMPLETE (see `.tasks/done/TASK-038-add-effect-native-submodules.md`)
 - npm native packaging (Zig artifacts): `.tasks/backlog/TASK-034-npm-package-zig-native.md`
-- Web phase-2 (TS-gated): `.tasks/backlog/TASK-031-web-service-worker-fallback.md`, `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- Mobile embedding guide: `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
-- Hosted web ESM proposal: `.tasks/backlog/TASK-035-hosted-wasm-proposal.md`
 - Release-planning proposal: `.tasks/backlog/TASK-036-release-planning-proposal.md`
+- Web phase-2 (now TS-in-`effect-native/`): `.tasks/backlog/TASK-031-web-service-worker-fallback.md`, `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+- Global mesh spec-first planning:
+  - `.tasks/backlog/TASK-039-spec-global-mesh-package-map.md`
+  - `.tasks/backlog/TASK-040-spec-crsql-mesh-protocol.md`
+  - `.tasks/backlog/TASK-041-spec-crsql-mesh-core.md`
+  - `.tasks/backlog/TASK-042-spec-crsql-mesh-transport.md`
+  - `.tasks/backlog/TASK-043-spec-crsql-mesh-integration.md`
+  - `.tasks/backlog/TASK-044-spec-libcrsql-next.md`
+  - `.tasks/backlog/TASK-045-spec-crsql-mesh-runtime.md`
+- Mobile embedding guide: `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
 - zig-sqlite upstream feedback capture (blocked): `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 **MVP COMPLETE** — All core replication functionality implemented and tested:
