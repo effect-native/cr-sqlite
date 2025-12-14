@@ -461,10 +461,11 @@ fn backfillColumn(db: ?*api.sqlite3, table_name: [*:0]const u8, col_name: []cons
     // Insert clock entries for rows that don't have an entry for this column
     // Uses crsql_db_version() instead of crsql_next_db_version() for migration
     // (other nodes will apply the same migration, so no need to re-sync)
+    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     const sql = std.fmt.bufPrintZ(&buf,
         \\INSERT OR IGNORE INTO "{s}__crsql_clock"
         \\  ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\SELECT p."pk", '{s}', 1, crsql_db_version(), 0, 0
+        \\SELECT p."pk", '{s}', 1, crsql_db_version(), 0, crsql_increment_and_get_seq()
         \\FROM "{s}__crsql_pks" p
         \\WHERE NOT EXISTS (
         \\  SELECT 1 FROM "{s}__crsql_clock" c
@@ -568,24 +569,26 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     writer.writeAll("));\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column
+    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  VALUES
-                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, 0);
+                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
                 \\
             , .{ table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
         }
     }
 
     // Sentinel row for row creation tracking
+    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     writer.print(
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  VALUES
-        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, 0);
+        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
         \\END;
     , .{table_name}) catch return error.BufferOverflow;
 
@@ -651,6 +654,7 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column (only when changed)
+    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             writer.print(
@@ -662,7 +666,7 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
                 \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = NEW.rowid AND col_name = '{s}'), 0) + 1,
                 \\    crsql_next_db_version(),
                 \\    0,
-                \\    0
+                \\    crsql_increment_and_get_seq()
                 \\  WHERE OLD."{s}" IS NOT NEW."{s}";
                 \\
             , .{
@@ -697,6 +701,7 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
+    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
         \\AFTER DELETE ON "{s}"
@@ -714,7 +719,7 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\    ),
         \\    crsql_next_db_version(),
         \\    0,
-        \\    0;
+        \\    crsql_increment_and_get_seq();
         \\  -- Drop all clock entries except the sentinel
         \\  DELETE FROM "{s}__crsql_clock"
         \\  WHERE pk = OLD.rowid AND col_name IS NOT '-1';

@@ -1426,7 +1426,60 @@ fn changesUpdate(
         }
     };
 
-    // Step 3: CL gating - if remote CL is less than local, reject immediately
+    // Step 3: Handle tombstones (cl < 0) specially
+    // A tombstone (negative cl) means "this row was deleted" and should always
+    // trigger a deletion, regardless of local cl value.
+    if (cl < 0) {
+        log.debug("changesUpdate: tombstone received (cl={}), applying delete", .{cl});
+
+        // Delete from base table
+        if (merge_stmts) |stmts| {
+            merge_insert.deleteFromBaseTableCached(stmts, pk_rowid) catch {
+                log.debug("changesUpdate: deleteFromBaseTableCached failed for tombstone", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
+                log.debug("changesUpdate: deleteFromBaseTable failed for tombstone", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
+
+        // Drop all non-sentinel clock entries
+        if (merge_stmts) |stmts| {
+            merge_insert.dropNonSentinelClocksCached(stmts, pk_rowid) catch {
+                log.debug("changesUpdate: dropNonSentinelClocksCached failed for tombstone", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
+                log.debug("changesUpdate: dropNonSentinelClocks failed for tombstone", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
+
+        // Update the sentinel clock with the tombstone marker
+        // Use col_version from the incoming change (which carries the authoritative cl)
+        const site_id_ptr_tomb: ?[*]const u8 = @ptrCast(site_id_blob);
+        if (merge_stmts) |stmts| {
+            merge_insert.setWinnerClockCached(stmts, pk_rowid, "-1", col_version, db_version, site_id_ptr_tomb, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClockCached failed for tombstone sentinel", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, "-1", col_version, db_version, site_id_ptr_tomb, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock failed for tombstone sentinel", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
+
+        rows_impacted.incrementRowsImpacted();
+        pRowid.* = 0;
+        return vtab.SQLITE_OK;
+    }
+
+    // Step 3b: CL gating - if remote CL is less than local, reject immediately
+    // (Only for non-tombstone changes - tombstones handled above)
     if (cl < local_cl) {
         log.debug("changesUpdate: remote cl {} < local cl {}, no-op", .{ cl, local_cl });
         pRowid.* = 0;
@@ -1468,9 +1521,21 @@ fn changesUpdate(
                         return vtab.SQLITE_ERROR;
                     };
                 }
+            } else {
+                // For resurrection (odd CL), zero column clocks so subsequent column changes win.
+                // This matches Rust's zero_clocks_on_resurrect behavior.
+                if (merge_stmts) |stmts| {
+                    merge_insert.zeroClockOnResurrectCached(stmts, pk_rowid) catch {
+                        log.debug("changesUpdate: zeroClockOnResurrectCached failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                } else {
+                    merge_insert.zeroClockOnResurrect(api_db, table_slice, pk_rowid) catch {
+                        log.debug("changesUpdate: zeroClockOnResurrect failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                }
             }
-            // For resurrection (odd CL), we don't delete - just update the sentinel clock.
-            // The actual row data will come from separate column change entries.
 
             // Update the sentinel clock (use cached if available)
             if (merge_stmts) |stmts| {

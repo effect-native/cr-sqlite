@@ -83,6 +83,9 @@ pub const TableMergeStmts = struct {
     /// INSERT INTO "{table}__crsql_pks" (pk, pks) VALUES (?, ?)
     insert_pks_stmt: ?*api.sqlite3_stmt = null,
 
+    /// UPDATE "{table}__crsql_clock" SET col_version = 0 WHERE pk = ? AND col_name != '-1'
+    zero_clock_resurrect_stmt: ?*api.sqlite3_stmt = null,
+
     // SQL buffers for dynamically-generated queries
     // These are built once during init or on first use
 
@@ -95,6 +98,7 @@ pub const TableMergeStmts = struct {
     sql_delete_base: [256]u8 = undefined,
     sql_drop_non_sentinel: [256]u8 = undefined,
     sql_insert_pks: [256]u8 = undefined,
+    sql_zero_clock_resurrect: [256]u8 = undefined,
 
     /// Initialize statement cache for a table.
     /// Statements are lazily prepared on first use.
@@ -129,6 +133,8 @@ pub const TableMergeStmts = struct {
 
         _ = std.fmt.bufPrintZ(&self.sql_insert_pks, "INSERT INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, ?)", .{table_name}) catch return MergeError.BufferOverflow;
 
+        _ = std.fmt.bufPrintZ(&self.sql_zero_clock_resurrect, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+
         return self;
     }
 
@@ -143,6 +149,7 @@ pub const TableMergeStmts = struct {
         if (self.delete_base_stmt) |stmt| _ = api.finalize(stmt);
         if (self.drop_non_sentinel_stmt) |stmt| _ = api.finalize(stmt);
         if (self.insert_pks_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.zero_clock_resurrect_stmt) |stmt| _ = api.finalize(stmt);
 
         self.get_cl_stmt = null;
         self.row_exists_stmt = null;
@@ -153,6 +160,7 @@ pub const TableMergeStmts = struct {
         self.delete_base_stmt = null;
         self.drop_non_sentinel_stmt = null;
         self.insert_pks_stmt = null;
+        self.zero_clock_resurrect_stmt = null;
     }
 
     /// Helper to get or prepare a statement.
@@ -405,6 +413,28 @@ pub fn rowExistsInBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) 
 pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Zero col_version for all non-sentinel clock entries on resurrection.
+/// When a row is resurrected (sentinel with higher odd cl), column clocks are zeroed
+/// so that subsequent column changes will win on col_version comparison.
+/// This matches the Rust impl's `zero_clocks_on_resurrect`.
+pub fn zeroClockOnResurrect(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -816,6 +846,20 @@ pub fn insertIntoPksTableCached(
     }
 }
 
+/// Zero col_version for all non-sentinel clock entries on resurrection using cached statement.
+///
+/// This is the cached variant of `zeroClockOnResurrect` for use with `TableMergeStmts`.
+pub fn zeroClockOnResurrectCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+    const stmt = try stmts.getOrPrepare(&stmts.zero_clock_resurrect_stmt, @ptrCast(&stmts.sql_zero_clock_resurrect));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -843,6 +887,10 @@ test "module compiles" {
     _ = deleteFromBaseTableCached;
     _ = dropNonSentinelClocksCached;
     _ = insertIntoPksTableCached;
+    _ = zeroClockOnResurrectCached;
+
+    // Uncached new functions
+    _ = zeroClockOnResurrect;
 }
 
 test "TableMergeStmts struct has expected fields" {

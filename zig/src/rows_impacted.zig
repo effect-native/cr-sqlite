@@ -41,7 +41,7 @@ fn rowsImpactedFunc(
     api.result_int64(pCtx, rows_impacted_counter);
 }
 
-/// Commit hook callback - resets the counter and commits db_version
+/// Commit hook callback - resets the counter, commits db_version, and resets seq
 fn commitHookCallback(pArg: ?*anyopaque) callconv(.c) c_int {
     _ = pArg;
     // Always commit db_version on commit - pending_db_version being higher
@@ -49,14 +49,16 @@ fn commitHookCallback(pArg: ?*anyopaque) callconv(.c) c_int {
     // calling crsql_next_db_version()). The rows_impacted counter only tracks
     // changes via the crsql_changes vtab, but local INSERTs also need tracking.
     site_identity.commitDbVersion();
+    site_identity.resetSeq();
     resetCounter();
     return 0; // 0 = allow commit to proceed
 }
 
-/// Rollback hook callback - resets the counter and pending db_version
+/// Rollback hook callback - resets the counter, pending db_version, and seq
 fn rollbackHookCallback(pArg: ?*anyopaque) callconv(.c) void {
     _ = pArg;
     site_identity.rollbackDbVersion();
+    site_identity.resetSeq();
     resetCounter();
 }
 

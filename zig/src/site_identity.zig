@@ -440,6 +440,23 @@ pub fn rollbackDbVersion() void {
     pending_db_version = 0;
 }
 
+/// Pending seq counter for the current transaction
+/// Increments for each change within a transaction, resets on commit/rollback
+var pending_seq: i64 = 0;
+
+/// Get the next seq number and increment the counter
+/// Used by triggers to assign unique seq values within a transaction
+pub fn getNextSeq() i64 {
+    const seq = pending_seq;
+    pending_seq += 1;
+    return seq;
+}
+
+/// Reset seq counter (called on commit/rollback)
+pub fn resetSeq() void {
+    pending_seq = 0;
+}
+
 /// Get current db_version
 pub fn getDbVersion() i64 {
     return global_db_version;
@@ -532,7 +549,25 @@ pub fn resetForTesting() void {
     @memset(&global_site_id, 0);
 }
 
-/// Register both UDFs with a database connection
+/// Implementation of crsql_increment_and_get_seq() SQL function
+/// Returns the current seq value and increments the counter for the next call.
+/// Used by triggers to assign unique seq values within a transaction.
+fn crsqlIncrementAndGetSeqFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    _ = argv;
+    if (argc != 0) {
+        api.result_error(pCtx, "crsql_increment_and_get_seq takes no arguments", -1);
+        return;
+    }
+
+    const seq = getNextSeq();
+    api.result_int64(pCtx, seq);
+}
+
+/// Register all UDFs with a database connection
 pub fn register(db: ?*api.sqlite3) c_int {
     var rc = api.create_function_v2(
         db,
@@ -569,6 +604,21 @@ pub fn register(db: ?*api.sqlite3) c_int {
         api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
         null,
         &crsqlNextDbVersionFunc,
+        null,
+        null,
+        null,
+    );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_increment_and_get_seq for triggers to get unique seq values
+    // SQLITE_INNOCUOUS allows this function to be called from triggers
+    rc = api.create_function_v2(
+        db,
+        "crsql_increment_and_get_seq",
+        0, // nArg: 0 arguments
+        api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
+        null,
+        &crsqlIncrementAndGetSeqFunc,
         null,
         null,
         null,
@@ -693,4 +743,31 @@ test "generateUuid produces different values" {
     const uuid1 = generateUuid();
     const uuid2 = generateUuid();
     try std.testing.expect(!std.mem.eql(u8, &uuid1, &uuid2));
+}
+
+test "getNextSeq increments and returns sequential values" {
+    const saved_seq = pending_seq;
+    defer {
+        pending_seq = saved_seq;
+    }
+
+    pending_seq = 0;
+
+    try std.testing.expectEqual(@as(i64, 0), getNextSeq());
+    try std.testing.expectEqual(@as(i64, 1), getNextSeq());
+    try std.testing.expectEqual(@as(i64, 2), getNextSeq());
+    try std.testing.expectEqual(@as(i64, 3), getNextSeq());
+    try std.testing.expectEqual(@as(i64, 4), getNextSeq());
+}
+
+test "resetSeq resets counter to zero" {
+    const saved_seq = pending_seq;
+    defer {
+        pending_seq = saved_seq;
+    }
+
+    pending_seq = 42;
+    resetSeq();
+    try std.testing.expectEqual(@as(i64, 0), pending_seq);
+    try std.testing.expectEqual(@as(i64, 0), getNextSeq());
 }

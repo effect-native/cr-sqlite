@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> **Last Updated**: 2025-12-14 (Round 23)
+> **Last Updated**: 2025-12-14 (Round 25)
 
 ## Status Summary
 
@@ -106,6 +106,23 @@
   - **Result: 100% compatible**
 - 📋 macOS universal binary approach documented (lipo-based)
 - 📋 Reactive query subscriptions researched (defer to Phase 2)
+
+### Round 24: Adversarial Testing (Bugs Found)
+- ✅ Merge stress test (`zig/harness/test-merge-stress.sh`) — **ALL PASS**
+- ✅ Schema evolution test (`zig/harness/test-schema-evolution.sh`) — **ALL PASS**
+- ⚠️ Large data test (`zig/harness/test-large-data.sh`) — 23/25 PASS
+- ⚠️ Clock edge cases test (`zig/harness/test-clock-edge-cases.sh`) — found 3 bugs
+
+### Round 25: Bug Fixes (All 3 Fixed!)
+- ✅ **BUG-001 FIXED**: cl comparison now works (higher cl wins)
+  - Added `zeroClockOnResurrect()` to reset col_versions on resurrection
+- ✅ **BUG-002 FIXED**: Tombstone (cl<0) now deletes rows correctly
+  - Added special tombstone handling before CL gating check
+- ✅ **BUG-003 FIXED**: seq now increments within transaction
+  - Added `crsql_increment_and_get_seq()` UDF
+  - Updated all triggers to use new seq function
+  - Seq resets to 0 on commit/rollback
+- ✅ **Clock edge cases test now passes: 7/7**
 
 ---
 
