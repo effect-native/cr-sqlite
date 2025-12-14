@@ -257,26 +257,24 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create clock entry
-            // Note: db_version is set to 1 for local writes. The commit hook
-            // will track actual db_version progression.
+            // db_version uses crsql_next_db_version() to get next version for this transaction
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  VALUES
-                \\    (NEW.rowid, '{s}', 1, 1, 0, 0);
+                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, 0);
                 \\
             , .{ table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
         }
     }
 
     // Sentinel row for row creation tracking
-    // Note: db_version is set to 1 for local writes. The commit hook
-    // will track actual db_version progression.
+    // db_version uses crsql_next_db_version() to get next version for this transaction
     writer.print(
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  VALUES
-        \\    (NEW.rowid, '-1', 1, 1, 0, 0);
+        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, 0);
         \\END;
     , .{table_name}) catch return error.BufferOverflow;
 
@@ -351,8 +349,7 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create/update clock entry when changed
-            // Note: db_version is set to 1 for local writes. The commit hook
-            // will track actual db_version progression.
+            // db_version uses crsql_next_db_version() to get next version for this transaction
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
@@ -360,7 +357,7 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
                 \\    NEW.rowid,
                 \\    '{s}',
                 \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = NEW.rowid AND col_name = '{s}'), 0) + 1,
-                \\    1,
+                \\    crsql_next_db_version(),
                 \\    0,
                 \\    0
                 \\  WHERE OLD."{s}" IS NOT NEW."{s}";
@@ -404,8 +401,7 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const writer = fbs.writer();
 
     // Trigger header with sync_bit gating
-    // Note: db_version is set to 1 for local writes. The commit hook
-    // will track actual db_version progression.
+    // db_version uses crsql_next_db_version() to get next version for this transaction
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
         \\AFTER DELETE ON "{s}"
@@ -421,7 +417,7 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE pk = OLD.rowid AND col_name = '-1'),
         \\      2
         \\    ),
-        \\    1,
+        \\    crsql_next_db_version(),
         \\    0,
         \\    0;
         \\  -- Drop all clock entries except the sentinel

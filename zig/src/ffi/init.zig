@@ -123,6 +123,11 @@ pub export fn sqlite3_crsqlite_init(
         return init_rc;
     }
 
+    // Enable trusted_schema so our INNOCUOUS functions can be called from triggers.
+    // Without this, SQLite 3.31.0+ rejects functions in triggers by default.
+    // This is safe because our functions are marked SQLITE_INNOCUOUS.
+    _ = api.exec(db, "PRAGMA trusted_schema = ON", null, null, null);
+
     // Initialize site_id (creates table if needed, loads or generates site_id)
     if (!site_identity.initSiteId(db)) {
         return api.SQLITE_ERROR;

@@ -34,6 +34,7 @@ const rows_impacted = @import("rows_impacted.zig");
 const merge_insert = @import("merge_insert.zig");
 const compare_values = @import("compare_values.zig");
 const sync_bit = @import("sync_bit.zig");
+const site_identity = @import("site_identity.zig");
 
 // Platform-aware logging: use std.log on native, no-op on WASM/freestanding
 const log = if (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)
@@ -98,10 +99,27 @@ const COL_CL = 7;
 const COL_SEQ = 8;
 
 // Index plan encoding for xBestIndex/xFilter:
-// idxNum bit 0: has db_version > constraint (argv[0])
-// idxNum bit 1: has site_id IS NOT constraint (argv[1])
-const IDX_DB_VERSION: c_int = 1;
-const IDX_SITE_ID: c_int = 2;
+// idxNum bits encode which filters are active and their types.
+// Bit layout:
+//   bits 0-2: db_version filter type (0=none, 1=GT, 2=GE, 3=LT, 4=LE)
+//   bits 3-5: site_id filter type (0=none, 1=ISNOT, 2=IS, 3=EQ, 4=NE)
+const IDX_DB_VERSION_MASK: c_int = 0x07; // bits 0-2
+const IDX_SITE_ID_MASK: c_int = 0x38; // bits 3-5
+const IDX_SITE_ID_SHIFT: u5 = 3;
+
+// db_version filter types (stored in bits 0-2)
+const IDX_DB_VERSION_NONE: c_int = 0;
+const IDX_DB_VERSION_GT: c_int = 1;
+const IDX_DB_VERSION_GE: c_int = 2;
+const IDX_DB_VERSION_LT: c_int = 3;
+const IDX_DB_VERSION_LE: c_int = 4;
+
+// site_id filter types (stored in bits 3-5, shifted)
+const IDX_SITE_ID_NONE: c_int = 0;
+const IDX_SITE_ID_ISNOT: c_int = 1;
+const IDX_SITE_ID_IS: c_int = 2;
+const IDX_SITE_ID_EQ: c_int = 3;
+const IDX_SITE_ID_NE: c_int = 4;
 
 // =============================================================================
 // Virtual Table Structure
@@ -150,11 +168,11 @@ const ChangesCursor = extern struct {
     current_pk: i64,
 
     // Filter state for xBestIndex/xFilter optimization
-    filter_db_version: i64, // Only return rows with db_version > this
+    filter_db_version: i64, // db_version filter value
+    filter_db_version_type: c_int, // IDX_DB_VERSION_GT, IDX_DB_VERSION_GE, etc.
     filter_site_id_blob: ?[*]const u8,
     filter_site_id_len: usize,
-    has_db_version_filter: bool,
-    has_site_id_filter: bool,
+    filter_site_id_type: c_int, // IDX_SITE_ID_ISNOT, IDX_SITE_ID_IS, etc.
 };
 
 /// Helper to get the allocator (always page_allocator for cursor allocations)
@@ -329,7 +347,7 @@ fn changesDisconnect(pVTab: ?*vtab.VTab) callconv(.c) c_int {
 }
 
 /// xBestIndex - Query planning
-/// Recognizes db_version > ? and site_id IS NOT ? constraints
+/// Recognizes db_version (>, >=, <, <=) and site_id (IS, IS NOT, =, !=) constraints
 fn changesBestIndex(pVTab: ?*vtab.VTab, pIdxInfo: ?*vtab.IndexInfo) callconv(.c) c_int {
     _ = pVTab;
     if (pIdxInfo == null) return vtab.SQLITE_ERROR;
@@ -338,6 +356,10 @@ fn changesBestIndex(pVTab: ?*vtab.VTab, pIdxInfo: ?*vtab.IndexInfo) callconv(.c)
     var idxNum: c_int = 0;
     var argvIndex: c_int = 1;
     var cost: f64 = 1_000_000.0;
+
+    // Track whether we've already claimed a constraint for each column
+    var have_db_version_filter = false;
+    var have_site_id_filter = false;
 
     // Check constraints
     const nConstraint = info.nConstraint;
@@ -348,21 +370,49 @@ fn changesBestIndex(pVTab: ?*vtab.VTab, pIdxInfo: ?*vtab.IndexInfo) callconv(.c)
         for (constraints, usages) |con, *usage| {
             if (con.usable == 0) continue;
 
-            // COL_DB_VERSION (5) with GT operator
-            if (con.iColumn == COL_DB_VERSION and con.op == vtab.SQLITE_INDEX_CONSTRAINT_GT) {
-                idxNum |= IDX_DB_VERSION;
-                usage.argvIndex = argvIndex;
-                usage.omit = 1;
-                argvIndex += 1;
-                cost /= 10.0; // Reduced cost with this constraint
+            // COL_DB_VERSION (5) - handle GT, GE, LT, LE
+            if (con.iColumn == COL_DB_VERSION and !have_db_version_filter) {
+                var filter_type: c_int = IDX_DB_VERSION_NONE;
+                if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_GT) {
+                    filter_type = IDX_DB_VERSION_GT;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_GE) {
+                    filter_type = IDX_DB_VERSION_GE;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_LT) {
+                    filter_type = IDX_DB_VERSION_LT;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_LE) {
+                    filter_type = IDX_DB_VERSION_LE;
+                }
+
+                if (filter_type != IDX_DB_VERSION_NONE) {
+                    idxNum = (idxNum & ~IDX_DB_VERSION_MASK) | filter_type;
+                    usage.argvIndex = argvIndex;
+                    usage.omit = 1;
+                    argvIndex += 1;
+                    cost /= 10.0;
+                    have_db_version_filter = true;
+                }
             }
-            // COL_SITE_ID (6) with ISNOT operator
-            else if (con.iColumn == COL_SITE_ID and con.op == vtab.SQLITE_INDEX_CONSTRAINT_ISNOT) {
-                idxNum |= IDX_SITE_ID;
-                usage.argvIndex = argvIndex;
-                usage.omit = 1;
-                argvIndex += 1;
-                cost /= 2.0;
+            // COL_SITE_ID (6) - handle ISNOT, IS, EQ, NE
+            else if (con.iColumn == COL_SITE_ID and !have_site_id_filter) {
+                var filter_type: c_int = IDX_SITE_ID_NONE;
+                if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_ISNOT) {
+                    filter_type = IDX_SITE_ID_ISNOT;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_IS) {
+                    filter_type = IDX_SITE_ID_IS;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_EQ) {
+                    filter_type = IDX_SITE_ID_EQ;
+                } else if (con.op == vtab.SQLITE_INDEX_CONSTRAINT_NE) {
+                    filter_type = IDX_SITE_ID_NE;
+                }
+
+                if (filter_type != IDX_SITE_ID_NONE) {
+                    idxNum = (idxNum & ~IDX_SITE_ID_MASK) | (filter_type << IDX_SITE_ID_SHIFT);
+                    usage.argvIndex = argvIndex;
+                    usage.omit = 1;
+                    argvIndex += 1;
+                    cost /= 2.0;
+                    have_site_id_filter = true;
+                }
             }
         }
     }
@@ -506,14 +556,25 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     var sql_buf: [1024]u8 = undefined;
 
     // Build query with optional db_version filter
-    const sql = if (cursor.has_db_version_filter)
-        std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version > ?", .{table_name}) catch {
+    // Note: We only push down the db_version filter to SQL query.
+    // Site_id filter is applied in shouldSkipSiteId since it requires ordinal lookup.
+    const sql = switch (cursor.filter_db_version_type) {
+        IDX_DB_VERSION_GT => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version > ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
-        }
-    else
-        std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+        },
+        IDX_DB_VERSION_GE => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version >= ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
-        };
+        },
+        IDX_DB_VERSION_LT => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version < ?", .{table_name}) catch {
+            return vtab.SQLITE_ERROR;
+        },
+        IDX_DB_VERSION_LE => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version <= ?", .{table_name}) catch {
+            return vtab.SQLITE_ERROR;
+        },
+        else => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+            return vtab.SQLITE_ERROR;
+        },
+    };
 
     var stmt: ?*api.sqlite3_stmt = null;
     const rc = prepareV2(toApiDb(db), sql, -1, &stmt, null);
@@ -522,7 +583,7 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     }
 
     // Bind db_version filter if present
-    if (cursor.has_db_version_filter) {
+    if (cursor.filter_db_version_type != IDX_DB_VERSION_NONE) {
         if (api.bind_int64(stmt, 1, cursor.filter_db_version) != vtab.SQLITE_OK) {
             _ = finalizeStmt(stmt);
             return vtab.SQLITE_ERROR;
@@ -544,50 +605,66 @@ fn isSentinelRow(stmt: ?*api.sqlite3_stmt) bool {
     return false;
 }
 
-/// Check if the current row's site_id matches the filter (should be skipped)
-/// Returns true if the row should be skipped (site_id matches the IS NOT filter)
-fn shouldSkipSiteId(cursor: *ChangesCursor, stmt: ?*api.sqlite3_stmt) bool {
-    if (!cursor.has_site_id_filter or cursor.filter_site_id_blob == null) {
+/// Check if the current row should be skipped based on site_id filter
+/// Returns true if the row should be skipped based on the filter type:
+/// - ISNOT: skip if site_id matches filter (exclude matching)
+/// - IS/EQ: skip if site_id does NOT match filter (include only matching)
+/// - NE: skip if site_id matches filter (exclude matching)
+fn shouldSkipSiteId(cursor: *ChangesCursor, db: ?*vtab.sqlite3, stmt: ?*api.sqlite3_stmt) bool {
+    if (cursor.filter_site_id_type == IDX_SITE_ID_NONE or cursor.filter_site_id_blob == null) {
         return false;
     }
 
     // Get site_id from clock table (column 4)
-    // Clock table stores site_id as INTEGER (0 for local) or BLOB for remote
+    // Clock table stores site_id as INTEGER ordinal (0 for local) or BLOB for remote
     const col_type = columnTypeFromStmt(stmt, 4);
 
-    // Filter blob is what we want to exclude
-    const filter_blob = cursor.filter_site_id_blob.?;
-    const filter_len = cursor.filter_site_id_len;
+    // Get the actual 16-byte site_id for this row
+    var row_site_id: [16]u8 = .{0} ** 16;
+    var have_row_site_id = false;
 
     if (col_type == api.SQLITE_INTEGER) {
-        // Local site_id (0) stored as INTEGER
-        // Compare with filter blob - if filter is all zeros, skip this row
-        const site_id_int = columnInt64FromStmt(stmt, 4);
-        if (site_id_int == 0 and filter_len == 16) {
-            // Check if filter is 16 zero bytes (local site)
-            var all_zero = true;
-            for (filter_blob[0..16]) |b| {
-                if (b != 0) {
-                    all_zero = false;
-                    break;
-                }
-            }
-            if (all_zero) return true;
+        // Integer ordinal - look up actual site_id
+        const ordinal = columnInt64FromStmt(stmt, 4);
+        if (site_identity.getSiteIdByOrdinal(toApiDb(db), ordinal)) |site_blob| {
+            row_site_id = site_blob;
+            have_row_site_id = true;
         }
     } else if (col_type == api.SQLITE_BLOB) {
-        // Remote site_id stored as BLOB
+        // Direct blob
         const row_blob = columnBlobFromStmt(stmt, 4);
         const row_len = columnBytesFromStmt(stmt, 4);
-        if (row_blob != null and row_len == filter_len) {
+        if (row_blob != null and row_len == 16) {
             const row_ptr: [*]const u8 = @ptrCast(row_blob);
-            // Compare blobs
-            if (std.mem.eql(u8, row_ptr[0..@intCast(row_len)], filter_blob[0..filter_len])) {
-                return true;
-            }
+            @memcpy(&row_site_id, row_ptr[0..16]);
+            have_row_site_id = true;
         }
     }
 
-    return false;
+    if (!have_row_site_id) {
+        // Can't determine row's site_id - don't skip by default
+        return false;
+    }
+
+    // Compare with filter
+    const filter_blob = cursor.filter_site_id_blob.?;
+    const filter_len = cursor.filter_site_id_len;
+
+    // Check if they match (filter must be 16 bytes for proper comparison)
+    const matches = (filter_len == 16) and std.mem.eql(u8, &row_site_id, filter_blob[0..16]);
+
+    // Apply filter logic based on type
+    switch (cursor.filter_site_id_type) {
+        IDX_SITE_ID_ISNOT, IDX_SITE_ID_NE => {
+            // ISNOT/NE: skip if matches (we want rows that DON'T match)
+            return matches;
+        },
+        IDX_SITE_ID_IS, IDX_SITE_ID_EQ => {
+            // IS/EQ: skip if NOT matches (we want rows that DO match)
+            return !matches;
+        },
+        else => return false,
+    }
 }
 
 /// Move to next row within current table, or advance to next table
@@ -601,8 +678,8 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
                     continue;
                 }
 
-                // Check site_id filter - skip rows that match the IS NOT filter
-                if (shouldSkipSiteId(cursor, stmt)) {
+                // Check site_id filter - skip rows based on filter type
+                if (shouldSkipSiteId(cursor, db, stmt)) {
                     // Skip this row, continue to next
                     continue;
                 }
@@ -657,23 +734,25 @@ fn changesFilter(
     const db = pVTab.db;
 
     // Reset filter state
-    cursor.has_db_version_filter = false;
-    cursor.has_site_id_filter = false;
     cursor.filter_db_version = 0;
+    cursor.filter_db_version_type = IDX_DB_VERSION_NONE;
     cursor.filter_site_id_blob = null;
     cursor.filter_site_id_len = 0;
+    cursor.filter_site_id_type = IDX_SITE_ID_NONE;
 
     // Extract constraint values from argv based on idxNum
     var argIdx: usize = 0;
-    if (idxNum & IDX_DB_VERSION != 0 and argc > @as(c_int, @intCast(argIdx))) {
+    const db_version_filter_type = idxNum & IDX_DB_VERSION_MASK;
+    if (db_version_filter_type != IDX_DB_VERSION_NONE and argc > @as(c_int, @intCast(argIdx))) {
         cursor.filter_db_version = api.value_int64(toApiValue(argv[argIdx]));
-        cursor.has_db_version_filter = true;
+        cursor.filter_db_version_type = db_version_filter_type;
         argIdx += 1;
     }
-    if (idxNum & IDX_SITE_ID != 0 and argc > @as(c_int, @intCast(argIdx))) {
+    const site_id_filter_type = (idxNum & IDX_SITE_ID_MASK) >> IDX_SITE_ID_SHIFT;
+    if (site_id_filter_type != IDX_SITE_ID_NONE and argc > @as(c_int, @intCast(argIdx))) {
         cursor.filter_site_id_blob = @ptrCast(api.value_blob(toApiValue(argv[argIdx])));
         cursor.filter_site_id_len = @intCast(api.value_bytes(toApiValue(argv[argIdx])));
-        cursor.has_site_id_filter = true;
+        cursor.filter_site_id_type = site_id_filter_type;
     }
 
     // Discover all CRR tables
@@ -892,14 +971,20 @@ fn changesColumn(
         },
         COL_SITE_ID => {
             // site_id is column 4 in clock table query
-            // Our clock table stores site_id as INTEGER (0 for local).
+            // Our clock table stores site_id as INTEGER ordinal (0 for local).
             // The crsql_changes schema expects a 16-byte BLOB.
-            // Check column type: if INTEGER and value is 0, return 16-byte zero blob
+            // We need to look up the actual site_id from the ordinal.
             const col_type = columnTypeFromStmt(stmt, 4);
             if (col_type == api.SQLITE_INTEGER) {
-                // Integer site_id (0 = local) -> return 16-byte zero blob
-                const zero_blob: [16]u8 = .{0} ** 16;
-                resultBlob(ctx, &zero_blob, 16, api.getTransientDestructor());
+                // Integer site_id ordinal - look up actual site_id blob
+                const ordinal = columnInt64FromStmt(stmt, 4);
+                if (site_identity.getSiteIdByOrdinal(toApiDb(db), ordinal)) |site_blob| {
+                    resultBlob(ctx, &site_blob, 16, api.getTransientDestructor());
+                } else {
+                    // Fallback to zeros if lookup fails
+                    const zero_blob: [16]u8 = .{0} ** 16;
+                    resultBlob(ctx, &zero_blob, 16, api.getTransientDestructor());
+                }
             } else if (col_type == api.SQLITE_BLOB) {
                 const blob = columnBlobFromStmt(stmt, 4);
                 const len = columnBytesFromStmt(stmt, 4);

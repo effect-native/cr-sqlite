@@ -245,6 +245,40 @@ pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64)
     }
 }
 
+/// Get the primary key column name for a table.
+/// For MVP, assumes single-column PRIMARY KEY.
+/// Returns the PK column name, or null if not found.
+fn getPkColumnName(db: ?*api.sqlite3, table_name: []const u8) MergeError!?[64]u8 {
+    var pragma_buf: [256]u8 = undefined;
+    const pragma_sql = std.fmt.bufPrintZ(&pragma_buf, "PRAGMA table_info(\"{s}\")", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, pragma_sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    // Column 1 is name, column 5 is pk (0 = not PK, 1+ = PK index)
+    while (api.step(stmt) == api.SQLITE_ROW) {
+        const pk_val = api.column_int64(stmt, 5);
+        if (pk_val > 0) {
+            // This is a PK column
+            const name_ptr = api.column_text(stmt, 1) orelse continue;
+            const name_slice = std.mem.span(name_ptr);
+            if (name_slice.len >= 64) {
+                return MergeError.BufferOverflow;
+            }
+            var result: [64]u8 = undefined;
+            @memcpy(result[0..name_slice.len], name_slice);
+            result[name_slice.len] = 0; // null-terminate
+            return result;
+        }
+    }
+
+    return null;
+}
+
 /// Insert a new row into base table with a single column value.
 /// For MVP, assumes single-column INTEGER PRIMARY KEY that matches rowid.
 /// Decodes the first value from pk_blob to get the PK value to insert.
@@ -281,17 +315,36 @@ pub fn insertIntoBaseTable(
         else => return MergeError.DecodeError, // Only integer PKs supported for MVP
     };
 
-    // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
-    var buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+    // Get the PK column name from the table schema
+    const pk_col_name = try getPkColumnName(db, table_name);
 
+    var buf: [1024]u8 = undefined;
     var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
+
+    if (pk_col_name) |pk_col| {
+        // Table has a declared PK column - insert using that column name
+        // Find the length of the null-terminated PK column name
+        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+        const pk_col_slice = pk_col[0..pk_col_len];
+
+        // Build: INSERT INTO "{table}" ("{pk_col}", "{col}") VALUES (?, ?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\", \"{s}\") VALUES (?, ?)", .{ table_name, pk_col_slice, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // No declared PK column - use rowid directly
+        // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
     }
     defer _ = api.finalize(stmt);
 
-    // Bind the rowid (PK value)
+    // Bind the PK value
     _ = api.bind_int64(stmt, 1, pk_int);
 
     // Bind column value based on type
@@ -367,17 +420,34 @@ pub fn insertRowForResurrection(
     col_name: []const u8,
     value: ?*api.sqlite3_value,
 ) MergeError!void {
-    // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
-    var buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+    // Get the PK column name from the table schema
+    const pk_col_name = try getPkColumnName(db, table_name);
 
+    var buf: [1024]u8 = undefined;
     var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
+
+    if (pk_col_name) |pk_col| {
+        // Table has a declared PK column - insert using that column name
+        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+        const pk_col_slice = pk_col[0..pk_col_len];
+
+        // Build: INSERT INTO "{table}" ("{pk_col}", "{col}") VALUES (?, ?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\", \"{s}\") VALUES (?, ?)", .{ table_name, pk_col_slice, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // No declared PK column - use rowid directly
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
     }
     defer _ = api.finalize(stmt);
 
-    // Bind the rowid (pk)
+    // Bind the pk value
     _ = api.bind_int64(stmt, 1, pk);
 
     // Bind column value based on type

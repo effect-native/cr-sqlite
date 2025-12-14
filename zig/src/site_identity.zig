@@ -449,11 +449,12 @@ pub fn register(db: ?*api.sqlite3) c_int {
     if (rc != api.SQLITE_OK) return rc;
 
     // Register crsql_next_db_version with -1 args to accept 0 or 1 arguments
+    // SQLITE_INNOCUOUS allows this function to be called from triggers
     rc = api.create_function_v2(
         db,
         "crsql_next_db_version",
         -1, // Variable number of arguments
-        api.SQLITE_UTF8,
+        api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
         null,
         &crsqlNextDbVersionFunc,
         null,

@@ -44,10 +44,11 @@ fn rowsImpactedFunc(
 /// Commit hook callback - resets the counter and commits db_version
 fn commitHookCallback(pArg: ?*anyopaque) callconv(.c) c_int {
     _ = pArg;
-    // Commit db_version if any rows were impacted during this transaction
-    if (rows_impacted_counter > 0) {
-        site_identity.commitDbVersion();
-    }
+    // Always commit db_version on commit - pending_db_version being higher
+    // than global_db_version indicates local changes occurred (via triggers
+    // calling crsql_next_db_version()). The rows_impacted counter only tracks
+    // changes via the crsql_changes vtab, but local INSERTs also need tracking.
+    site_identity.commitDbVersion();
     resetCounter();
     return 0; // 0 = allow commit to proceed
 }
