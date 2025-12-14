@@ -12,5 +12,5 @@
     "declarationMap": true,
     "noEmit": true
   },
-  "include": ["tests/**/*.ts", "playwright.config.ts"]
+  "include": ["tests/**/*.ts", "src/**/*.ts", "playwright.config.ts"]
 }

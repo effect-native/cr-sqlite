@@ -1,0 +1,190 @@
+name: zig-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'zig/**'
+      - '.github/workflows/zig-tests.yaml'
+  pull_request:
+    paths:
+      - 'zig/**'
+      - '.github/workflows/zig-tests.yaml'
+
+jobs:
+  build-native:
+    name: Build Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+
+      - name: Build
+        working-directory: zig
+        run: zig build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crsqlite-native-${{ runner.os }}
+          path: zig/zig-out/lib/
+          retention-days: 7
+
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-wasm-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-wasm-
+
+      - name: Build WASM
+        working-directory: zig
+        run: zig build wasm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crsqlite-wasm
+          path: zig/zig-out/lib/*.wasm
+          retention-days: 7
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+
+      - name: Run unit tests
+        working-directory: zig
+        run: zig build test
+
+  test-parity:
+    name: Parity Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+
+      - name: Build extension
+        working-directory: zig
+        run: zig build
+
+      - name: Run parity tests
+        working-directory: zig
+        run: make test-parity
+
+  test-browser:
+    name: Browser Tests
+    runs-on: ubuntu-latest
+    needs: build-wasm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-wasm-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-wasm-
+
+      - name: Build WASM
+        working-directory: zig
+        run: zig build wasm
+
+      - name: Install dependencies
+        working-directory: zig/browser-test
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: zig/browser-test
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: zig/browser-test
+        run: npm test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: zig/browser-test/test-results/
+          retention-days: 7

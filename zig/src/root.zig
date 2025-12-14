@@ -11,6 +11,7 @@ pub const finalize = @import("finalize.zig");
 pub const pack_columns = @import("pack_columns.zig");
 pub const rows_impacted = @import("rows_impacted.zig");
 pub const site_identity = @import("site_identity.zig");
+pub const stmt_cache = @import("stmt_cache.zig");
 pub const sync_bit = @import("sync_bit.zig");
 pub const merge_insert = @import("merge_insert.zig");
 pub const sqlite = struct {
@@ -54,6 +55,8 @@ test {
     _ = rows_impacted;
     // Run site_identity tests
     _ = site_identity;
+    // Run stmt_cache tests
+    _ = stmt_cache;
     // Run merge_insert tests
     _ = merge_insert;
     // Run sync_bit tests
