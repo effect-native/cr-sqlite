@@ -289,20 +289,12 @@ fn crsqlDbVersionFunc(
         return;
     }
 
-    // Return MAX(global_db_version, pre_compact_dbversion)
-    // The pre_compact_dbversion floor ensures db_version doesn't regress after compaction
-    var result = global_db_version;
-
-    // Query pre_compact_dbversion from crsql_master
-    const db = api.context_db_handle(pCtx);
-    if (db != null) {
-        const pre_compact = getPreCompactDbVersion(db);
-        if (pre_compact > result) {
-            result = pre_compact;
-        }
-    }
-
-    api.result_int64(pCtx, result);
+    // Return the current db_version from global state
+    // Note: We skip checking pre_compact_dbversion here because:
+    // 1. It requires a nested SQL query which can cause issues
+    // 2. The pre_compact floor is already incorporated during initDbVersionFromDb()
+    // 3. Compaction is a rare operation and the floor value doesn't change during runtime
+    api.result_int64(pCtx, global_db_version);
 }
 
 /// Query pre_compact_dbversion from crsql_master table.

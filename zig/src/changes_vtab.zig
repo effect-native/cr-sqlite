@@ -1270,12 +1270,19 @@ fn changesUpdate(
         return vtab.SQLITE_OK;
     }
 
-    // Step 4b: Check if local row is deleted (even CL) and needs resurrection
-    // When receiving a column change for a deleted row, we need to re-insert instead of update
-    const local_is_deleted = (local_cl > 0) and (@mod(local_cl, 2) == 0);
-    if (local_is_deleted and cl > local_cl) {
-        // Resurrection case: local row was deleted, remote has newer CL with column data
-        log.debug("changesUpdate: resurrection - local_cl={} (deleted), remote cl={}", .{ local_cl, cl });
+    // Step 4b: Check if row needs resurrection
+    // A row needs resurrection if:
+    //   - The incoming cl indicates live (odd) OR cl > local_cl
+    //   - BUT the row doesn't actually exist in the base table
+    // This handles both:
+    //   - Out-of-order delivery: sentinel arrives first, updates cl to 3 (live), then column data arrives
+    //   - In-order delivery: column data arrives when local_cl is still even (deleted)
+    const row_exists = merge_insert.rowExistsInBaseTable(api_db, table_slice, pk_rowid) catch false;
+    const incoming_is_live = @mod(cl, 2) == 1; // odd cl = live state
+
+    if (!row_exists and incoming_is_live) {
+        // Resurrection case: row doesn't exist but should be live
+        log.debug("changesUpdate: resurrection needed - row doesn't exist, incoming cl={} (live)", .{cl});
 
         // Get the value from argv[5]
         const resurrect_value = toApiValue(argv[5]);

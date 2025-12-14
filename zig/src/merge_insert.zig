@@ -225,6 +225,23 @@ pub fn deleteFromBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) M
     }
 }
 
+/// Check if a row exists in the base table by rowid.
+/// Returns true if the row exists, false otherwise.
+pub fn rowExistsInBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!bool {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    return api.step(stmt) == api.SQLITE_ROW;
+}
+
 /// Drop all clock entries except sentinel (-1).
 /// Used when merging a remote delete - removes column clock entries but keeps the sentinel.
 pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
@@ -496,6 +513,7 @@ test "module compiles" {
     _ = setWinnerClock;
     _ = findPkFromBlob;
     _ = deleteFromBaseTable;
+    _ = rowExistsInBaseTable;
     _ = dropNonSentinelClocks;
     _ = insertIntoBaseTable;
     _ = insertIntoPksTable;

@@ -186,11 +186,25 @@ pub fn result_text(
 
 /// Wrapper for sqlite3_result_int64
 /// Sets the result of a function to a 64-bit integer.
+/// Falls back to result_int if result_int64 is not available (e.g., WASM builds).
 pub fn result_int64(pCtx: ?*c.sqlite3_context, val: c.sqlite3_int64) void {
-    const api = sqlite_c.sqlite3_api;
-    if (api == null) return;
-    const func = api.*.result_int64 orelse return;
-    func(pCtx, val);
+    const api_ptr = sqlite_c.sqlite3_api;
+    if (api_ptr == null) {
+        // No API - cannot set result
+        return;
+    }
+    // Dereference once and use local reference
+    const api = api_ptr.*;
+    if (api.result_int64) |func| {
+        func(pCtx, val);
+    } else if (api.result_int) |func_int| {
+        // Fallback to result_int for WASM builds where result_int64 may not be available
+        // This works for values that fit in 32 bits (db_version typically does)
+        func_int(pCtx, @intCast(val));
+    } else if (api.result_error) |func_err| {
+        // Last resort - report error if we can't set a result
+        func_err(pCtx, "result_int64 not available", -1);
+    }
 }
 
 /// Wrapper for sqlite3_result_int

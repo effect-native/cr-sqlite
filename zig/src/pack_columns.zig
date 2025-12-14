@@ -15,6 +15,9 @@ const std = @import("std");
 const api = @import("ffi/api.zig");
 const codec = @import("codec.zig");
 
+/// Maximum columns supported for packing (use fixed buffer to avoid memory allocation)
+const MAX_PACK_COLUMNS = 64;
+
 /// Implementation of `crsql_pack_columns(...)` SQL function.
 /// Takes 1+ SQLite values and returns a packed blob.
 fn packColumnsFunc(
@@ -28,18 +31,18 @@ fn packColumnsFunc(
         return;
     }
 
-    // Use page_allocator for temporary allocation
-    const allocator = std.heap.page_allocator;
-
     // Convert argc to usize for array operations
     const arg_count: usize = @intCast(argc);
 
-    // Allocate temporary array for codec.Value
-    const values = allocator.alloc(codec.Value, arg_count) catch {
-        api.result_error_nomem(pCtx);
+    // Use fixed-size buffer to avoid memory allocation
+    // This avoids potential WASM issues with page_allocator
+    if (arg_count > MAX_PACK_COLUMNS) {
+        api.result_error(pCtx, "crsql_pack_columns: too many columns (max 64)", -1);
         return;
-    };
-    defer allocator.free(values);
+    }
+
+    // Fixed-size array on stack
+    var values: [MAX_PACK_COLUMNS]codec.Value = undefined;
 
     // Convert each SQLite value to codec.Value
     var i: usize = 0;
@@ -75,8 +78,14 @@ fn packColumnsFunc(
         };
     }
 
+    // Use a fixed buffer for packing output to avoid heap allocation
+    // Maximum pack output size: 1 byte for count + up to 64 columns * ~20 bytes each = ~1300 bytes
+    var pack_buffer: [2048]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&pack_buffer);
+    const allocator = fba.allocator();
+
     // Pack the values using codec
-    const packed_blob = codec.pack(allocator, values) catch |err| {
+    const packed_blob = codec.pack(allocator, values[0..arg_count]) catch |err| {
         switch (err) {
             error.TooManyColumns => api.result_error(pCtx, "crsql_pack_columns: too many columns (max 255)", -1),
             error.LengthOverflow => api.result_error(pCtx, "crsql_pack_columns: value too large", -1),
@@ -85,10 +94,10 @@ fn packColumnsFunc(
         }
         return;
     };
-    defer allocator.free(packed_blob);
+    // No need to free - buffer is on stack
 
     // Return the blob using SQLITE_TRANSIENT so SQLite copies it
-    // (we free the memory immediately after this call)
+    // (the buffer is on the stack and will be invalidated after return)
     const len: c_int = @intCast(packed_blob.len);
     api.result_blob(pCtx, packed_blob.ptr, len, api.getTransientDestructor());
 }
