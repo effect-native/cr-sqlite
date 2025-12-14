@@ -15,3 +15,6 @@ target/
 .zig-cache/
 .tmp
 .tmp
+zig-out/
+zig/*.a
+zig/*.o
