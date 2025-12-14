@@ -12,3 +12,6 @@
 [submodule ".refs/tigerbeetle"]
 	path = .refs/tigerbeetle
 	url = git@github.com:tigerbeetle/tigerbeetle.git
+[submodule ".refs/zig-sqlite"]
+	path = .refs/zig-sqlite
+	url = git@github.com:vrischmann/zig-sqlite.git
