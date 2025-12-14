@@ -13,5 +13,6 @@ export default defineConfig({
     command: 'npx serve fixtures -l 3456',
     port: 3456,
     reuseExistingServer: !process.env.CI,
+    timeout: 30000,
   },
 });
