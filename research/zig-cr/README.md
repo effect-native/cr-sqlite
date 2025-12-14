@@ -67,6 +67,11 @@ After reports exist, produce:
 - `research/zig-cr/21-ghostty-best-practices.md`
 - `research/zig-cr/22-bun-best-practices.md`
 
+## Proposals
+- `research/zig-cr/93-phased-execution-proposal.md`
+- `research/zig-cr/94-long-term-solution.md`
+- `research/zig-cr/95-one-weird-tricks.md`
+
 ## Working Method
 1. Run agents concurrently with tight scopes.
 2. Do *not* implement; research only.
