@@ -4,33 +4,36 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Main library module
-    const lib_mod = b.addModule("crsql", .{
+    const root_mod = b.addModule("crsql", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    // Create static library artifact
+    root_mod.addAnonymousImport("golden_vectors", .{
+        .root_source_file = b.path("test/golden_vectors.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    root_mod.addAnonymousImport("merge_oracle", .{
+        .root_source_file = b.path("test/merge_oracle.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib = b.addLibrary(.{
         .name = "crsql",
         .linkage = .static,
-        .root_module = lib_mod,
+        .root_module = root_mod,
     });
     b.installArtifact(lib);
 
-    // Test module
-    const test_mod = b.addModule("crsql-test", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+    const tests = b.addTest(.{
+        .name = "crsql",
+        .root_module = root_mod,
     });
 
-    // Tests
-    const tests = b.addTest(.{
-        .name = "crsql-test",
-        .root_module = test_mod,
-    });
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
