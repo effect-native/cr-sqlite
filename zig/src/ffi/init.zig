@@ -47,6 +47,20 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
     );
     if (rc != api.SQLITE_OK) return rc;
 
+    // Register crsql_version() - standard version function (same implementation)
+    rc = api.create_function_v2(
+        db,
+        "crsql_version", // function name
+        0, // nArg: 0 arguments
+        api.SQLITE_UTF8 | api.SQLITE_DETERMINISTIC, // text encoding + deterministic
+        null, // pApp: no user data
+        &crsqlZigVersionFunc, // xFunc: scalar function (reuse same impl)
+        null, // xStep: not an aggregate
+        null, // xFinal: not an aggregate
+        null, // xDestroy: no cleanup needed
+    );
+    if (rc != api.SQLITE_OK) return rc;
+
     // Register crsql_as_crr() function
     rc = as_crr.register(db);
     if (rc != api.SQLITE_OK) return rc;

@@ -89,6 +89,22 @@ research/zig-cr/
 2. **Linux**: second priority — loadable `.so` extension
 3. **macOS/Windows/iOS/Android**: expand after Web + Linux are stable
 
+### Testing the Zig Extension
+
+**IMPORTANT**: Do NOT use `nix run github:subtleGradient/sqlite-cr` to test the Zig extension. That command runs sqlite3 with the **Rust-based** cr-sqlite extension pre-loaded. Loading a second cr-sqlite extension (the Zig one) into the same process will cause conflicts and undefined behavior.
+
+Instead, use plain sqlite3 and load the Zig extension explicitly:
+```bash
+# Build the Zig extension first
+cd zig && nix run nixpkgs#zig -- build
+
+# Test with plain sqlite3 (no pre-loaded extension)
+sqlite3 :memory: -cmd '.load ./zig/zig-out/lib/libcrsqlite.dylib'
+
+# Or use nix to get sqlite3:
+nix run nixpkgs#sqlite -- :memory: -cmd '.load ./zig/zig-out/lib/libcrsqlite.dylib'
+```
+
 ---
 
 ## Project Overview

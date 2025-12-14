@@ -360,6 +360,64 @@ pub fn insertIntoPksTable(
     }
 }
 
+/// Insert a row for resurrection using existing pk (rowid).
+/// Used when a previously deleted row is being resurrected.
+/// The pks entry already exists, we just need to recreate the base table row.
+pub fn insertRowForResurrection(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+    col_name: []const u8,
+    value: ?*api.sqlite3_value,
+) MergeError!void {
+    // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
+    var buf: [1024]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    // Bind the rowid (pk)
+    _ = api.bind_int64(stmt, 1, pk);
+
+    // Bind column value based on type
+    if (value) |v| {
+        const val_type = api.value_type(v);
+        switch (val_type) {
+            api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
+            api.SQLITE_FLOAT => {
+                // TODO: Add bind_double to api.zig
+                _ = api.bind_null(stmt, 2);
+            },
+            api.SQLITE_TEXT => {
+                const text = api.value_text(v);
+                const len = api.value_bytes(v);
+                if (text) |t| {
+                    _ = api.bind_text(stmt, 2, t, len, api.getTransientDestructor());
+                } else {
+                    _ = api.bind_null(stmt, 2);
+                }
+            },
+            api.SQLITE_BLOB => {
+                const blob = api.value_blob(v);
+                const len = api.value_bytes(v);
+                _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
+            },
+            else => _ = api.bind_null(stmt, 2),
+        }
+    } else {
+        _ = api.bind_null(stmt, 2);
+    }
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -375,4 +433,5 @@ test "module compiles" {
     _ = dropNonSentinelClocks;
     _ = insertIntoBaseTable;
     _ = insertIntoPksTable;
+    _ = insertRowForResurrection;
 }

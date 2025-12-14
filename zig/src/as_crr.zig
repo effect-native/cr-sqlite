@@ -444,9 +444,80 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
 }
 
-/// Register the crsql_as_crr function with a database connection.
+/// Implementation of `crsql_as_table(table_name)` SQL function.
+/// Tears down CRR infrastructure: drops clock table, pks table, and triggers.
+fn crsqlAsTableFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    if (argc != 1) {
+        api.result_error(pCtx, "crsql_as_table requires exactly 1 argument", -1);
+        return;
+    }
+
+    const table_name_ptr = api.value_text(argv[0]) orelse {
+        api.result_error(pCtx, "crsql_as_table: table name must be TEXT", -1);
+        return;
+    };
+
+    const db = api.context_db_handle(pCtx) orelse {
+        api.result_error(pCtx, "crsql_as_table: failed to get db handle", -1);
+        return;
+    };
+
+    // Drop triggers
+    dropTriggers(db, table_name_ptr) catch {
+        api.result_error(pCtx, "crsql_as_table: failed to drop triggers", -1);
+        return;
+    };
+
+    // Drop clock table
+    dropClockTable(db, table_name_ptr) catch {
+        api.result_error(pCtx, "crsql_as_table: failed to drop clock table", -1);
+        return;
+    };
+
+    // Drop pks table
+    dropPksTable(db, table_name_ptr) catch {
+        api.result_error(pCtx, "crsql_as_table: failed to drop pks table", -1);
+        return;
+    };
+
+    api.result_null(pCtx);
+}
+
+fn dropTriggers(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+
+    // Drop INSERT trigger
+    var sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_itrig\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
+
+    // Drop UPDATE trigger
+    sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_utrig\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
+
+    // Drop DELETE trigger
+    sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_dtrig\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
+}
+
+fn dropClockTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "DROP TABLE IF EXISTS \"{s}__crsql_clock\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
+}
+
+fn dropPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "DROP TABLE IF EXISTS \"{s}__crsql_pks\"", .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
+}
+
+/// Register the crsql_as_crr and crsql_as_table functions with a database connection.
 pub fn register(db: ?*api.sqlite3) c_int {
-    return api.create_function_v2(
+    var rc = api.create_function_v2(
         db,
         "crsql_as_crr",
         1, // nArg: 1 argument (table name)
@@ -457,6 +528,20 @@ pub fn register(db: ?*api.sqlite3) c_int {
         null, // xFinal: not an aggregate
         null, // xDestroy: no cleanup needed
     );
+    if (rc != api.SQLITE_OK) return rc;
+
+    rc = api.create_function_v2(
+        db,
+        "crsql_as_table",
+        1,
+        api.SQLITE_UTF8,
+        null,
+        &crsqlAsTableFunc,
+        null,
+        null,
+        null,
+    );
+    return rc;
 }
 
 test "createClockTable generates valid SQL" {

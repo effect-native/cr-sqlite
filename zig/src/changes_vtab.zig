@@ -85,6 +85,12 @@ const COL_SITE_ID = 6;
 const COL_CL = 7;
 const COL_SEQ = 8;
 
+// Index plan encoding for xBestIndex/xFilter:
+// idxNum bit 0: has db_version > constraint (argv[0])
+// idxNum bit 1: has site_id IS NOT constraint (argv[1])
+const IDX_DB_VERSION: c_int = 1;
+const IDX_SITE_ID: c_int = 2;
+
 // =============================================================================
 // Virtual Table Structure
 // =============================================================================
@@ -130,6 +136,13 @@ const ChangesCursor = extern struct {
 
     // Current row's pk value (for lookups in pks table and base table)
     current_pk: i64,
+
+    // Filter state for xBestIndex/xFilter optimization
+    filter_db_version: i64, // Only return rows with db_version > this
+    filter_site_id_blob: ?[*]const u8,
+    filter_site_id_len: usize,
+    has_db_version_filter: bool,
+    has_site_id_filter: bool,
 };
 
 /// Helper to get the allocator (always page_allocator for cursor allocations)
@@ -304,15 +317,47 @@ fn changesDisconnect(pVTab: ?*vtab.VTab) callconv(.c) c_int {
 }
 
 /// xBestIndex - Query planning
+/// Recognizes db_version > ? and site_id IS NOT ? constraints
 fn changesBestIndex(pVTab: ?*vtab.VTab, pIdxInfo: ?*vtab.IndexInfo) callconv(.c) c_int {
     _ = pVTab;
+    if (pIdxInfo == null) return vtab.SQLITE_ERROR;
 
-    if (pIdxInfo) |info| {
-        // Full table scan - set high cost
-        info.estimatedCost = 1_000_000.0;
-        info.estimatedRows = 10_000;
-        info.idxNum = 0;
+    const info = pIdxInfo.?;
+    var idxNum: c_int = 0;
+    var argvIndex: c_int = 1;
+    var cost: f64 = 1_000_000.0;
+
+    // Check constraints
+    const nConstraint = info.nConstraint;
+    if (nConstraint > 0 and info.aConstraint != null) {
+        const constraints = info.aConstraint[0..@intCast(nConstraint)];
+        const usages = info.aConstraintUsage[0..@intCast(nConstraint)];
+
+        for (constraints, usages) |con, *usage| {
+            if (con.usable == 0) continue;
+
+            // COL_DB_VERSION (5) with GT operator
+            if (con.iColumn == COL_DB_VERSION and con.op == vtab.SQLITE_INDEX_CONSTRAINT_GT) {
+                idxNum |= IDX_DB_VERSION;
+                usage.argvIndex = argvIndex;
+                usage.omit = 1;
+                argvIndex += 1;
+                cost /= 10.0; // Reduced cost with this constraint
+            }
+            // COL_SITE_ID (6) with ISNOT operator
+            else if (con.iColumn == COL_SITE_ID and con.op == vtab.SQLITE_INDEX_CONSTRAINT_ISNOT) {
+                idxNum |= IDX_SITE_ID;
+                usage.argvIndex = argvIndex;
+                usage.omit = 1;
+                argvIndex += 1;
+                cost /= 2.0;
+            }
+        }
     }
+
+    info.idxNum = idxNum;
+    info.estimatedCost = cost;
+    info.estimatedRows = if (idxNum != 0) 1000 else 10000;
 
     return vtab.SQLITE_OK;
 }
@@ -447,9 +492,16 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     // Column order: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
     // Exclude sentinel rows (col_name = '-1') from output - they're metadata only
     var sql_buf: [1024]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
-        return vtab.SQLITE_ERROR;
-    };
+
+    // Build query with optional db_version filter
+    const sql = if (cursor.has_db_version_filter)
+        std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version > ?", .{table_name}) catch {
+            return vtab.SQLITE_ERROR;
+        }
+    else
+        std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+            return vtab.SQLITE_ERROR;
+        };
 
     var stmt: ?*api.sqlite3_stmt = null;
     const rc = prepareV2(toApiDb(db), sql, -1, &stmt, null);
@@ -457,8 +509,73 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
         return rc;
     }
 
+    // Bind db_version filter if present
+    if (cursor.has_db_version_filter) {
+        if (api.bind_int64(stmt, 1, cursor.filter_db_version) != vtab.SQLITE_OK) {
+            _ = finalizeStmt(stmt);
+            return vtab.SQLITE_ERROR;
+        }
+    }
+
     cursor.clock_stmt = stmt;
     return vtab.SQLITE_OK;
+}
+
+/// Check if the current row is a sentinel row (col_name = '-1')
+/// Sentinel rows are metadata-only and should be excluded from crsql_changes output
+fn isSentinelRow(stmt: ?*api.sqlite3_stmt) bool {
+    const col_name_ptr = columnTextFromStmt(stmt, 1);
+    if (col_name_ptr) |cn| {
+        const col_name_slice = std.mem.span(cn);
+        return std.mem.eql(u8, col_name_slice, "-1");
+    }
+    return false;
+}
+
+/// Check if the current row's site_id matches the filter (should be skipped)
+/// Returns true if the row should be skipped (site_id matches the IS NOT filter)
+fn shouldSkipSiteId(cursor: *ChangesCursor, stmt: ?*api.sqlite3_stmt) bool {
+    if (!cursor.has_site_id_filter or cursor.filter_site_id_blob == null) {
+        return false;
+    }
+
+    // Get site_id from clock table (column 4)
+    // Clock table stores site_id as INTEGER (0 for local) or BLOB for remote
+    const col_type = columnTypeFromStmt(stmt, 4);
+
+    // Filter blob is what we want to exclude
+    const filter_blob = cursor.filter_site_id_blob.?;
+    const filter_len = cursor.filter_site_id_len;
+
+    if (col_type == api.SQLITE_INTEGER) {
+        // Local site_id (0) stored as INTEGER
+        // Compare with filter blob - if filter is all zeros, skip this row
+        const site_id_int = columnInt64FromStmt(stmt, 4);
+        if (site_id_int == 0 and filter_len == 16) {
+            // Check if filter is 16 zero bytes (local site)
+            var all_zero = true;
+            for (filter_blob[0..16]) |b| {
+                if (b != 0) {
+                    all_zero = false;
+                    break;
+                }
+            }
+            if (all_zero) return true;
+        }
+    } else if (col_type == api.SQLITE_BLOB) {
+        // Remote site_id stored as BLOB
+        const row_blob = columnBlobFromStmt(stmt, 4);
+        const row_len = columnBytesFromStmt(stmt, 4);
+        if (row_blob != null and row_len == filter_len) {
+            const row_ptr: [*]const u8 = @ptrCast(row_blob);
+            // Compare blobs
+            if (std.mem.eql(u8, row_ptr[0..@intCast(row_len)], filter_blob[0..filter_len])) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /// Move to next row within current table, or advance to next table
@@ -467,6 +584,17 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
         if (cursor.clock_stmt) |stmt| {
             const rc = stepStmt(stmt);
             if (rc == vtab.SQLITE_ROW) {
+                // Skip sentinel rows (col_name = '-1') - they're metadata only
+                if (isSentinelRow(stmt)) {
+                    continue;
+                }
+
+                // Check site_id filter - skip rows that match the IS NOT filter
+                if (shouldSkipSiteId(cursor, stmt)) {
+                    // Skip this row, continue to next
+                    continue;
+                }
+
                 // Got a row - increment row counter within current table
                 cursor.current_row_in_table += 1;
                 cursor.is_eof = false;
@@ -507,14 +635,34 @@ fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 /// xFilter - Begin a scan
 fn changesFilter(
     pCursor: ?*vtab.VTabCursor,
-    _: c_int, // idxNum
+    idxNum: c_int, // idxNum from xBestIndex
     _: [*c]const u8, // idxStr
-    _: c_int, // argc
-    _: [*c]?*vtab.sqlite3_value, // argv
+    argc: c_int, // number of constraint values
+    argv: [*c]?*vtab.sqlite3_value, // constraint values
 ) callconv(.c) c_int {
     const cursor: *ChangesCursor = @ptrCast(@alignCast(pCursor orelse return vtab.SQLITE_ERROR));
     const pVTab: *ChangesVTab = @ptrCast(@alignCast(cursor.base.pVtab orelse return vtab.SQLITE_ERROR));
     const db = pVTab.db;
+
+    // Reset filter state
+    cursor.has_db_version_filter = false;
+    cursor.has_site_id_filter = false;
+    cursor.filter_db_version = 0;
+    cursor.filter_site_id_blob = null;
+    cursor.filter_site_id_len = 0;
+
+    // Extract constraint values from argv based on idxNum
+    var argIdx: usize = 0;
+    if (idxNum & IDX_DB_VERSION != 0 and argc > @as(c_int, @intCast(argIdx))) {
+        cursor.filter_db_version = api.value_int64(toApiValue(argv[argIdx]));
+        cursor.has_db_version_filter = true;
+        argIdx += 1;
+    }
+    if (idxNum & IDX_SITE_ID != 0 and argc > @as(c_int, @intCast(argIdx))) {
+        cursor.filter_site_id_blob = @ptrCast(api.value_blob(toApiValue(argv[argIdx])));
+        cursor.filter_site_id_len = @intCast(api.value_bytes(toApiValue(argv[argIdx])));
+        cursor.has_site_id_filter = true;
+    }
 
     // Discover all CRR tables
     discoverTables(cursor, db) catch {
@@ -986,20 +1134,27 @@ fn changesUpdate(
     // Step 4: Handle sentinel-only operations (cid = "-1")
     const is_sentinel = std.mem.eql(u8, cid_slice, "-1");
     if (is_sentinel) {
-        // Sentinel operations (delete/resurrect) handled by CL comparison above
-        // If cl > local_cl, update the sentinel and perform delete operations
+        // Sentinel operations: CL parity determines state
+        // - Even CL = deleted (tombstone)
+        // - Odd CL = live (resurrection marker)
         if (cl > local_cl) {
-            // Delete from base table first
-            merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
-                log.debug("changesUpdate: deleteFromBaseTable failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            const is_delete = (@mod(cl, 2) == 0); // Even CL = deleted state
 
-            // Drop all non-sentinel clock entries
-            merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
-                log.debug("changesUpdate: dropNonSentinelClocks failed", .{});
-                return vtab.SQLITE_ERROR;
-            };
+            if (is_delete) {
+                // Delete from base table first
+                merge_insert.deleteFromBaseTable(api_db, table_slice, pk_rowid) catch {
+                    log.debug("changesUpdate: deleteFromBaseTable failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+
+                // Drop all non-sentinel clock entries
+                merge_insert.dropNonSentinelClocks(api_db, table_slice, pk_rowid) catch {
+                    log.debug("changesUpdate: dropNonSentinelClocks failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+            }
+            // For resurrection (odd CL), we don't delete - just update the sentinel clock.
+            // The actual row data will come from separate column change entries.
 
             // Update the sentinel clock
             merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
@@ -1008,6 +1163,34 @@ fn changesUpdate(
             };
             rows_impacted.incrementRowsImpacted();
         }
+        pRowid.* = 0;
+        return vtab.SQLITE_OK;
+    }
+
+    // Step 4b: Check if local row is deleted (even CL) and needs resurrection
+    // When receiving a column change for a deleted row, we need to re-insert instead of update
+    const local_is_deleted = (local_cl > 0) and (@mod(local_cl, 2) == 0);
+    if (local_is_deleted and cl > local_cl) {
+        // Resurrection case: local row was deleted, remote has newer CL with column data
+        log.debug("changesUpdate: resurrection - local_cl={} (deleted), remote cl={}", .{ local_cl, cl });
+
+        // Get the value from argv[5]
+        const resurrect_value = toApiValue(argv[5]);
+
+        // Re-insert into base table using the existing pk (the pks entry still exists)
+        merge_insert.insertRowForResurrection(api_db, table_slice, pk_rowid, cid_slice, resurrect_value) catch {
+            log.debug("changesUpdate: insertRowForResurrection failed", .{});
+            return vtab.SQLITE_ERROR;
+        };
+
+        // Update clock entry for the column
+        const site_id_ptr_res: ?[*]const u8 = @ptrCast(site_id_blob);
+        merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
+            log.debug("changesUpdate: setWinnerClock for resurrection failed", .{});
+            return vtab.SQLITE_ERROR;
+        };
+
+        rows_impacted.incrementRowsImpacted();
         pRowid.* = 0;
         return vtab.SQLITE_OK;
     }
