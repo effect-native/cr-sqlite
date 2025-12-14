@@ -289,9 +289,36 @@ fn crsqlDbVersionFunc(
         return;
     }
 
-    // MVP: Return global counter
-    // In production: query MAX(db_version) from all clock tables
-    api.result_int64(pCtx, global_db_version);
+    // Return MAX(global_db_version, pre_compact_dbversion)
+    // The pre_compact_dbversion floor ensures db_version doesn't regress after compaction
+    var result = global_db_version;
+
+    // Query pre_compact_dbversion from crsql_master
+    const db = api.context_db_handle(pCtx);
+    if (db != null) {
+        const pre_compact = getPreCompactDbVersion(db);
+        if (pre_compact > result) {
+            result = pre_compact;
+        }
+    }
+
+    api.result_int64(pCtx, result);
+}
+
+/// Query pre_compact_dbversion from crsql_master table.
+/// Returns 0 if not found or on error.
+fn getPreCompactDbVersion(db: ?*api.sqlite3) i64 {
+    const sql = "SELECT value FROM crsql_master WHERE key = 'pre_compact_dbversion'";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return 0;
+    defer _ = api.finalize(stmt);
+
+    rc = api.step(stmt);
+    if (rc == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+    return 0;
 }
 
 /// Implementation of crsql_next_db_version() SQL function
@@ -362,6 +389,7 @@ pub fn nextDbVersion(merging_version: ?i64) i64 {
 }
 
 /// Initialize db_version from database by querying MAX from all clock tables
+/// and the pre_compact_dbversion floor from crsql_master.
 /// Should be called during extension initialization
 pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
     if (db == null) return;
@@ -373,7 +401,10 @@ pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
     var stmt: ?*api.sqlite3_stmt = null;
     var rc = api.prepare_v2(db, find_clock_tables_sql, -1, &stmt, null);
     if (rc != api.SQLITE_OK) {
-        return; // No clock tables or error - start at 0
+        // No clock tables or error - check pre_compact_dbversion only
+        global_db_version = getPreCompactDbVersion(db);
+        pending_db_version = 0;
+        return;
     }
     defer _ = api.finalize(stmt);
 
@@ -398,6 +429,13 @@ pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
                 max_version = version;
             }
         }
+    }
+
+    // Also include pre_compact_dbversion floor from crsql_master
+    // This ensures db_version doesn't regress after compaction
+    const pre_compact = getPreCompactDbVersion(db);
+    if (pre_compact > max_version) {
+        max_version = pre_compact;
     }
 
     global_db_version = max_version;
