@@ -6,7 +6,7 @@
 #   make test-quick - Run individual test scripts
 #   make help       - Show all available targets
 
-.PHONY: all test test-parity test-rowid test-merge test-filters test-e2e clean help
+.PHONY: all test test-parity test-rowid test-merge test-filters test-e2e test-alter clean help
 
 all: test
 
@@ -30,8 +30,11 @@ test-filters:
 test-e2e:
 	@bash test-e2e-sync.sh
 
+test-alter:
+	@bash test-alter.sh
+
 # Run all individual tests (alternative to test-parity)
-test-quick: test-rowid test-merge test-filters test-e2e
+test-quick: test-rowid test-merge test-filters test-e2e test-alter
 
 clean:
 	@echo "Nothing to clean"
@@ -48,6 +51,7 @@ help:
 	@echo "  test-merge    - Merge semantics and rows_impacted (rows-impacted.test.c)"
 	@echo "  test-filters  - Filter pushdown (changes-vtab.test.c:testFilters)"
 	@echo "  test-e2e      - End-to-end sync (crsqlite.test.c:teste2e)"
+	@echo "  test-alter    - Schema alter (crsql_begin_alter/commit_alter)"
 	@echo ""
 	@echo "Other:"
 	@echo "  test-quick    - Run all individual tests (no summary)"
