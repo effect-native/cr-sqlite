@@ -366,7 +366,9 @@ echo "=== Step 4: Compile with Emscripten ==="
 # These match sql.js configuration with additions for CR-SQLite
 SQLITE_FLAGS=(
     # Core optimizations
-    -DSQLITE_OMIT_LOAD_EXTENSION      # No dynamic loading in WASM
+    # NOTE: Cannot use SQLITE_OMIT_LOAD_EXTENSION because it causes pApi to be NULL
+    # when calling auto-extension init functions. Our extension needs the API routines.
+    # -DSQLITE_OMIT_LOAD_EXTENSION
     -DSQLITE_DISABLE_LFS              # No large file support needed
     -DSQLITE_THREADSAFE=0             # Single-threaded in browser
     -DSQLITE_TEMP_STORE=2             # Store temp tables in memory

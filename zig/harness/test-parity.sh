@@ -9,6 +9,7 @@
 #   - test-filters.sh: crsql_changes filter pushdown
 #   - test-rowid-slab.sh: Rowid slab allocation
 #   - test-alter.sh: crsql_begin_alter/crsql_commit_alter schema changes
+#   - test-noops.sh: No-op changes do not advance clocks (CRDT property)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -432,6 +433,26 @@ else
     fi
     TOTAL_PASS=$((TOTAL_PASS + ALTER_PASS))
     TOTAL_FAIL=$((TOTAL_FAIL + ALTER_FAIL))
+fi
+
+# Run noop tests (clock stability on redundant syncs)
+echo "Running test-noops.sh..."
+if bash "$SCRIPT_DIR/test-noops.sh" > "$TMPFILE" 2>&1; then
+    NOOP_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || NOOP_PASS=0
+    echo "  Noop tests: $NOOP_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + NOOP_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Noop tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 4))
+    else
+        NOOP_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || NOOP_FAIL=0
+        NOOP_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || NOOP_PASS=0
+        echo "  Noop tests: $NOOP_PASS passed, $NOOP_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + NOOP_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + NOOP_FAIL))
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

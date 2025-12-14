@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CR-SQLite WASM Browser Test</title>
-  <!-- Use sql.js from CDN for high-level API (Database class, exec, etc.) -->
+  <!-- Use sql.js from CDN for baseline tests -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 </head>
 <body>
@@ -16,10 +16,12 @@
     // Global state for test access
     window.testState = {
       ready: false,
-      db: null,
+      db: null,            // sql.js Database (for baseline tests)
       error: null,
       sqljs: null,
-      crsqliteWasmLoaded: false
+      crsqliteReady: false,
+      crsqliteModule: null, // Raw Emscripten module
+      crsqliteDb: null      // Pointer to sqlite3* db handle
     };
 
     // Helper to log output
@@ -29,64 +31,130 @@
       console.log(msg);
     }
 
-    // Test if CR-SQLite WASM module loads (raw Emscripten module)
-    async function testCrSqliteWasmLoad() {
+    // Initialize CR-SQLite WASM module (our custom build with extension)
+    async function initCrSqliteWasm() {
       try {
-        // Try to load our built CR-SQLite WASM as a separate test
-        const script = document.createElement('script');
-        script.src = './sql-wasm.js';
-        script.onload = async () => {
-          if (typeof initCrSqlite === 'function') {
-            log('CR-SQLite WASM module script loaded');
-            try {
-              const mod = await initCrSqlite({ locateFile: f => './' + f });
-              window.testState.crsqliteWasmLoaded = true;
-              log('CR-SQLite WASM initialized successfully');
-              // Check if sqlite3_libversion is available
-              if (mod._sqlite3_libversion) {
-                log('CR-SQLite WASM exports sqlite3 functions');
-              }
-            } catch (e) {
-              log('CR-SQLite WASM init failed: ' + e.message);
-            }
-          }
-        };
-        script.onerror = () => log('CR-SQLite WASM script not found (optional)');
-        document.head.appendChild(script);
+        log('Loading CR-SQLite WASM module...');
+        
+        // initCrSqlite is defined in our sql-wasm.js
+        if (typeof initCrSqlite !== 'function') {
+          throw new Error('initCrSqlite not found - sql-wasm.js not loaded?');
+        }
+        
+        const mod = await initCrSqlite({ 
+          locateFile: f => './' + f,
+          print: log,
+          printErr: log
+        });
+        
+        window.testState.crsqliteModule = mod;
+        log('CR-SQLite WASM module loaded');
+        
+        // Open database using raw C API
+        const dbPtrPtr = mod._malloc(4);
+        const rc = mod._sqlite3_open(':memory:', dbPtrPtr);
+        if (rc !== 0) {
+          const errMsg = mod.UTF8ToString(mod._sqlite3_errmsg(0));
+          throw new Error(`sqlite3_open failed: ${errMsg} (rc=${rc})`);
+        }
+        
+        const dbPtr = mod.getValue(dbPtrPtr, 'i32');
+        mod._free(dbPtrPtr);
+        window.testState.crsqliteDb = dbPtr;
+        log('CR-SQLite database opened (ptr=' + dbPtr + ')');
+        
+        // Test sqlite_version
+        const versionPtr = mod._sqlite3_libversion();
+        const version = mod.UTF8ToString(versionPtr);
+        log('CR-SQLite SQLite version: ' + version);
+        
+        // Test crsql_version - this will only work if extension loaded correctly
+        try {
+          const result = execSql(mod, dbPtr, 'SELECT crsql_version()');
+          log('CR-SQLite version: ' + result);
+          window.testState.crsqliteReady = true;
+        } catch (e) {
+          log('crsql_version() failed: ' + e.message);
+          window.testState.crsqliteReady = false;
+        }
+        
       } catch (e) {
-        log('CR-SQLite WASM test skipped: ' + e.message);
+        log('CR-SQLite WASM init failed: ' + e.message);
+        console.error(e);
       }
     }
 
-    // Initialize database (using sql.js from CDN for high-level API)
-    async function initDatabase() {
+    // Helper: Execute SQL on raw sqlite3* handle
+    function execSql(mod, dbPtr, sql) {
+      const stmtPtrPtr = mod._malloc(4);
+      const tailPtrPtr = mod._malloc(4);
+      
+      // Allocate and copy SQL string to WASM memory
+      const sqlLen = mod.lengthBytesUTF8(sql) + 1;
+      const sqlPtr = mod._malloc(sqlLen);
+      mod.stringToUTF8(sql, sqlPtr, sqlLen);
+      
+      let rc = mod._sqlite3_prepare_v2(dbPtr, sqlPtr, -1, stmtPtrPtr, tailPtrPtr);
+      mod._free(sqlPtr);
+      
+      if (rc !== 0) {
+        const errMsgPtr = mod._sqlite3_errmsg(dbPtr);
+        const errMsg = errMsgPtr ? mod.UTF8ToString(errMsgPtr) : 'prepare failed';
+        mod._free(stmtPtrPtr);
+        mod._free(tailPtrPtr);
+        throw new Error('SQLite prepare error: ' + errMsg + ' (rc=' + rc + ', sql=' + sql.substring(0, 80) + ')');
+      }
+      
+      const stmtPtr = mod.getValue(stmtPtrPtr, 'i32');
+      mod._free(stmtPtrPtr);
+      mod._free(tailPtrPtr);
+      
+      rc = mod._sqlite3_step(stmtPtr);
+      let result = null;
+      if (rc === 100) { // SQLITE_ROW
+        const colCount = mod._sqlite3_column_count(stmtPtr);
+        if (colCount > 0) {
+          const type = mod._sqlite3_column_type(stmtPtr, 0);
+          if (type === 3) { // SQLITE_TEXT
+            const textPtr = mod._sqlite3_column_text(stmtPtr, 0);
+            result = textPtr ? mod.UTF8ToString(textPtr) : null;
+          } else if (type === 1) { // SQLITE_INTEGER
+            result = mod._sqlite3_column_int(stmtPtr, 0);
+          } else if (type === 2) { // SQLITE_FLOAT
+            result = mod._sqlite3_column_double(stmtPtr, 0);
+          }
+        }
+      } else if (rc !== 101) { // Not SQLITE_DONE
+        const errMsgPtr = mod._sqlite3_errmsg(dbPtr);
+        const errMsg = errMsgPtr ? mod.UTF8ToString(errMsgPtr) : 'unknown error';
+        mod._sqlite3_finalize(stmtPtr);
+        throw new Error('SQLite error: ' + errMsg + ' (rc=' + rc + ', sql=' + sql.substring(0, 50) + ')');
+      }
+      
+      mod._sqlite3_finalize(stmtPtr);
+      return result;
+    }
+    window.execSql = execSql; // Export for tests
+
+    // Initialize baseline sql.js database (CDN version, for comparison tests)
+    async function initSqljsBaseline() {
       try {
-        document.getElementById('status').textContent = 'Initializing sql.js...';
+        document.getElementById('status').textContent = 'Initializing sql.js baseline...';
         
-        // Initialize sql.js with WASM (initSqlJs is global from sql-wasm.js)
         const SQL = await initSqlJs({
           locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
         });
         
         window.testState.sqljs = SQL;
-        
-        // Create a new database
         const db = new SQL.Database();
         window.testState.db = db;
         
-        // Basic sanity check
         const result = db.exec("SELECT sqlite_version() as version");
         const version = result[0].values[0][0];
-        log(`SQLite version: ${version}`);
+        log(`sql.js baseline version: ${version}`);
         
         document.getElementById('status').textContent = 'Ready';
         window.testState.ready = true;
-        
-        // Dispatch ready event for Playwright
-        window.dispatchEvent(new CustomEvent('sqljs-ready', { detail: { version } }));
-        
-        // Also test CR-SQLite WASM loading (non-blocking)
-        testCrSqliteWasmLoad();
         
       } catch (err) {
         window.testState.error = err;
@@ -96,8 +164,40 @@
       }
     }
 
+    // Load our custom CR-SQLite WASM build
+    async function loadCrSqliteScript() {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = './sql-wasm.js';
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Failed to load sql-wasm.js'));
+        document.head.appendChild(script);
+      });
+    }
+
     // Start initialization
-    initDatabase();
+    async function init() {
+      // First load baseline sql.js for non-CR-SQLite tests
+      await initSqljsBaseline();
+      
+      // Then load and init our CR-SQLite WASM
+      try {
+        await loadCrSqliteScript();
+        await initCrSqliteWasm();
+      } catch (e) {
+        log('CR-SQLite load error: ' + e.message);
+      }
+      
+      // Dispatch ready event for Playwright
+      window.dispatchEvent(new CustomEvent('sqljs-ready', { 
+        detail: { 
+          ready: window.testState.ready,
+          crsqliteReady: window.testState.crsqliteReady 
+        } 
+      }));
+    }
+    
+    init();
   </script>
 </body>
 </html>
