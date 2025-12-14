@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CR-SQLite WASM Browser Test</title>
+  <!-- Use sql.js from CDN for high-level API (Database class, exec, etc.) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 </head>
 <body>
@@ -17,7 +18,8 @@
       ready: false,
       db: null,
       error: null,
-      sqljs: null
+      sqljs: null,
+      crsqliteWasmLoaded: false
     };
 
     // Helper to log output
@@ -27,7 +29,36 @@
       console.log(msg);
     }
 
-    // Initialize database (using global initSqlJs from sql.js library)
+    // Test if CR-SQLite WASM module loads (raw Emscripten module)
+    async function testCrSqliteWasmLoad() {
+      try {
+        // Try to load our built CR-SQLite WASM as a separate test
+        const script = document.createElement('script');
+        script.src = './sql-wasm.js';
+        script.onload = async () => {
+          if (typeof initCrSqlite === 'function') {
+            log('CR-SQLite WASM module script loaded');
+            try {
+              const mod = await initCrSqlite({ locateFile: f => './' + f });
+              window.testState.crsqliteWasmLoaded = true;
+              log('CR-SQLite WASM initialized successfully');
+              // Check if sqlite3_libversion is available
+              if (mod._sqlite3_libversion) {
+                log('CR-SQLite WASM exports sqlite3 functions');
+              }
+            } catch (e) {
+              log('CR-SQLite WASM init failed: ' + e.message);
+            }
+          }
+        };
+        script.onerror = () => log('CR-SQLite WASM script not found (optional)');
+        document.head.appendChild(script);
+      } catch (e) {
+        log('CR-SQLite WASM test skipped: ' + e.message);
+      }
+    }
+
+    // Initialize database (using sql.js from CDN for high-level API)
     async function initDatabase() {
       try {
         document.getElementById('status').textContent = 'Initializing sql.js...';
@@ -53,6 +84,9 @@
         
         // Dispatch ready event for Playwright
         window.dispatchEvent(new CustomEvent('sqljs-ready', { detail: { version } }));
+        
+        // Also test CR-SQLite WASM loading (non-blocking)
+        testCrSqliteWasmLoad();
         
       } catch (err) {
         window.testState.error = err;
