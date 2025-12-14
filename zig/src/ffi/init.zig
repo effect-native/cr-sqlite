@@ -12,6 +12,7 @@ const changes_vtab = @import("../changes_vtab.zig");
 const finalize = @import("../finalize.zig");
 const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
+const schema_alter = @import("../schema_alter.zig");
 const site_identity = @import("../site_identity.zig");
 const sync_bit = @import("../sync_bit.zig");
 
@@ -88,6 +89,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_internal_sync_bit() function
     rc = sync_bit.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_begin_alter() and crsql_commit_alter() functions
+    rc = schema_alter.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

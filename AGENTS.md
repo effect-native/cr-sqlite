@@ -78,6 +78,7 @@ research/zig-cr/
 3. **Small scope**: prefer many small tasks over few large ones
 4. **Update on completion**: subagent must update its task card (in todo list or status doc) when done
 5. **Commit atomically**: each completed task = one git commit with clear message
+6. **Use `.tmp/` for temp files**: Never use `/tmp/`. Use `.tmp/` in the repo root instead (already in `.gitignore`)
 
 ### Methodology
 - **RGRTDD**: Red (failing tests) → Green (minimal impl) → Refactor → Regression (keep green)

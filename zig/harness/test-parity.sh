@@ -8,6 +8,7 @@
 #   - test-e2e-sync.sh: End-to-end multi-DB sync
 #   - test-filters.sh: crsql_changes filter pushdown
 #   - test-rowid-slab.sh: Rowid slab allocation
+#   - test-alter.sh: crsql_begin_alter/crsql_commit_alter schema changes
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -413,6 +414,24 @@ else
         TOTAL_PASS=$((TOTAL_PASS + ROWID_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + ROWID_FAIL))
     fi
+fi
+
+# Run alter tests
+echo "Running test-alter.sh..."
+bash "$SCRIPT_DIR/test-alter.sh" > "$TMPFILE" 2>&1 || true
+if grep -q "All tests SKIPPED" "$TMPFILE" || grep -q "not yet implemented" "$TMPFILE"; then
+    echo "  Alter tests: SKIPPED (alter functions not implemented)"
+    TOTAL_SKIP=$((TOTAL_SKIP + 4))
+else
+    ALTER_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ALTER_FAIL=0
+    ALTER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ALTER_PASS=0
+    if [[ $ALTER_FAIL -eq 0 && $ALTER_PASS -gt 0 ]]; then
+        echo "  Alter tests: $ALTER_PASS passed"
+    else
+        echo "  Alter tests: $ALTER_PASS passed, $ALTER_FAIL failed"
+    fi
+    TOTAL_PASS=$((TOTAL_PASS + ALTER_PASS))
+    TOTAL_FAIL=$((TOTAL_FAIL + ALTER_FAIL))
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
