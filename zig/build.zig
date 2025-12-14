@@ -10,6 +10,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Add C header include path for SQLite extension headers
+    root_mod.addIncludePath(b.path("src/ffi/c"));
+
+    // Add C source file for workaround functions (SQLITE_TRANSIENT, etc.)
+    root_mod.addCSourceFile(.{
+        .file = b.path("src/ffi/c/workaround.c"),
+        .flags = &.{},
+    });
+
     root_mod.addAnonymousImport("golden_vectors", .{
         .root_source_file = b.path("test/golden_vectors.zig"),
         .target = target,

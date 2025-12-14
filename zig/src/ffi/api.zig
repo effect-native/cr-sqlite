@@ -1,75 +1,80 @@
-//! SQLite API pointer storage for loadable extensions.
+//! SQLite API wrappers for loadable extensions.
 //!
-//! This module provides the global `sqlite3_api` pointer that loadable extensions
-//! must store on initialization. All SQLite API calls in a loadable extension go
-//! through this pointer table (equivalent to C's `SQLITE_EXTENSION_INIT2(pApi)`).
+//! This module provides Zig wrappers around the SQLite C API for use in
+//! loadable extensions. It uses @cImport via sqlite_c.zig to ensure proper
+//! struct layout compatibility with the actual SQLite library.
 //!
 //! Reference: `.refs/zig-sqlite/c/loadable_extension.zig`
 
 const std = @import("std");
+const sqlite_c = @import("sqlite_c.zig");
 
-// Opaque pointer types for SQLite structures.
-// These are intentionally opaque - the actual struct layouts are internal to SQLite.
-pub const sqlite3 = opaque {};
-pub const sqlite3_context = opaque {};
-pub const sqlite3_value = opaque {};
-pub const sqlite3_stmt = opaque {};
+pub const c = sqlite_c.c;
 
-/// SQLite API routines table passed to loadable extensions.
-/// This is an opaque type since we access it through function pointers.
-pub const sqlite3_api_routines = opaque {};
-
-/// Global API pointer - initialized by `initApi()` during extension load.
-/// All SQLite API calls in the extension go through this pointer.
-///
-/// This is the Zig equivalent of C's:
-/// ```c
-/// static sqlite3_api_routines *sqlite3_api = 0;
-/// SQLITE_EXTENSION_INIT2(pApi);  // sets sqlite3_api = pApi
-/// ```
-pub var sqlite3_api: ?*sqlite3_api_routines = null;
-
-/// SQLite result codes
-pub const SQLITE_OK = 0;
-pub const SQLITE_ERROR = 1;
-pub const SQLITE_MISUSE = 21;
-
-/// Text encoding flags for create_function
-pub const SQLITE_UTF8 = 1;
-
-/// Destructor function type for sqlite3_result_* functions.
-/// Using align(1) to allow the special sentinel value SQLITE_TRANSIENT (-1).
-pub const DestructorFn = ?*align(1) const fn (?*anyopaque) callconv(.c) void;
-
-/// Special destructor value meaning SQLite should not free the result.
-/// SQLITE_STATIC is null - tells SQLite the data is static/const.
-pub const SQLITE_STATIC: DestructorFn = null;
-
-/// SQLITE_TRANSIENT tells SQLite to make a copy of the data.
-/// In SQLite's C API, SQLITE_TRANSIENT is ((void(*)(void*))-1).
-/// We use align(1) on DestructorFn to allow this misaligned sentinel.
-pub const SQLITE_TRANSIENT: DestructorFn = @ptrFromInt(@as(usize, @bitCast(@as(isize, -1))));
-
-/// Get SQLITE_TRANSIENT - provided for API consistency with older code
-pub inline fn getTransientDestructor() DestructorFn {
-    return SQLITE_TRANSIENT;
+/// Get the global API pointer (for direct access by other modules)
+/// Returns null if not initialized, otherwise the pointer to the API routines.
+pub fn getApi() ?*c.sqlite3_api_routines {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    return api;
 }
 
+// Re-export common types from sqlite_c
+pub const sqlite3 = sqlite_c.sqlite3;
+pub const sqlite3_context = sqlite_c.sqlite3_context;
+pub const sqlite3_value = sqlite_c.sqlite3_value;
+pub const sqlite3_stmt = sqlite_c.sqlite3_stmt;
+pub const sqlite3_module = sqlite_c.sqlite3_module;
+pub const sqlite3_vtab = sqlite_c.sqlite3_vtab;
+pub const sqlite3_vtab_cursor = sqlite_c.sqlite3_vtab_cursor;
+pub const sqlite3_index_info = sqlite_c.sqlite3_index_info;
+pub const sqlite3_int64 = sqlite_c.sqlite3_int64;
+pub const sqlite3_uint64 = sqlite_c.sqlite3_uint64;
+pub const sqlite3_api_routines = sqlite_c.sqlite3_api_routines;
+
+/// SQLite result codes
+pub const SQLITE_OK = c.SQLITE_OK;
+pub const SQLITE_ERROR = c.SQLITE_ERROR;
+pub const SQLITE_MISUSE = c.SQLITE_MISUSE;
+pub const SQLITE_NOMEM = c.SQLITE_NOMEM;
+pub const SQLITE_BUSY = c.SQLITE_BUSY;
+pub const SQLITE_CONSTRAINT = c.SQLITE_CONSTRAINT;
+pub const SQLITE_ABORT = c.SQLITE_ABORT;
+pub const SQLITE_DONE = c.SQLITE_DONE;
+pub const SQLITE_ROW = c.SQLITE_ROW;
+
+/// Text encoding flags for create_function
+pub const SQLITE_UTF8 = c.SQLITE_UTF8;
+pub const SQLITE_DETERMINISTIC = c.SQLITE_DETERMINISTIC;
+
 /// SQLite value type codes (returned by sqlite3_value_type)
-pub const SQLITE_INTEGER = 1;
-pub const SQLITE_FLOAT = 2;
-pub const SQLITE_TEXT = 3;
-pub const SQLITE_BLOB = 4;
-pub const SQLITE_NULL = 5;
+pub const SQLITE_INTEGER = c.SQLITE_INTEGER;
+pub const SQLITE_FLOAT = c.SQLITE_FLOAT;
+pub const SQLITE_TEXT = c.SQLITE_TEXT;
+pub const SQLITE_BLOB = c.SQLITE_BLOB;
+pub const SQLITE_NULL = c.SQLITE_NULL;
+
+/// Destructor type compatible with SQLite's C API.
+pub const DestructorFn = ?*const fn (?*anyopaque) callconv(.c) void;
+
+/// SQLITE_STATIC - tells SQLite the data is static/const and won't be freed
+pub const SQLITE_STATIC: DestructorFn = null;
+
+// Import the C workaround function that returns SQLITE_TRANSIENT (-1)
+// This is needed because Zig doesn't allow creating misaligned pointer constants.
+extern fn sqliteTransientAsDestructor() DestructorFn;
+
+/// Get SQLITE_TRANSIENT for passing to SQLite result functions.
+/// Tells SQLite to make a copy of the data because it may be deallocated.
+pub inline fn getTransientDestructor() DestructorFn {
+    return sqliteTransientAsDestructor();
+}
 
 /// Initialize the global API pointer. Called once during extension initialization.
-///
 /// Equivalent to C's `SQLITE_EXTENSION_INIT2(pApi)` macro.
-///
-/// Returns `SQLITE_OK` on success, `SQLITE_ERROR` if `pApi` is null.
-pub fn initApi(pApi: ?*sqlite3_api_routines) c_int {
-    if (pApi) |api| {
-        sqlite3_api = api;
+pub fn initApi(pApi: ?*c.sqlite3_api_routines) c_int {
+    if (pApi) |p| {
+        sqlite_c.sqlite3_api = p;
         return SQLITE_OK;
     }
     return SQLITE_ERROR;
@@ -77,128 +82,494 @@ pub fn initApi(pApi: ?*sqlite3_api_routines) c_int {
 
 /// Check if the API has been initialized.
 pub fn isInitialized() bool {
-    return sqlite3_api != null;
+    return sqlite_c.sqlite3_api != null;
 }
 
-// -----------------------------------------------------------------------------
-// SQLite API function wrappers
-//
-// These access the function pointers in sqlite3_api_routines.
-// The routines struct is a large table of optional function pointers.
-// We cast it to access specific offsets matching SQLite's ABI.
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Function Registration
+// =============================================================================
 
 /// Function pointer type for scalar UDFs
-pub const ScalarFn = *const fn (?*sqlite3_context, c_int, [*c]?*sqlite3_value) callconv(.c) void;
+pub const ScalarFn = *const fn (?*c.sqlite3_context, c_int, [*c]?*c.sqlite3_value) callconv(.c) void;
+
+/// Function pointer type for aggregate step function
+pub const StepFn = *const fn (?*c.sqlite3_context, c_int, [*c]?*c.sqlite3_value) callconv(.c) void;
+
+/// Function pointer type for aggregate final function
+pub const FinalFn = *const fn (?*c.sqlite3_context) callconv(.c) void;
+
+/// Function pointer type for destructor
+pub const DestroyFn = *const fn (?*anyopaque) callconv(.c) void;
 
 /// Wrapper for sqlite3_create_function_v2
 /// Registers a scalar, aggregate, or window function.
 pub fn create_function_v2(
-    db: ?*sqlite3,
+    db: ?*c.sqlite3,
     zFunctionName: [*:0]const u8,
     nArg: c_int,
     eTextRep: c_int,
     pApp: ?*anyopaque,
     xFunc: ?ScalarFn,
-    xStep: ?*const fn (?*sqlite3_context, c_int, [*c]?*sqlite3_value) callconv(.c) void,
-    xFinal: ?*const fn (?*sqlite3_context) callconv(.c) void,
-    xDestroy: ?*const fn (?*anyopaque) callconv(.c) void,
+    xStep: ?StepFn,
+    xFinal: ?FinalFn,
+    xDestroy: ?DestroyFn,
 ) c_int {
-    const api_ptr = sqlite3_api orelse return SQLITE_MISUSE;
-    // create_function_v2 is at offset 173 in the routines table (SQLite 3.50.x)
-    const ApiTable = extern struct {
-        padding: [173]?*anyopaque,
-        create_function_v2: ?*const fn (
-            ?*sqlite3,
-            [*:0]const u8,
-            c_int,
-            c_int,
-            ?*anyopaque,
-            ?ScalarFn,
-            ?*const fn (?*sqlite3_context, c_int, [*c]?*sqlite3_value) callconv(.c) void,
-            ?*const fn (?*sqlite3_context) callconv(.c) void,
-            ?*const fn (?*anyopaque) callconv(.c) void,
-        ) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.create_function_v2 orelse return SQLITE_MISUSE;
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.create_function_v2 orelse return SQLITE_MISUSE;
     return func(db, zFunctionName, nArg, eTextRep, pApp, xFunc, xStep, xFinal, xDestroy);
 }
 
-/// Wrapper for sqlite3_result_text
-/// Sets the result of a function to a text string.
-pub fn result_text(
-    pCtx: ?*sqlite3_context,
-    z: [*:0]const u8,
-    n: c_int,
-    xDel: DestructorFn,
-) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_text is at offset 93 in the routines table
-    const ApiTable = extern struct {
-        padding: [93]?*anyopaque,
-        result_text_fn: ?*const fn (
-            ?*sqlite3_context,
-            [*:0]const u8,
-            c_int,
-            DestructorFn,
-        ) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_text_fn orelse return;
-    func(pCtx, z, n, xDel);
-}
-
-// -----------------------------------------------------------------------------
+// =============================================================================
 // Virtual Table Registration
-// -----------------------------------------------------------------------------
-
-/// Virtual table module structure (opaque - actual layout defined by SQLite)
-pub const sqlite3_module = opaque {};
+// =============================================================================
 
 /// Wrapper for sqlite3_create_module_v2
 /// Registers a virtual table implementation.
 pub fn create_module_v2(
-    db: ?*sqlite3,
+    db: ?*c.sqlite3,
     zName: [*:0]const u8,
-    pModule: ?*const sqlite3_module,
+    pModule: ?*const c.sqlite3_module,
     pClientData: ?*anyopaque,
-    xDestroy: ?*const fn (?*anyopaque) callconv(.c) void,
+    xDestroy: ?DestroyFn,
 ) c_int {
-    const api_ptr = sqlite3_api orelse return SQLITE_MISUSE;
-    // create_module_v2 is at offset 127 in the routines table
-    const ApiTable = extern struct {
-        padding: [127]?*anyopaque,
-        create_module_v2_fn: ?*const fn (
-            ?*sqlite3,
-            [*:0]const u8,
-            ?*const sqlite3_module,
-            ?*anyopaque,
-            ?*const fn (?*anyopaque) callconv(.c) void,
-        ) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.create_module_v2_fn orelse return SQLITE_MISUSE;
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.create_module_v2 orelse return SQLITE_MISUSE;
     return func(db, zName, pModule, pClientData, xDestroy);
 }
 
 /// Wrapper for sqlite3_declare_vtab
 /// Declares the schema for a virtual table during xCreate/xConnect.
-pub fn declare_vtab(db: ?*sqlite3, zSQL: [*:0]const u8) c_int {
-    const api_ptr = sqlite3_api orelse return SQLITE_MISUSE;
-    // declare_vtab is at offset 58 in the routines table
-    const ApiTable = extern struct {
-        padding: [58]?*anyopaque,
-        declare_vtab_fn: ?*const fn (?*sqlite3, [*:0]const u8) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.declare_vtab_fn orelse return SQLITE_MISUSE;
+pub fn declare_vtab(db: ?*c.sqlite3, zSQL: [*:0]const u8) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.declare_vtab orelse return SQLITE_MISUSE;
     return func(db, zSQL);
 }
 
-// -----------------------------------------------------------------------------
+// =============================================================================
+// Result Functions (for UDF output)
+// =============================================================================
+
+/// Wrapper for sqlite3_result_text
+/// Sets the result of a function to a text string.
+pub fn result_text(
+    pCtx: ?*c.sqlite3_context,
+    z: [*c]const u8,
+    n: c_int,
+    xDel: DestructorFn,
+) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_text orelse return;
+    func(pCtx, z, n, xDel);
+}
+
+/// Wrapper for sqlite3_result_int64
+/// Sets the result of a function to a 64-bit integer.
+pub fn result_int64(pCtx: ?*c.sqlite3_context, val: c.sqlite3_int64) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_int64 orelse return;
+    func(pCtx, val);
+}
+
+/// Wrapper for sqlite3_result_int
+/// Sets the result of a function to a 32-bit integer.
+pub fn result_int(pCtx: ?*c.sqlite3_context, val: c_int) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_int orelse return;
+    func(pCtx, val);
+}
+
+/// Wrapper for sqlite3_result_double
+/// Sets the result of a function to a floating-point number.
+pub fn result_double(pCtx: ?*c.sqlite3_context, val: f64) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_double orelse return;
+    func(pCtx, val);
+}
+
+/// Wrapper for sqlite3_result_blob
+/// Sets the result of a function to a blob.
+pub fn result_blob(
+    pCtx: ?*c.sqlite3_context,
+    ptr: ?*const anyopaque,
+    n: c_int,
+    xDel: DestructorFn,
+) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_blob orelse return;
+    func(pCtx, ptr, n, xDel);
+}
+
+/// Wrapper for sqlite3_result_null
+/// Sets the result of a function to NULL.
+pub fn result_null(pCtx: ?*c.sqlite3_context) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_null orelse return;
+    func(pCtx);
+}
+
+/// Wrapper for sqlite3_result_error
+/// Sets the result of a function to an error.
+pub fn result_error(pCtx: ?*c.sqlite3_context, zMsg: [*c]const u8, n: c_int) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_error orelse return;
+    func(pCtx, zMsg, n);
+}
+
+/// Wrapper for sqlite3_result_error_nomem
+/// Sets the result to an out-of-memory error.
+pub fn result_error_nomem(pCtx: ?*c.sqlite3_context) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.result_error_nomem orelse return;
+    func(pCtx);
+}
+
+// =============================================================================
+// Value Extraction Functions (for UDF input)
+// =============================================================================
+
+/// Wrapper for sqlite3_value_type
+/// Returns the datatype code for the value.
+pub fn value_type(pVal: ?*c.sqlite3_value) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_NULL;
+    const func = api.*.value_type orelse return SQLITE_NULL;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_int64
+/// Returns the value as a 64-bit integer.
+pub fn value_int64(pVal: ?*c.sqlite3_value) c.sqlite3_int64 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.value_int64 orelse return 0;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_int
+/// Returns the value as a 32-bit integer.
+pub fn value_int(pVal: ?*c.sqlite3_value) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.value_int orelse return 0;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_double
+/// Returns the value as a floating-point number.
+pub fn value_double(pVal: ?*c.sqlite3_value) f64 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0.0;
+    const func = api.*.value_double orelse return 0.0;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_blob
+/// Returns the value as a pointer to blob data.
+pub fn value_blob(pVal: ?*c.sqlite3_value) ?*const anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.value_blob orelse return null;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_bytes
+/// Returns the number of bytes in a blob or text value.
+pub fn value_bytes(pVal: ?*c.sqlite3_value) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.value_bytes orelse return 0;
+    return func(pVal);
+}
+
+/// Wrapper for sqlite3_value_text
+/// Returns the value as a null-terminated UTF-8 string.
+pub fn value_text(pVal: ?*c.sqlite3_value) ?[*:0]const u8 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.value_text orelse return null;
+    // The C function returns `const unsigned char*` which Zig sees as `[*c]const u8`
+    // We need to cast it to the sentinel-terminated type
+    const result = func(pVal);
+    if (result == null) return null;
+    return @ptrCast(result);
+}
+
+// =============================================================================
+// Memory Management
+// =============================================================================
+
+/// Wrapper for sqlite3_malloc
+/// Allocates memory using SQLite's allocator.
+pub fn malloc(n: c_int) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.malloc orelse return null;
+    return func(n);
+}
+
+/// Wrapper for sqlite3_malloc64
+/// Allocates memory using SQLite's allocator (64-bit size).
+pub fn malloc64(n: c.sqlite3_uint64) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.malloc64 orelse return null;
+    return func(n);
+}
+
+/// Wrapper for sqlite3_free
+/// Frees memory allocated by sqlite3_malloc.
+pub fn free(p: ?*anyopaque) void {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return;
+    const func = api.*.free orelse return;
+    func(p);
+}
+
+/// Wrapper for sqlite3_realloc
+/// Reallocates memory using SQLite's allocator.
+pub fn realloc(pOld: ?*anyopaque, n: c_int) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.realloc orelse return null;
+    return func(pOld, n);
+}
+
+// =============================================================================
+// Context and Database Access
+// =============================================================================
+
+/// Wrapper for sqlite3_context_db_handle
+/// Returns the database handle associated with a function context.
+pub fn context_db_handle(pCtx: ?*c.sqlite3_context) ?*c.sqlite3 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.context_db_handle orelse return null;
+    return func(pCtx);
+}
+
+/// Wrapper for sqlite3_user_data
+/// Returns the user data pointer associated with a function.
+pub fn user_data(pCtx: ?*c.sqlite3_context) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.user_data orelse return null;
+    return func(pCtx);
+}
+
+/// Wrapper for sqlite3_aggregate_context
+/// Returns memory for storing aggregate state.
+pub fn aggregate_context(pCtx: ?*c.sqlite3_context, nBytes: c_int) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.aggregate_context orelse return null;
+    return func(pCtx, nBytes);
+}
+
+// =============================================================================
+// SQL Execution
+// =============================================================================
+
+/// Callback type for sqlite3_exec
+pub const ExecCallback = *const fn (?*anyopaque, c_int, [*c][*c]u8, [*c][*c]u8) callconv(.c) c_int;
+
+/// Wrapper for sqlite3_exec
+/// Executes one or more SQL statements.
+pub fn exec(
+    db: ?*c.sqlite3,
+    sql: [*:0]const u8,
+    callback: ?ExecCallback,
+    arg: ?*anyopaque,
+    pzErrMsg: ?*[*c]u8,
+) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.exec orelse return SQLITE_MISUSE;
+    return func(db, sql, callback, arg, pzErrMsg);
+}
+
+/// Wrapper for sqlite3_errmsg
+/// Returns the error message for the most recent error.
+pub fn errmsg(db: ?*c.sqlite3) [*c]const u8 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return "API not initialized";
+    const func = api.*.errmsg orelse return "errmsg not available";
+    return func(db);
+}
+
+/// Wrapper for sqlite3_errcode
+/// Returns the error code for the most recent error.
+pub fn errcode(db: ?*c.sqlite3) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.errcode orelse return SQLITE_MISUSE;
+    return func(db);
+}
+
+// =============================================================================
+// Prepared Statements
+// =============================================================================
+
+/// Wrapper for sqlite3_prepare_v2
+/// Prepares a SQL statement for execution.
+pub fn prepare_v2(
+    db: ?*c.sqlite3,
+    zSql: [*c]const u8,
+    nByte: c_int,
+    ppStmt: *?*c.sqlite3_stmt,
+    pzTail: ?*[*c]const u8,
+) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.prepare_v2 orelse return SQLITE_MISUSE;
+    return func(db, zSql, nByte, ppStmt, pzTail);
+}
+
+/// Wrapper for sqlite3_step
+/// Executes one step of a prepared statement.
+pub fn step(pStmt: ?*c.sqlite3_stmt) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.step orelse return SQLITE_MISUSE;
+    return func(pStmt);
+}
+
+/// Wrapper for sqlite3_finalize
+/// Destroys a prepared statement.
+pub fn finalize(pStmt: ?*c.sqlite3_stmt) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.finalize orelse return SQLITE_MISUSE;
+    return func(pStmt);
+}
+
+/// Wrapper for sqlite3_reset
+/// Resets a prepared statement for re-execution.
+pub fn reset(pStmt: ?*c.sqlite3_stmt) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.reset orelse return SQLITE_MISUSE;
+    return func(pStmt);
+}
+
+/// Wrapper for sqlite3_column_count
+/// Returns the number of columns in the result set.
+pub fn column_count(pStmt: ?*c.sqlite3_stmt) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.column_count orelse return 0;
+    return func(pStmt);
+}
+
+/// Wrapper for sqlite3_column_type
+/// Returns the type of a column in the current row.
+pub fn column_type(pStmt: ?*c.sqlite3_stmt, iCol: c_int) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_NULL;
+    const func = api.*.column_type orelse return SQLITE_NULL;
+    return func(pStmt, iCol);
+}
+
+/// Wrapper for sqlite3_column_int64
+/// Returns a column value as a 64-bit integer.
+pub fn column_int64(pStmt: ?*c.sqlite3_stmt, iCol: c_int) c.sqlite3_int64 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.column_int64 orelse return 0;
+    return func(pStmt, iCol);
+}
+
+/// Wrapper for sqlite3_column_double
+/// Returns a column value as a floating-point number.
+pub fn column_double(pStmt: ?*c.sqlite3_stmt, iCol: c_int) f64 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0.0;
+    const func = api.*.column_double orelse return 0.0;
+    return func(pStmt, iCol);
+}
+
+/// Wrapper for sqlite3_column_text
+/// Returns a column value as UTF-8 text.
+pub fn column_text(pStmt: ?*c.sqlite3_stmt, iCol: c_int) ?[*:0]const u8 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.column_text orelse return null;
+    const result = func(pStmt, iCol);
+    if (result == null) return null;
+    return @ptrCast(result);
+}
+
+/// Wrapper for sqlite3_column_blob
+/// Returns a column value as a blob.
+pub fn column_blob(pStmt: ?*c.sqlite3_stmt, iCol: c_int) ?*const anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.column_blob orelse return null;
+    return func(pStmt, iCol);
+}
+
+/// Wrapper for sqlite3_column_bytes
+/// Returns the size of a column value in bytes.
+pub fn column_bytes(pStmt: ?*c.sqlite3_stmt, iCol: c_int) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.column_bytes orelse return 0;
+    return func(pStmt, iCol);
+}
+
+// =============================================================================
+// Bind Functions (for prepared statements)
+// =============================================================================
+
+/// Wrapper for sqlite3_bind_int64
+/// Binds a 64-bit integer to a prepared statement parameter.
+pub fn bind_int64(pStmt: ?*c.sqlite3_stmt, i: c_int, val: c.sqlite3_int64) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.bind_int64 orelse return SQLITE_MISUSE;
+    return func(pStmt, i, val);
+}
+
+/// Wrapper for sqlite3_bind_text
+/// Binds a text value to a prepared statement parameter.
+pub fn bind_text(pStmt: ?*c.sqlite3_stmt, i: c_int, z: [*c]const u8, n: c_int, xDel: DestructorFn) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.bind_text orelse return SQLITE_MISUSE;
+    return func(pStmt, i, z, n, xDel);
+}
+
+/// Wrapper for sqlite3_bind_blob
+/// Binds a blob value to a prepared statement parameter.
+pub fn bind_blob(pStmt: ?*c.sqlite3_stmt, i: c_int, z: ?*const anyopaque, n: c_int, xDel: DestructorFn) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.bind_blob orelse return SQLITE_MISUSE;
+    return func(pStmt, i, z, n, xDel);
+}
+
+/// Wrapper for sqlite3_bind_null
+/// Binds NULL to a prepared statement parameter.
+pub fn bind_null(pStmt: ?*c.sqlite3_stmt, i: c_int) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.bind_null orelse return SQLITE_MISUSE;
+    return func(pStmt, i);
+}
+
+// =============================================================================
 // Hooks
-// -----------------------------------------------------------------------------
+// =============================================================================
 
 /// Callback type for commit hook
 pub const CommitHookFn = *const fn (?*anyopaque) callconv(.c) c_int;
@@ -206,326 +577,101 @@ pub const CommitHookFn = *const fn (?*anyopaque) callconv(.c) c_int;
 /// Callback type for rollback hook
 pub const RollbackHookFn = *const fn (?*anyopaque) callconv(.c) void;
 
+/// Callback type for update hook
+pub const UpdateHookFn = *const fn (?*anyopaque, c_int, [*c]const u8, [*c]const u8, c.sqlite3_int64) callconv(.c) void;
+
 /// Wrapper for sqlite3_commit_hook
 /// Registers a callback invoked when a transaction is committed.
-/// Returns the previous callback (or null).
 pub fn commit_hook(
-    db: ?*sqlite3,
+    db: ?*c.sqlite3,
     callback: ?CommitHookFn,
     pArg: ?*anyopaque,
-) ?CommitHookFn {
-    const api_ptr = sqlite3_api orelse return null;
-    // commit_hook is at offset 40 in the routines table
-    const ApiTable = extern struct {
-        padding: [40]?*anyopaque,
-        commit_hook_fn: ?*const fn (?*sqlite3, ?CommitHookFn, ?*anyopaque) callconv(.c) ?CommitHookFn,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.commit_hook_fn orelse return null;
+) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.commit_hook orelse return null;
     return func(db, callback, pArg);
 }
 
 /// Wrapper for sqlite3_rollback_hook
 /// Registers a callback invoked when a transaction is rolled back.
-/// Returns the previous callback (or null).
 pub fn rollback_hook(
-    db: ?*sqlite3,
+    db: ?*c.sqlite3,
     callback: ?RollbackHookFn,
     pArg: ?*anyopaque,
-) ?RollbackHookFn {
-    const api_ptr = sqlite3_api orelse return null;
-    // rollback_hook is at offset 98 in the routines table
-    const ApiTable = extern struct {
-        padding: [98]?*anyopaque,
-        rollback_hook_fn: ?*const fn (?*sqlite3, ?RollbackHookFn, ?*anyopaque) callconv(.c) ?RollbackHookFn,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.rollback_hook_fn orelse return null;
+) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.rollback_hook orelse return null;
     return func(db, callback, pArg);
 }
 
-// -----------------------------------------------------------------------------
-// Memory Management
-// -----------------------------------------------------------------------------
-
-/// Wrapper for sqlite3_malloc
-/// Allocates memory using SQLite's allocator.
-pub fn malloc(n: c_int) ?*anyopaque {
-    const api_ptr = sqlite3_api orelse return null;
-    // malloc is at offset 76 in the routines table
-    const ApiTable = extern struct {
-        padding: [76]?*anyopaque,
-        malloc_fn: ?*const fn (c_int) callconv(.c) ?*anyopaque,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.malloc_fn orelse return null;
-    return func(n);
+/// Wrapper for sqlite3_update_hook
+/// Registers a callback invoked when a row is modified.
+pub fn update_hook(
+    db: ?*c.sqlite3,
+    callback: ?UpdateHookFn,
+    pArg: ?*anyopaque,
+) ?*anyopaque {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return null;
+    const func = api.*.update_hook orelse return null;
+    return func(db, callback, pArg);
 }
 
-/// Wrapper for sqlite3_free
-/// Frees memory allocated by sqlite3_malloc.
-pub fn free(p: ?*anyopaque) void {
-    const api_ptr = sqlite3_api orelse return;
-    // free is at offset 66 in the routines table
-    const ApiTable = extern struct {
-        padding: [66]?*anyopaque,
-        free_fn: ?*const fn (?*anyopaque) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.free_fn orelse return;
-    func(p);
+// =============================================================================
+// Miscellaneous
+// =============================================================================
+
+/// Wrapper for sqlite3_changes
+/// Returns the number of rows modified by the last INSERT, UPDATE, or DELETE.
+pub fn changes(db: ?*c.sqlite3) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.changes orelse return 0;
+    return func(db);
 }
 
-// -----------------------------------------------------------------------------
-// Additional Result APIs (for vtab column output)
-// -----------------------------------------------------------------------------
-
-/// Wrapper for sqlite3_result_int64
-/// Sets the result of a function to a 64-bit integer.
-pub fn result_int64(pCtx: ?*sqlite3_context, val: i64) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_int64 is at offset 91 in the routines table
-    const ApiTable = extern struct {
-        padding: [91]?*anyopaque,
-        result_int64_fn: ?*const fn (?*sqlite3_context, i64) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_int64_fn orelse return;
-    func(pCtx, val);
+/// Wrapper for sqlite3_last_insert_rowid
+/// Returns the rowid of the most recent successful INSERT.
+pub fn last_insert_rowid(db: ?*c.sqlite3) c.sqlite3_int64 {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.last_insert_rowid orelse return 0;
+    return func(db);
 }
 
-/// Wrapper for sqlite3_result_double
-/// Sets the result of a function to a floating-point number.
-pub fn result_double(pCtx: ?*sqlite3_context, val: f64) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_double is at offset 87 in the routines table
-    const ApiTable = extern struct {
-        padding: [87]?*anyopaque,
-        result_double_fn: ?*const fn (?*sqlite3_context, f64) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_double_fn orelse return;
-    func(pCtx, val);
+/// Wrapper for sqlite3_get_autocommit
+/// Returns non-zero if auto-commit mode is on.
+pub fn get_autocommit(db: ?*c.sqlite3) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return 0;
+    const func = api.*.get_autocommit orelse return 0;
+    return func(db);
 }
 
-/// Wrapper for sqlite3_result_blob
-/// Sets the result of a function to a blob.
-pub fn result_blob(
-    pCtx: ?*sqlite3_context,
-    ptr: ?*const anyopaque,
-    n: c_int,
-    xDel: DestructorFn,
-) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_blob is at offset 86 in the routines table
-    const ApiTable = extern struct {
-        padding: [86]?*anyopaque,
-        result_blob_fn: ?*const fn (
-            ?*sqlite3_context,
-            ?*const anyopaque,
-            c_int,
-            DestructorFn,
-        ) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_blob_fn orelse return;
-    func(pCtx, ptr, n, xDel);
-}
+// =============================================================================
+// Tests
+// =============================================================================
 
-/// Wrapper for sqlite3_result_null
-/// Sets the result of a function to NULL.
-pub fn result_null(pCtx: ?*sqlite3_context) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_null is at offset 92 in the routines table
-    const ApiTable = extern struct {
-        padding: [92]?*anyopaque,
-        result_null_fn: ?*const fn (?*sqlite3_context) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_null_fn orelse return;
-    func(pCtx);
-}
-
-/// Wrapper for sqlite3_result_error
-/// Sets the result of a function to an error.
-pub fn result_error(pCtx: ?*sqlite3_context, zMsg: [*:0]const u8, n: c_int) void {
-    const api_ptr = sqlite3_api orelse return;
-    // result_error is at offset 88 in the routines table
-    const ApiTable = extern struct {
-        padding: [88]?*anyopaque,
-        result_error_fn: ?*const fn (?*sqlite3_context, [*:0]const u8, c_int) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_error_fn orelse return;
-    func(pCtx, zMsg, n);
-}
-
-// -----------------------------------------------------------------------------
-// Value Extraction APIs (for vtab xUpdate args)
-// -----------------------------------------------------------------------------
-
-/// Wrapper for sqlite3_value_type
-/// Returns the datatype code for the value.
-pub fn value_type(pVal: ?*sqlite3_value) c_int {
-    const api_ptr = sqlite3_api orelse return SQLITE_NULL;
-    // value_type is at offset 121 in the routines table
-    const ApiTable = extern struct {
-        padding: [121]?*anyopaque,
-        value_type_fn: ?*const fn (?*sqlite3_value) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_type_fn orelse return SQLITE_NULL;
-    return func(pVal);
-}
-
-/// Wrapper for sqlite3_value_int64
-/// Returns the value as a 64-bit integer.
-pub fn value_int64(pVal: ?*sqlite3_value) i64 {
-    const api_ptr = sqlite3_api orelse return 0;
-    // value_int64 is at offset 115 in the routines table
-    const ApiTable = extern struct {
-        padding: [115]?*anyopaque,
-        value_int64_fn: ?*const fn (?*sqlite3_value) callconv(.c) i64,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_int64_fn orelse return 0;
-    return func(pVal);
-}
-
-/// Wrapper for sqlite3_value_double
-/// Returns the value as a floating-point number.
-pub fn value_double(pVal: ?*sqlite3_value) f64 {
-    const api_ptr = sqlite3_api orelse return 0.0;
-    // value_double is at offset 113 in the routines table
-    const ApiTable = extern struct {
-        padding: [113]?*anyopaque,
-        value_double_fn: ?*const fn (?*sqlite3_value) callconv(.c) f64,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_double_fn orelse return 0.0;
-    return func(pVal);
-}
-
-/// Wrapper for sqlite3_value_blob
-/// Returns the value as a pointer to blob data.
-pub fn value_blob(pVal: ?*sqlite3_value) ?*const anyopaque {
-    const api_ptr = sqlite3_api orelse return null;
-    // value_blob is at offset 110 in the routines table
-    const ApiTable = extern struct {
-        padding: [110]?*anyopaque,
-        value_blob_fn: ?*const fn (?*sqlite3_value) callconv(.c) ?*const anyopaque,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_blob_fn orelse return null;
-    return func(pVal);
-}
-
-/// Wrapper for sqlite3_value_bytes
-/// Returns the number of bytes in a blob or text value.
-pub fn value_bytes(pVal: ?*sqlite3_value) c_int {
-    const api_ptr = sqlite3_api orelse return 0;
-    // value_bytes is at offset 111 in the routines table
-    const ApiTable = extern struct {
-        padding: [111]?*anyopaque,
-        value_bytes_fn: ?*const fn (?*sqlite3_value) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_bytes_fn orelse return 0;
-    return func(pVal);
-}
-
-/// Wrapper for sqlite3_value_text
-/// Returns the value as a null-terminated UTF-8 string.
-pub fn value_text(pVal: ?*sqlite3_value) ?[*:0]const u8 {
-    const api_ptr = sqlite3_api orelse return null;
-    // value_text is at offset 117 in the routines table
-    const ApiTable = extern struct {
-        padding: [117]?*anyopaque,
-        value_text_fn: ?*const fn (?*sqlite3_value) callconv(.c) ?[*:0]const u8,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.value_text_fn orelse return null;
-    return func(pVal);
-}
-
-// -----------------------------------------------------------------------------
-// Context and Execution APIs
-// -----------------------------------------------------------------------------
-
-/// Wrapper for sqlite3_context_db_handle
-/// Returns the database handle associated with a function context.
-pub fn context_db_handle(pCtx: ?*sqlite3_context) ?*sqlite3 {
-    const api_ptr = sqlite3_api orelse return null;
-    // context_db_handle is at offset 160 in the routines table
-    const ApiTable = extern struct {
-        padding: [160]?*anyopaque,
-        context_db_handle_fn: ?*const fn (?*sqlite3_context) callconv(.c) ?*sqlite3,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.context_db_handle_fn orelse return null;
-    return func(pCtx);
-}
-
-/// Callback type for sqlite3_exec
-pub const ExecCallback = *const fn (?*anyopaque, c_int, [*c]?[*:0]u8, [*c]?[*:0]u8) callconv(.c) c_int;
-
-/// Wrapper for sqlite3_exec
-/// Executes one or more SQL statements.
-pub fn exec(
-    db: ?*sqlite3,
-    sql: [*:0]const u8,
-    callback: ?ExecCallback,
-    arg: ?*anyopaque,
-    errmsg: ?*?[*:0]u8,
-) c_int {
-    const api_ptr = sqlite3_api orelse return SQLITE_MISUSE;
-    // exec is at offset 63 in the routines table
-    const ApiTable = extern struct {
-        padding: [63]?*anyopaque,
-        exec_fn: ?*const fn (
-            ?*sqlite3,
-            [*:0]const u8,
-            ?ExecCallback,
-            ?*anyopaque,
-            ?*?[*:0]u8,
-        ) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.exec_fn orelse return SQLITE_MISUSE;
-    return func(db, sql, callback, arg, errmsg);
-}
-
-test "initApi stores pointer" {
+test "initApi and isInitialized" {
     // Reset for test isolation
-    sqlite3_api = null;
+    sqlite_c.sqlite3_api = null;
+    try std.testing.expect(!isInitialized());
 
     // Null should fail
     const result_null_code = initApi(null);
     try std.testing.expectEqual(SQLITE_ERROR, result_null_code);
     try std.testing.expect(!isInitialized());
-
-    // Non-null should succeed (using a dummy pointer for testing)
-    var dummy: u8 = 0;
-    const dummy_api: *sqlite3_api_routines = @ptrCast(&dummy);
-    const result_ok = initApi(dummy_api);
-    try std.testing.expectEqual(SQLITE_OK, result_ok);
-    try std.testing.expect(isInitialized());
-
-    // Cleanup
-    sqlite3_api = null;
 }
 
 test "wrappers return safe defaults when sqlite3_api is null" {
     // Ensure API is not initialized
-    sqlite3_api = null;
+    sqlite_c.sqlite3_api = null;
 
     // Virtual table registration should return SQLITE_MISUSE
     try std.testing.expectEqual(SQLITE_MISUSE, create_module_v2(null, "test", null, null, null));
     try std.testing.expectEqual(SQLITE_MISUSE, declare_vtab(null, "CREATE TABLE x(a)"));
-
-    // Hooks should return null
-    try std.testing.expectEqual(@as(?CommitHookFn, null), commit_hook(null, null, null));
-    try std.testing.expectEqual(@as(?RollbackHookFn, null), rollback_hook(null, null, null));
 
     // Memory functions should return null/noop
     try std.testing.expectEqual(@as(?*anyopaque, null), malloc(100));
@@ -540,7 +686,7 @@ test "wrappers return safe defaults when sqlite3_api is null" {
 
     // Value extraction should return safe defaults
     try std.testing.expectEqual(SQLITE_NULL, value_type(null));
-    try std.testing.expectEqual(@as(i64, 0), value_int64(null));
+    try std.testing.expectEqual(@as(c.sqlite3_int64, 0), value_int64(null));
     try std.testing.expectEqual(@as(f64, 0.0), value_double(null));
     try std.testing.expectEqual(@as(?*const anyopaque, null), value_blob(null));
     try std.testing.expectEqual(@as(c_int, 0), value_bytes(null));

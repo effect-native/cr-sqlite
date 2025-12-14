@@ -28,7 +28,7 @@ fn crsqlZigVersionFunc(
 /// Register all CR-SQLite functions with the database connection.
 fn registerFunctions(db: ?*api.sqlite3) c_int {
     // Register crsql_zig_version() - a 0-argument scalar function
-    const rc = api.create_function_v2(
+    var rc = api.create_function_v2(
         db,
         "crsql_zig_version", // function name
         0, // nArg: 0 arguments
@@ -39,7 +39,17 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
         null, // xFinal: not an aggregate
         null, // xDestroy: no cleanup needed
     );
-    return rc;
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_as_crr() function
+    rc = as_crr.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_changes virtual table
+    rc = changes_vtab.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    return api.SQLITE_OK;
 }
 
 /// Extension entrypoint called by SQLite when loading the extension.

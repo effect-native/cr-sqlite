@@ -149,223 +149,97 @@ fn setCursorTableNames(cursor: *ChangesCursor, names: ?[][]u8) void {
 // SQLite API Wrappers (via api routines table)
 // =============================================================================
 
-/// sqlite3_declare_vtab wrapper - offset 21 in API routines
+/// sqlite3_declare_vtab wrapper - uses api.declare_vtab
 fn declareVtab(db: ?*api.sqlite3, schema: [*:0]const u8) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [21]?*anyopaque,
-        declare_vtab: ?*const fn (?*api.sqlite3, [*:0]const u8) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.declare_vtab orelse return api.SQLITE_MISUSE;
-    return func(db, schema);
+    return api.declare_vtab(@ptrCast(db), schema);
 }
 
-/// sqlite3_malloc wrapper - offset 46 in API routines
+/// sqlite3_malloc wrapper - uses api.malloc
 fn sqliteMalloc(n: c_int) ?*anyopaque {
-    const api_ptr = api.sqlite3_api orelse return null;
-    const ApiTable = extern struct {
-        padding: [46]?*anyopaque,
-        malloc_fn: ?*const fn (c_int) callconv(.c) ?*anyopaque,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.malloc_fn orelse return null;
-    return func(n);
+    return api.malloc(n);
 }
 
-/// sqlite3_free wrapper - offset 31 in API routines
+/// sqlite3_free wrapper - uses api.free
 fn sqliteFree(ptr: ?*anyopaque) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [31]?*anyopaque,
-        free_fn: ?*const fn (?*anyopaque) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.free_fn orelse return;
-    func(ptr);
+    api.free(ptr);
 }
 
-/// sqlite3_prepare_v2 wrapper - offset 60 in API routines
-fn prepareV2(db: ?*api.sqlite3, sql: [*:0]const u8, nByte: c_int, ppStmt: *?*api.sqlite3_stmt, pzTail: ?*[*:0]const u8) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [60]?*anyopaque,
-        prepare_v2: ?*const fn (?*api.sqlite3, [*:0]const u8, c_int, *?*api.sqlite3_stmt, ?*[*:0]const u8) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.prepare_v2 orelse return api.SQLITE_MISUSE;
-    return func(db, sql, nByte, ppStmt, pzTail);
+/// sqlite3_prepare_v2 wrapper - uses api.prepare_v2
+fn prepareV2(db: ?*api.sqlite3, sql: [*:0]const u8, nByte: c_int, ppStmt: *?*api.sqlite3_stmt, pzTail: ?*[*c]const u8) c_int {
+    return api.prepare_v2(@ptrCast(db), sql, nByte, @ptrCast(ppStmt), pzTail);
 }
 
-/// sqlite3_step wrapper - offset 76 in API routines
-fn step(stmt: ?*api.sqlite3_stmt) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [76]?*anyopaque,
-        step_fn: ?*const fn (?*api.sqlite3_stmt) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.step_fn orelse return api.SQLITE_MISUSE;
-    return func(stmt);
+/// sqlite3_step wrapper - uses api.step
+fn stepStmt(stmt: ?*api.sqlite3_stmt) c_int {
+    return api.step(@ptrCast(stmt));
 }
 
-/// sqlite3_finalize wrapper - offset 30 in API routines
-fn finalize(stmt: ?*api.sqlite3_stmt) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [30]?*anyopaque,
-        finalize_fn: ?*const fn (?*api.sqlite3_stmt) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.finalize_fn orelse return api.SQLITE_MISUSE;
-    return func(stmt);
+/// sqlite3_finalize wrapper - uses api.finalize
+fn finalizeStmt(stmt: ?*api.sqlite3_stmt) c_int {
+    return api.finalize(@ptrCast(stmt));
 }
 
-/// sqlite3_reset wrapper - offset 63 in API routines
-fn reset(stmt: ?*api.sqlite3_stmt) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [63]?*anyopaque,
-        reset_fn: ?*const fn (?*api.sqlite3_stmt) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.reset_fn orelse return api.SQLITE_MISUSE;
-    return func(stmt);
+/// sqlite3_reset wrapper - uses api.reset
+fn resetStmt(stmt: ?*api.sqlite3_stmt) c_int {
+    return api.reset(@ptrCast(stmt));
 }
 
-/// sqlite3_column_text wrapper - offset 15 in API routines
-fn columnText(stmt: ?*api.sqlite3_stmt, col: c_int) ?[*:0]const u8 {
-    const api_ptr = api.sqlite3_api orelse return null;
-    const ApiTable = extern struct {
-        padding: [15]?*anyopaque,
-        column_text: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) ?[*:0]const u8,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_text orelse return null;
-    return func(stmt, col);
+/// sqlite3_column_text wrapper - uses api.column_text
+fn columnTextFromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) ?[*:0]const u8 {
+    return api.column_text(@ptrCast(stmt), col);
 }
 
-/// sqlite3_column_int64 wrapper - offset 13 in API routines
-fn columnInt64(stmt: ?*api.sqlite3_stmt, col: c_int) i64 {
-    const api_ptr = api.sqlite3_api orelse return 0;
-    const ApiTable = extern struct {
-        padding: [13]?*anyopaque,
-        column_int64: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) i64,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_int64 orelse return 0;
-    return func(stmt, col);
+/// sqlite3_column_int64 wrapper - uses api.column_int64
+fn columnInt64FromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) i64 {
+    return api.column_int64(@ptrCast(stmt), col);
 }
 
-/// sqlite3_column_blob wrapper - offset 10 in API routines
-fn columnBlob(stmt: ?*api.sqlite3_stmt, col: c_int) ?*const anyopaque {
-    const api_ptr = api.sqlite3_api orelse return null;
-    const ApiTable = extern struct {
-        padding: [10]?*anyopaque,
-        column_blob: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) ?*const anyopaque,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_blob orelse return null;
-    return func(stmt, col);
+/// sqlite3_column_blob wrapper - uses api.column_blob
+fn columnBlobFromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) ?*const anyopaque {
+    return api.column_blob(@ptrCast(stmt), col);
 }
 
-/// sqlite3_column_bytes wrapper - offset 11 in API routines
-fn columnBytes(stmt: ?*api.sqlite3_stmt, col: c_int) c_int {
-    const api_ptr = api.sqlite3_api orelse return 0;
-    const ApiTable = extern struct {
-        padding: [11]?*anyopaque,
-        column_bytes: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_bytes orelse return 0;
-    return func(stmt, col);
+/// sqlite3_column_bytes wrapper - uses api.column_bytes
+fn columnBytesFromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) c_int {
+    return api.column_bytes(@ptrCast(stmt), col);
 }
 
-/// sqlite3_column_type wrapper - offset 16 in API routines
-fn columnType(stmt: ?*api.sqlite3_stmt, col: c_int) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_NULL;
-    const ApiTable = extern struct {
-        padding: [16]?*anyopaque,
-        column_type: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_type orelse return api.SQLITE_NULL;
-    return func(stmt, col);
+/// sqlite3_column_type wrapper - uses api.column_type
+fn columnTypeFromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) c_int {
+    return api.column_type(@ptrCast(stmt), col);
 }
 
-/// sqlite3_column_double wrapper - offset 12 in API routines  
-fn columnDouble(stmt: ?*api.sqlite3_stmt, col: c_int) f64 {
-    const api_ptr = api.sqlite3_api orelse return 0.0;
-    const ApiTable = extern struct {
-        padding: [12]?*anyopaque,
-        column_double: ?*const fn (?*api.sqlite3_stmt, c_int) callconv(.c) f64,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.column_double orelse return 0.0;
-    return func(stmt, col);
+/// sqlite3_column_double wrapper - uses api.column_double
+fn columnDoubleFromStmt(stmt: ?*api.sqlite3_stmt, col: c_int) f64 {
+    return api.column_double(@ptrCast(stmt), col);
 }
 
-/// sqlite3_result_text wrapper - offset 66 in API routines (already in api.zig)
+/// sqlite3_result_text wrapper - uses api.result_text
 fn resultText(ctx: ?*api.sqlite3_context, text: [*]const u8, len: c_int, destructor: api.DestructorFn) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [66]?*anyopaque,
-        result_text: ?*const fn (?*api.sqlite3_context, [*]const u8, c_int, api.DestructorFn) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_text orelse return;
-    func(ctx, text, len, destructor);
+    api.result_text(@ptrCast(ctx), text, len, destructor);
 }
 
-/// sqlite3_result_blob wrapper - offset 61 in API routines
+/// sqlite3_result_blob wrapper - uses api.result_blob
 fn resultBlob(ctx: ?*api.sqlite3_context, blob: ?*const anyopaque, len: c_int, destructor: api.DestructorFn) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [61]?*anyopaque,
-        result_blob: ?*const fn (?*api.sqlite3_context, ?*const anyopaque, c_int, api.DestructorFn) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_blob orelse return;
-    func(ctx, blob, len, destructor);
+    api.result_blob(@ptrCast(ctx), blob, len, destructor);
 }
 
-/// sqlite3_result_int64 wrapper - offset 64 in API routines
+/// sqlite3_result_int64 wrapper - uses api.result_int64
 fn resultInt64(ctx: ?*api.sqlite3_context, val: i64) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [64]?*anyopaque,
-        result_int64: ?*const fn (?*api.sqlite3_context, i64) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_int64 orelse return;
-    func(ctx, val);
+    api.result_int64(@ptrCast(ctx), val);
 }
 
-/// sqlite3_result_null wrapper - offset 65 in API routines
+/// sqlite3_result_null wrapper - uses api.result_null
 fn resultNull(ctx: ?*api.sqlite3_context) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [65]?*anyopaque,
-        result_null: ?*const fn (?*api.sqlite3_context) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_null orelse return;
-    func(ctx);
+    api.result_null(@ptrCast(ctx));
 }
 
-/// sqlite3_result_double wrapper - offset 62 in API routines
+/// sqlite3_result_double wrapper - uses api.result_double
 fn resultDouble(ctx: ?*api.sqlite3_context, val: f64) void {
-    const api_ptr = api.sqlite3_api orelse return;
-    const ApiTable = extern struct {
-        padding: [62]?*anyopaque,
-        result_double: ?*const fn (?*api.sqlite3_context, f64) callconv(.c) void,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.result_double orelse return;
-    func(ctx, val);
+    api.result_double(@ptrCast(ctx), val);
 }
 
-/// sqlite3_create_module_v2 wrapper - offset 150 in API routines
+/// sqlite3_create_module_v2 wrapper - uses api.create_module_v2
 pub fn createModuleV2(
     db: ?*api.sqlite3,
     name: [*:0]const u8,
@@ -373,20 +247,7 @@ pub fn createModuleV2(
     pClientData: ?*anyopaque,
     xDestroy: ?*const fn (?*anyopaque) callconv(.c) void,
 ) c_int {
-    const api_ptr = api.sqlite3_api orelse return api.SQLITE_MISUSE;
-    const ApiTable = extern struct {
-        padding: [150]?*anyopaque,
-        create_module_v2: ?*const fn (
-            ?*api.sqlite3,
-            [*:0]const u8,
-            *const vtab.Module,
-            ?*anyopaque,
-            ?*const fn (?*anyopaque) callconv(.c) void,
-        ) callconv(.c) c_int,
-    };
-    const tbl: *const ApiTable = @ptrCast(@alignCast(api_ptr));
-    const func = tbl.create_module_v2 orelse return api.SQLITE_MISUSE;
-    return func(db, name, mod, pClientData, xDestroy);
+    return api.create_module_v2(@ptrCast(db), name, @ptrCast(mod), pClientData, xDestroy);
 }
 
 // =============================================================================
@@ -492,7 +353,7 @@ fn changesClose(pCursor: ?*vtab.VTabCursor) callconv(.c) c_int {
 
         // Finalize any open statement
         if (cursor.clock_stmt) |stmt| {
-            _ = finalize(stmt);
+            _ = finalizeStmt(stmt);
             cursor.clock_stmt = null;
         }
 
@@ -517,11 +378,11 @@ fn discoverTables(cursor: *ChangesCursor, db: ?*vtab.sqlite3) !void {
     if (rc != vtab.SQLITE_OK) {
         return error.PrepareError;
     }
-    defer _ = finalize(stmt);
+    defer _ = finalizeStmt(stmt);
 
     // First pass: count tables
     var count: usize = 0;
-    while (step(stmt) == vtab.SQLITE_ROW) {
+    while (stepStmt(stmt) == vtab.SQLITE_ROW) {
         count += 1;
     }
 
@@ -535,10 +396,10 @@ fn discoverTables(cursor: *ChangesCursor, db: ?*vtab.sqlite3) !void {
     errdefer allocator.free(names);
 
     // Reset and second pass: store names
-    _ = reset(stmt);
+    _ = resetStmt(stmt);
     var idx: usize = 0;
-    while (step(stmt) == vtab.SQLITE_ROW) : (idx += 1) {
-        const clock_name = columnText(stmt, 0) orelse continue;
+    while (stepStmt(stmt) == vtab.SQLITE_ROW) : (idx += 1) {
+        const clock_name = columnTextFromStmt(stmt, 0) orelse continue;
         const clock_slice = std.mem.span(clock_name);
 
         // Get base table name (strip __crsql_clock)
@@ -558,7 +419,7 @@ fn discoverTables(cursor: *ChangesCursor, db: ?*vtab.sqlite3) !void {
 fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     // Finalize previous statement if any
     if (cursor.clock_stmt) |stmt| {
-        _ = finalize(stmt);
+        _ = finalizeStmt(stmt);
         cursor.clock_stmt = null;
     }
 
@@ -591,15 +452,15 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 fn advanceCursor(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     while (true) {
         if (cursor.clock_stmt) |stmt| {
-            const rc = step(stmt);
+            const rc = stepStmt(stmt);
             if (rc == vtab.SQLITE_ROW) {
                 // Got a row - read the rowid from the clock table
-                cursor.current_row_in_table = columnInt64(stmt, 8); // rowid is last column
+                cursor.current_row_in_table = columnInt64FromStmt(stmt, 8); // rowid is last column
                 cursor.is_eof = false;
                 return vtab.SQLITE_OK;
             } else if (rc == vtab.SQLITE_DONE) {
                 // Current table exhausted, move to next
-                _ = finalize(stmt);
+                _ = finalizeStmt(stmt);
                 cursor.clock_stmt = null;
                 cursor.current_table_idx += 1;
 
@@ -709,15 +570,15 @@ fn changesColumn(
         },
         COL_PK => {
             // pk is column 0 in clock table query
-            const blob = columnBlob(stmt, 0);
-            const len = columnBytes(stmt, 0);
+            const blob = columnBlobFromStmt(stmt, 0);
+            const len = columnBytesFromStmt(stmt, 0);
             resultBlob(ctx, blob, len, api.getTransientDestructor());
         },
         COL_CID => {
             // cid is column 1
-            const text = columnText(stmt, 1);
+            const text = columnTextFromStmt(stmt, 1);
             if (text) |t| {
-                const len = columnBytes(stmt, 1);
+                const len = columnBytesFromStmt(stmt, 1);
                 resultText(ctx, t, len, api.getTransientDestructor());
             } else {
                 resultNull(ctx);
@@ -725,45 +586,45 @@ fn changesColumn(
         },
         COL_VAL => {
             // val is column 2 - ANY type, preserve type
-            const col_type = columnType(stmt, 2);
+            const col_type = columnTypeFromStmt(stmt, 2);
             switch (col_type) {
-                api.SQLITE_INTEGER => resultInt64(ctx, columnInt64(stmt, 2)),
-                api.SQLITE_FLOAT => resultDouble(ctx, columnDouble(stmt, 2)),
+                api.SQLITE_INTEGER => resultInt64(ctx, columnInt64FromStmt(stmt, 2)),
+                api.SQLITE_FLOAT => resultDouble(ctx, columnDoubleFromStmt(stmt, 2)),
                 api.SQLITE_TEXT => {
-                    const text = columnText(stmt, 2);
+                    const text = columnTextFromStmt(stmt, 2);
                     if (text) |t| {
-                        resultText(ctx, t, columnBytes(stmt, 2), api.getTransientDestructor());
+                        resultText(ctx, t, columnBytesFromStmt(stmt, 2), api.getTransientDestructor());
                     } else {
                         resultNull(ctx);
                     }
                 },
                 api.SQLITE_BLOB => {
-                    resultBlob(ctx, columnBlob(stmt, 2), columnBytes(stmt, 2), api.getTransientDestructor());
+                    resultBlob(ctx, columnBlobFromStmt(stmt, 2), columnBytesFromStmt(stmt, 2), api.getTransientDestructor());
                 },
                 else => resultNull(ctx),
             }
         },
         COL_COL_VERSION => {
             // col_version is column 3
-            resultInt64(ctx, columnInt64(stmt, 3));
+            resultInt64(ctx, columnInt64FromStmt(stmt, 3));
         },
         COL_DB_VERSION => {
             // db_version is column 4
-            resultInt64(ctx, columnInt64(stmt, 4));
+            resultInt64(ctx, columnInt64FromStmt(stmt, 4));
         },
         COL_SITE_ID => {
             // site_id is column 5
-            const blob = columnBlob(stmt, 5);
-            const len = columnBytes(stmt, 5);
+            const blob = columnBlobFromStmt(stmt, 5);
+            const len = columnBytesFromStmt(stmt, 5);
             resultBlob(ctx, blob, len, api.getTransientDestructor());
         },
         COL_CL => {
             // cl is column 6
-            resultInt64(ctx, columnInt64(stmt, 6));
+            resultInt64(ctx, columnInt64FromStmt(stmt, 6));
         },
         COL_SEQ => {
             // seq is column 7
-            resultInt64(ctx, columnInt64(stmt, 7));
+            resultInt64(ctx, columnInt64FromStmt(stmt, 7));
         },
         else => {
             resultNull(ctx);
