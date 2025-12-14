@@ -1,6 +1,95 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository.
+
+---
+
+## Zig CR-SQLite Rewrite: Orchestration Workflow
+
+This project is undergoing a major rewrite from C/Rust to Zig. The following workflow governs how work proceeds.
+
+### Continuous Integration Loop
+
+```
+1. Review the evergreen end state spec
+2. Compare it to the current WIP implementation
+3. Identify gaps
+4. Ensure each gap is captured and all status documents are updated in git
+5. Brainstorm the optimal divide-and-conquer strategy to keep many subagents busy without stepping on each other's toes
+6. Ensure the current subagent tasklist properly reflects that strategy
+7. Assign tasks to subagents and direct them to update their task card once done
+8. Ensure everything is in git
+9. While not yet done, goto step 1
+```
+
+### Document Organization
+
+```
+research/zig-cr/
+├── README.md                          # Index of all research + proposals
+│
+├── # Legacy Analysis Reports (01-11)
+├── 01-extension-surface.md            # C entrypoints, init/load, exported symbols
+├── 02-virtual-tables.md               # vtab inventory, x* methods, schemas
+├── 03-hooks-and-triggers.md           # SQLite hooks + trigger-based capture
+├── 04-schema-and-metadata.md          # internal tables, migrations, naming
+├── 05-conflict-resolution-semantics.md # merge rules, winner selection, tombstones
+├── 06-clock-versioning.md             # site ids, db_version/seq, causal ordering
+├── 07-fractindex-rust.md              # fractional index crate analysis
+├── 08-ffi-boundary.md                 # C↔Rust ABI surface
+├── 09-storage-serialization.md        # packed blob wire format
+├── 10-test-oracle.md                  # behavioral contract from C tests
+├── 11-performance-hotspots.md         # stmt caching, union query, pragma checks
+│
+├── # Zig Reference Analysis (20-22)
+├── 20-zig-sqlite-capabilities.md      # what .refs/zig-sqlite provides + gaps
+├── 21-ghostty-best-practices.md       # build/allocator/test patterns
+├── 22-bun-best-practices.md           # protocol parsing, ownership, errdefer
+│
+├── # Synthesis Documents (90-92)
+├── 90-feature-matrix.md               # feature → impl → Zig plan → gaps
+├── 91-mvp-roadmap.md                  # phased test-passing milestones
+├── 92-gap-backlog.md                  # missing zig-sqlite bindings to add
+│
+├── # Execution Proposals (93-95)
+├── 93-phased-execution-proposal.md    # RGRTDD + GAN workflow, Web-first
+├── 94-long-term-solution.md           # ideal multi-platform architecture
+└── 95-one-weird-tricks.md             # 80/20 shortcuts to end-to-end beta
+```
+
+### Evergreen Spec Location
+- **Behavioral contract (source of truth)**: `core/src/*.test.c`
+- **Wire format spec**: `research/zig-cr/09-storage-serialization.md`
+- **Merge semantics spec**: `research/zig-cr/05-conflict-resolution-semantics.md`
+
+### WIP Implementation Location
+- New Zig code will live in a new `zig/` directory (to be created)
+- Build artifacts: `zig-out/`
+- Zig build definition: `zig/build.zig`
+
+### Gap Tracking
+- High-level gaps: `research/zig-cr/92-gap-backlog.md`
+- Per-phase acceptance: `research/zig-cr/93-phased-execution-proposal.md`
+- Use git commits to checkpoint status after each subagent completes a task
+
+### Subagent Task Assignment Rules
+1. **No overlapping file edits**: assign disjoint file sets to each subagent
+2. **Contract-first**: each task must have explicit acceptance criteria (test name or assertion)
+3. **Small scope**: prefer many small tasks over few large ones
+4. **Update on completion**: subagent must update its task card (in todo list or status doc) when done
+5. **Commit atomically**: each completed task = one git commit with clear message
+
+### Methodology
+- **RGRTDD**: Red (failing tests) → Green (minimal impl) → Refactor → Regression (keep green)
+- **GAN Adversarial**: treat spec ambiguities as adversarial; force explicit contracts before implementing
+- **Parallelism**: maximize concurrent subagent utilization by vertical slicing
+
+### Platform Priority
+1. **Web (WASM)**: highest priority — static embedding into SQLite WASM
+2. **Linux**: second priority — loadable `.so` extension
+3. **macOS/Windows/iOS/Android**: expand after Web + Linux are stable
+
+---
 
 ## Project Overview
 
