@@ -7,6 +7,7 @@ pub const codec = @import("codec.zig");
 pub const ffi = @import("ffi/root.zig");
 pub const changes_vtab = @import("changes_vtab.zig");
 pub const pack_columns = @import("pack_columns.zig");
+pub const rows_impacted = @import("rows_impacted.zig");
 pub const sqlite = struct {
     /// Writable virtual table infrastructure
     pub const vtab = @import("sqlite/vtab.zig");
@@ -37,4 +38,6 @@ test {
     _ = changes_vtab;
     // Run pack_columns tests
     _ = pack_columns;
+    // Run rows_impacted tests
+    _ = rows_impacted;
 }
