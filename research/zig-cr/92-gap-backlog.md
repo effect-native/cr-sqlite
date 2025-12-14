@@ -1,53 +1,108 @@
 # 92-gap-backlog
 
-## Inventory
+> **Last Updated**: 2025-12-14 (Round 10)
 
-Derived from:
-- `research/zig-cr/20-zig-sqlite-capabilities.md`
-- `research/zig-cr/02-virtual-tables.md`
-- `research/zig-cr/09-storage-serialization.md`
+## Status Summary
 
-## Runtime Role
+**MVP COMPLETE** — All core replication functionality implemented and tested:
+- Native parity tests: 44/44 PASS
+- Browser WASM tests: 10/10 PASS
+- E2E sync tests: ALL PASS
 
-This is the “things to build before Zig CR-SQLite can work” list, biased toward gaps in `.refs/zig-sqlite`.
+## Completed Items (Rounds 1-9)
 
-## SQLite API Requirements
+### ✅ SQLite API Scaffolding
+1. ~~**Loadable extension init scaffolding**~~ — DONE in `zig/src/ffi/init.zig`
+2. ~~**Writable vtab support**~~ — DONE in `zig/src/changes_vtab.zig` (xUpdate, xBegin, xCommit)
+3. ~~**Blob-safe arg decoding**~~ — DONE in `zig/src/codec.zig`, `pack_columns.zig`
 
-### Gaps in `.refs/zig-sqlite` for a CR-SQLite port
+### ✅ Core Replication Features
+- `crsql_as_crr` / `crsql_as_table` — `zig/src/as_crr.zig`
+- `crsql_changes` read path (union query, filters, rowid slabs)
+- `crsql_changes` write path (merge semantics, cl/col_version comparison)
+- `crsql_site_id()`, `crsql_db_version()` — `zig/src/site_identity.zig`
+- `crsql_rows_impacted()` — `zig/src/rows_impacted.zig`
+- `crsql_is_crr()` — `zig/src/is_crr.zig`
+- `crsql_begin_alter` / `crsql_commit_alter` — `zig/src/schema_alter.zig`
+- Sync bit gating — `zig/src/sync_bit.zig`
+- Resurrection merge (tombstone → live) — `zig/src/merge_insert.zig`
+- WASM memory safety (allocator fixes) — `zig/src/pack_columns.zig`
 
-1) **Loadable extension init scaffolding**
-- Need an equivalent of `SQLITE_EXTENSION_INIT2(pApi)` in Zig to set the global thunk table used by `c/loadable_extension.zig`.
+---
 
-2) **Writable vtab support**
-- `crsql_changes` needs:
-  - `xUpdate` (INSERT-only)
-  - `xBegin`/`xCommit` (and potentially rollback)
-- `.refs/zig-sqlite/vtab.zig` currently generates read-only vtabs.
+## Remaining Gaps (Post-MVP)
 
-3) **Blob-safe arg decoding**
-- `.refs/zig-sqlite/helpers.zig` currently uses `sqlite3_value_text` for slice extraction, even for blobs.
-- CR-SQLite requires stable binary decoding (`sqlite3_value_blob` + `sqlite3_value_bytes`).
+### 1. Performance Optimizations
+**Source**: `research/zig-cr/11-performance-hotspots.md`
+**Priority**: Medium
+**Status**: Not started
 
-4) **`sqlite3_vtab_config`**
-- Thunk layer stubs it with a compile error.
-- If you need to configure vtab behaviors (constraint support / innocuous / direct-only), you must implement it or avoid it.
+- [ ] Statement caching for frequently-used queries (union query, clock writes)
+- [ ] Schema version invalidation caching (`PRAGMA schema_version`)
+- [ ] `PRAGMA data_version` check amortization (per-transaction flag)
+- [ ] Prepared statement persistence (`SQLITE_PREPARE_PERSISTENT`)
 
-5) **Missing/unknown hook APIs**
-- CR-SQLite uses commit/rollback hooks (covered), but if you later want preupdate hooks, confirm availability and add to thunk layer.
+### 2. Fractional Indexing UDFs
+**Source**: `research/zig-cr/07-fractindex-rust.md`
+**Priority**: Low (deferred from MVP)
+**Status**: Not started
 
-## Porting Implications (Zig)
+- [ ] `crsql_fract_key_between(left, right)` — lexicographic midpoint
+- [ ] `crsql_fract_as_ordered(table, order_col, collection_cols...)` — view + triggers
+- [ ] `crsql_fract_fix_conflict_return_old_key(...)` — collision repair
 
-- Decide early whether to:
-  - fork `.refs/zig-sqlite` into a purpose-built “zig-sqlite-extension” layer, or
-  - write a minimal C ABI shim in Zig and only import the bits you need.
-- Keep `ExtData` and its cached prepared statements in Zig with explicit allocator lifetime.
+### 3. Multi-tab Web Architecture
+**Source**: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
+**Priority**: High (for production web use)
+**Status**: Not started
+
+- [ ] SharedWorker coordinator for provider election
+- [ ] Service Worker fallback for environments without SharedWorker
+- [ ] Web Locks for exclusive provider access
+- [ ] RPC interface (exec, query, subscribe)
+- [ ] OPFS storage integration (`opfs-sahpool` VFS)
+- [ ] Provider migration safety (idempotent writes)
+- [ ] Browser test coverage for multi-tab scenarios
+
+### 4. C Test Harness (Oracle Validation)
+**Source**: `research/zig-cr/10-test-oracle.md`
+**Priority**: Medium
+**Status**: Not started
+
+- [ ] Build harness to load Zig `.so`/`.dylib` via `sqlite3_load_extension()`
+- [ ] Run original C tests (`core/src/*.test.c`) against Zig extension
+- [ ] Validate byte-for-byte codec compatibility
+
+### 5. Cross-platform Packaging & CI
+**Source**: `research/zig-cr/93-phased-execution-proposal.md` (Phase 7)
+**Priority**: Medium
+**Status**: Partial (local builds work)
+
+- [ ] GitHub Actions CI for Zig extension (Linux x86_64/aarch64)
+- [ ] macOS universal binary (aarch64 + x86_64)
+- [ ] Windows `.dll` build
+- [ ] iOS/Android static embedding guide
+- [ ] npm package updates for Zig-built extensions
+
+### 6. `sqlite3_vtab_config` (Optional)
+**Priority**: Low
+**Status**: Deferred — not needed for current functionality
+
+---
 
 ## Risks / Unknowns
 
-- If you rely on returning memory to SQLite, you must ensure allocation/destructor matches SQLite expectations.
-- Some SQLite APIs in the thunk layer are intentionally unsupported due to varargs; avoid them (e.g., use `sqlite3_errmsg` / fixed strings rather than `sqlite3_mprintf`) or implement safe alternatives.
+- Performance at scale with many CRR tables (UNION query compilation time)
+- Hook clobbering: commit/rollback hooks overwrite existing hooks (no chaining)
+- WASM memory limits for very large databases
 
-## MVP Cut
+## MVP Cut (Reference)
 
-- Solve (1) init scaffolding, (2) writable vtab, (3) blob decoding first.
-- Defer `sqlite3_vtab_config` unless you hit a concrete need.
+The MVP path from `research/zig-cr/91-mvp-roadmap.md` is **COMPLETE**:
+- ✅ Phase 0: Extension bring-up
+- ✅ Phase 1: Wire format (codec)
+- ✅ Phase 2: Clock + site identity
+- ✅ Phase 3: `crsql_as_crr` + triggers
+- ✅ Phase 4: `crsql_changes` read path
+- ✅ Phase 5: Merge + `rows_impacted`
+- ✅ Phase 6: E2E sync + alter workflow
