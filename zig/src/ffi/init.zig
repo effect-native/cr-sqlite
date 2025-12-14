@@ -133,6 +133,19 @@ pub export fn sqlite3_crsqlite_init(
     // This is safe because our functions are marked SQLITE_INNOCUOUS.
     _ = api.exec(db, "PRAGMA trusted_schema = ON", null, null, null);
 
+    // Create crsql_master table for storing metadata (version, pre_compact_dbversion, etc.)
+    // Reference: core/rs/core/src/bootstrap.rs crsql_create_schema_table_if_not_exists
+    const create_master_rc = api.exec(
+        db,
+        "CREATE TABLE IF NOT EXISTS \"crsql_master\" (\"key\" TEXT PRIMARY KEY, \"value\" ANY);",
+        null,
+        null,
+        null,
+    );
+    if (create_master_rc != api.SQLITE_OK) {
+        return create_master_rc;
+    }
+
     // Initialize site_id (creates table if needed, loads or generates site_id)
     if (!site_identity.initSiteId(db)) {
         return api.SQLITE_ERROR;
