@@ -31,7 +31,8 @@ TEST_SRCS := \
     $(CORE_SRC)/changes-vtab.test.c \
     $(CORE_SRC)/rows-impacted.test.c \
     $(CORE_SRC)/crsqlite.test.c \
-    $(CORE_SRC)/sandbox.test.c
+    $(CORE_SRC)/sandbox.test.c \
+    $(CORE_SRC)/rs-fract.test.c
 
 HARNESS_SRC := harness.c
 

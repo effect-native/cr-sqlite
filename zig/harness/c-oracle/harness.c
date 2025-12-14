@@ -52,6 +52,7 @@ extern void crsqlChangesVtabTestSuite(void);
 extern void rowsImpactedTestSuite(void);
 extern void crsqlTestSuite(void);
 extern void crsqlSandboxSuite(void);
+extern void crsqlFractSuite(void);
 
 #define SUITE(N) if (strcmp(suite, "all") == 0 || strcmp(suite, N) == 0)
 
@@ -76,6 +77,7 @@ int main(int argc, char *argv[]) {
     SUITE("rows_impacted") rowsImpactedTestSuite();
     SUITE("crsql") crsqlTestSuite();
     SUITE("sandbox") crsqlSandboxSuite();
+    SUITE("fract") crsqlFractSuite();
     
     printf("\n=== Tests Complete ===\n");
     return 0;
