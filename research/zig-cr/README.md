@@ -44,6 +44,8 @@ Each bullet corresponds to one agent report file in this folder.
 - `20-zig-sqlite-capabilities.md`: what `.refs/zig-sqlite` already provides; gaps.
 - `21-ghostty-best-practices.md`: idioms for large Zig codebases; build/test patterns.
 - `22-bun-best-practices.md`: idioms for protocol parsing/IO; error handling patterns.
+- `23-notion-wasm-sqlite-multitab-technique.md`: technique analysis: how Notion / wa-sqlite handle multi-tab OPFS SQLite via single-provider.
+- `23-notion-wasm-sqlite-multitab-technique.md`: how Notion/wa-sqlite coordinate OPFS SQLite across tabs.
 
 ## Synthesis Deliverables
 After reports exist, produce:
@@ -68,9 +70,11 @@ After reports exist, produce:
 - `research/zig-cr/22-bun-best-practices.md`
 
 ## Proposals
-- `research/zig-cr/93-phased-execution-proposal.md`
-- `research/zig-cr/94-long-term-solution.md`
-- `research/zig-cr/95-one-weird-tricks.md`
+- `research/zig-cr/93-phased-execution-proposal.md`: phased RGRTDD roadmap (web-first, Linux-second).
+- `research/zig-cr/94-long-term-solution.md`: ideal long-term architecture (semantics engine + platform skins).
+- `research/zig-cr/95-one-weird-tricks.md`: 80/20 shortcuts to end-to-end beta.
+- `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`: single-provider multi-client architecture (low complexity, good for read-heavy).
+- `research/zig-cr/97-proposal-multitab-crsqlite-mesh.md`: peer-to-peer multi-writer mesh architecture (true CR semantics, instant local writes).
 
 ## Working Method
 1. Run agents concurrently with tight scopes.
