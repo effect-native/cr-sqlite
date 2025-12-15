@@ -11,14 +11,12 @@ If you’re asking “what’s left?” start here:
 
 ## Next parallel work (curated)
 
-- Global mesh (TS, Phase 4 implementation gaps):
-  - `.tasks/backlog/TASK-048-crsql-mesh-protocol-schema-reuse.md`
-  - `.tasks/backlog/TASK-049-crsql-mesh-engine-phase4.md`
-  - `.tasks/backlog/TASK-050-crsql-mesh-runtime-node-phase4.md`
 - Web phase 2 (TS, spec-gated):
   - `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
   - `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 - Upstream feedback capture (blocked): `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
+
+(For what just happened in the last delegate round, start at `.tasks/DELEGATE_WORK_HANDOFF.md` and then confirm against `effect-native/.specs/` and `effect-native/packages-native/`.)
 
 ## Rules of the game (thing-golf)
 

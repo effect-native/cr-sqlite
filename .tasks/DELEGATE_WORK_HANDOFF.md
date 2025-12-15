@@ -257,7 +257,8 @@ Root cause: Multi-table crsql_changes vtab rowid slab assignment not implemented
 - `.tasks/done/TASK-052-web-browser-test-triage.md`
 
 **Commits**
-- Pending — changes made by subagent in `zig/src/changes_vtab.zig`
+- `3fc49dbe` — delegate round 34: fix zig rowid slab cache invalidation (TASK-051, 052)
+- `e466ae2c` — cleanup: remove completed mesh tasks from backlog, update AGENTS.md + wishes
 
 **Modified files**
 - `zig/src/changes_vtab.zig` (schema cache invalidation fix)
@@ -327,4 +328,3 @@ Running 18 tests using 2 workers
 **Known gaps / unverified claims**
 - TypeScript packages have type errors (visible in project diagnostics) — these are pre-existing from Round 32, not introduced by this round
 - No coverage captured
-- Commit not yet created (will be done after handoff update)

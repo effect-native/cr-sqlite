@@ -46,7 +46,17 @@ Workflow:
 
 Meaning: reconcile intended docs/specs vs built reality, then refresh `.tasks/`.
 
+"Delegate work" and "Update tasks" are an adversarial collaboration loop:
+- Delegate phase writes **claims + evidence** into `.tasks/DELEGATE_WORK_HANDOFF.md`.
+- Update phase tries to **invalidate** those claims by reconciling specs vs implementation.
+- Gap backlog (`research/zig-cr/92-gap-backlog.md`) is the opposite evergreen handoff (update→delegate).
+
 Do this, in order:
+0. Read the delegate evidence first:
+   - `.tasks/DELEGATE_WORK_HANDOFF.md`
+   - Treat it as *claims to falsify*.
+   - Prefer using the captured test output + coverage notes to avoid rerunning expensive tests.
+   - If evidence is missing (no commands, no output, no repro steps), assume the claim is unproven.
 1. Snapshot the inbox + queue:
    - `.wishes/*.md`
    - `.tasks/{active,backlog,done}/`
