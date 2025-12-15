@@ -25,6 +25,9 @@ Per `.wishes/gather-upstream-feedback.md`, these ideas should be recorded as ind
 
 This task is blocked because it requires Tom to confirm the intended scope (how many cards, and whether we’re allowed to touch `.refs/` at all).
 
+Decision-capture task:
+- `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
+
 ## Files to Modify
 - `.wishes/blocked-on-tom/*.md` (new idea cards)
 - `research/zig-cr/92-gap-backlog.md` (optional link section)

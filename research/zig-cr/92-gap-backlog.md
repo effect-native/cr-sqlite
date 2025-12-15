@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-15 (Round 32 — Phase 4 mesh implementation complete)
+> Last updated: 2025-12-15 (Round 34 — Zig parity fixed, browser tests green)
 
 ## Status
 
@@ -12,10 +12,19 @@
 
 Pick disjoint tasks from `.tasks/backlog/`:
 
-- Web phase 2 (TS, blocked until Phase 2 specs exist for browser runtime)
-  - Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-  - Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- Upstream goodwill (blocked on Tom)
+- **Tests now green**
+  - Zig parity: 52/52 passing (TASK-051 done)
+  - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
+
+- **Unblock browser specs (to unblock TS work)**
+  - Tom decision: browser spec naming + package boundary: `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
+  - Phase 1 instructions: `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
+  - Phase 2 requirements: `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
+  - (Then implement) Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
+  - (Then implement) Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+
+- **Upstream goodwill (blocked on Tom)**
+  - Scope decision: `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
   - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
@@ -24,6 +33,11 @@ Pick disjoint tasks from `.tasks/backlog/`:
   - Protocol schema reuse: `.tasks/done/TASK-048-crsql-mesh-protocol-schema-reuse.md` — Types now re-exported from CrSqlSchema, 26 tests pass
   - Mesh engine: `.tasks/done/TASK-049-crsql-mesh-engine-phase4.md` — Receive loop, periodic sync, diff exchange, transactional apply, progress observation, 23 tests pass
   - Node runtime: `.tasks/done/TASK-050-crsql-mesh-runtime-node-phase4.md` — DB open, CR-SQLite load, protocol init, lifecycle hooks, 11 tests pass
+
+- **Round 33 assessment** (2025-12-15)
+  - No delegation: `.tasks/DELEGATE_WORK_HANDOFF.md`
+  - Tests status: mesh tests green, TS check green, Zig parity failing (rowid slab) per Round 33
+
 - **Mesh packages (Phase 4 scaffolding + partial implementation)** (2025-12-14)
   - `@effect-native/crsql-mesh-transport` — Transport tag + deterministic InMemoryTransport (good)
 - **Mesh Phase 2 requirements (node-first)**: `.tasks/done/TASK-046-phase2-requirements-crsql-mesh.md` (2025-12-14)
@@ -41,10 +55,23 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 ## Gaps (only what’s still open)
 
-### Web multi-tab (Phase 2)
+### Test infrastructure (resolved)
+
+Source: `.tasks/DELEGATE_WORK_HANDOFF.md` (Round 34)
+
+- [x] Fix Zig parity rowid slab failures → `.tasks/done/TASK-051-zig-parity-rowid-slab.md` (2025-12-15)
+- [x] Triage + bucket browser-test failures → `.tasks/done/TASK-052-web-browser-test-triage.md` (2025-12-15, was port conflict)
+
+### Web multi-tab (spec unblock → implementation)
 
 Source: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 
+Spec unblock (required before TS implementation):
+- [ ] Tom decision: choose spec + package boundary → `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
+- [ ] Phase 1 instructions (browser runtime) → `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
+- [ ] Phase 2 requirements (browser runtime) → `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
+
+Implementation tasks (blocked until requirements exist):
 - [ ] Service Worker fallback when SharedWorker missing → `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
 - [ ] Reactive subscriptions/notifications surface → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 
@@ -76,6 +103,7 @@ Source: `research/zig-cr/93-phased-execution-proposal.md`
 
 Source wish: `.wishes/gather-upstream-feedback.md`
 
+- [ ] Tom scope decision → `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
 - [ ] Collect zig-sqlite improvement ideas as blocked-on-tom cards → `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Release work

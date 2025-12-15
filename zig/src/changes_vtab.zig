@@ -913,8 +913,11 @@ fn changesFilter(
     // Discover all CRR tables using schema-version keyed cache for optimal performance.
     // This avoids re-querying sqlite_master on every xFilter when schema hasn't changed.
     if (pVTab.cache) |cache| {
-        // Check if we have a valid cached table list
+        // First, check if schema version has changed (this refreshes cache.schema_version)
+        _ = cache.checkSchemaVersion() catch {};
         const schema_version = cache.getSchemaVersion();
+
+        // Check if we have a valid cached table list for the current schema version
         if (getCachedTableNames(pVTab, schema_version)) |cached_names| {
             // Schema unchanged, copy cached names to cursor
             copyTableNamesToCursor(cursor, cached_names) catch {

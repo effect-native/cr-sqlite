@@ -17,7 +17,10 @@ subagent (general)
 - Proposal: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md` ("Notifications / subscriptions")
 - Gap backlog: `research/zig-cr/92-gap-backlog.md` (Multi-tab Web Architecture)
 - TS workflow rules: `effect-native/.specs/AGENTS.md`
-- Future spec parent (Phase 1): `effect-native/.specs/crsql-mesh-runtime/instructions.md`
+- Browser spec tasks (unblock):
+  - `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
+  - `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
+  - `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
 
 ## Constraint
 This work is TypeScript-heavy.
