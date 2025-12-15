@@ -6,7 +6,8 @@ Short operating manual for AI agents working in this repo.
 
 - Wishes inbox: `.wishes/`
 - Task queue: `.tasks/{backlog,active,done}/`
-- Zig status + gaps (canonical): `research/zig-cr/92-gap-backlog.md`
+- Gap backlog (canonical map: update→delegate): `research/zig-cr/92-gap-backlog.md`
+- Delegate handoff log (canonical claims: delegate→update): `.tasks/DELEGATE_WORK_HANDOFF.md`
 - Zig implementation: `zig/`
 - TypeScript specs (source of truth): `effect-native/.specs/`
 - TypeScript packages (current reality): `effect-native/packages-native/`
@@ -69,6 +70,10 @@ Output:
 
 Meaning: take a curated subset of `.tasks/backlog/` and run multiple subagents in parallel.
 
+This workflow must produce an evergreen handoff for the adversarial "Update tasks" phase:
+- **Gap backlog** (`research/zig-cr/92-gap-backlog.md`) is update→delegate.
+- **Delegate handoff log** (`.tasks/DELEGATE_WORK_HANDOFF.md`) is delegate→update.
+
 Procedure:
 1. Read `research/zig-cr/92-gap-backlog.md` first (it is the task map).
 2. Pick tasks with disjoint `Files to Modify`.
@@ -80,6 +85,21 @@ Procedure:
    - Move `.tasks/active/` → `.tasks/done/`.
    - Ensure completion notes include date + commit hash.
    - Refresh `research/zig-cr/92-gap-backlog.md` links/status.
+5. **Commit all changes before handoff** (mandatory):
+   - Commit in `effect-native/` submodule first (if changes exist there).
+   - Then commit in the root repo (including the submodule pointer update).
+   - Use descriptive commit messages referencing the task card(s).
+   - Record the commit hashes in the task cards' Completion Notes.
+6. Write the round outcome to the evergreen handoff log:
+   - Append a new "Round" section to `.tasks/DELEGATE_WORK_HANDOFF.md`.
+   - Include (at minimum):
+     - which task cards were executed
+     - commit hashes produced (if any)
+     - exact commands used to run tests / typecheck / lint
+     - the captured outputs (paste) for those commands
+     - coverage outputs/paths (if applicable)
+     - steps to reproduce the results from a clean checkout
+   - If no tests were run, explicitly say so (this is a red flag).
 
 Note: `.tasks/active/` can be changing while you read it. Take a snapshot and proceed.
 
