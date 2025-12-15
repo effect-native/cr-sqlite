@@ -40,7 +40,8 @@ A pure Zig port of [CR-SQLite](https://github.com/vlcn-io/cr-sqlite), providing 
 Post-MVP items not yet implemented:
 - Web: Service Worker fallback (for environments without SharedWorker)
 - Web: Reactive query subscriptions / notifications surface
-- Packaging: iOS/Android static embedding guides
+
+For mobile static embedding (iOS/Android), see [Mobile Static Embedding Guide](../research/zig-cr/104-mobile-static-embedding-guide.md).
 
 Notes:
 - Performance hotspot work is complete (see `research/zig-cr/92-gap-backlog.md`).

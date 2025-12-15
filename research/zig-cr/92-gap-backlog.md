@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-14 (Round 27)
+> Last updated: 2025-12-14 (Round 28)
 
 ## Status
 
@@ -12,19 +12,17 @@
 
 Pick disjoint tasks from `.tasks/backlog/`:
 
-- Mesh Phase 2 (approved by Tom)
-  - Phase 2 requirements for node-first slice: `.tasks/backlog/TASK-046-phase2-requirements-crsql-mesh.md`
-  - Phase 1 RN runtime specs: `.tasks/backlog/TASK-047-phase1-react-native-runtime-specs.md`
-- Web phase 2 (TS, still blocked until its own Phase 2 specs exist)
+- Web phase 2 (TS, blocked until Phase 2 specs exist for browser runtime)
   - Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
   - Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- Mobile embedding docs (Zig)
-  - iOS/Android static embedding guide: `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
 - Upstream goodwill (blocked on Tom)
   - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
 
+- **Mesh Phase 2 requirements (node-first)**: `.tasks/done/TASK-046-phase2-requirements-crsql-mesh.md` (2025-12-14)
+- **Phase 1 RN runtime specs**: `.tasks/done/TASK-047-phase1-react-native-runtime-specs.md` (2025-12-14)
+- **Mobile static embedding guide**: `.tasks/done/TASK-033-mobile-static-embedding-guide.md` → `research/zig-cr/104-mobile-static-embedding-guide.md` (2025-12-14)
 - Perf hotspots: `.tasks/done/TASK-029-performance-hotspot-closure.md`
 - macOS universal: `.tasks/done/TASK-026-A-macos-universal-binary.md`
 - Windows `.dll`: `.tasks/done/TASK-030-windows-dll-build.md`
@@ -46,7 +44,7 @@ Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
 Source: `research/zig-cr/93-phased-execution-proposal.md`
 
-- [ ] iOS/Android static embedding guide → `.tasks/backlog/TASK-033-mobile-static-embedding-guide.md`
+- [x] iOS/Android static embedding guide → `research/zig-cr/104-mobile-static-embedding-guide.md` (done 2025-12-14)
 
 ### Upstream feedback capture (optional)
 
