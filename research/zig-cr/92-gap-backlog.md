@@ -12,7 +12,10 @@
 
 Pick disjoint tasks from `.tasks/backlog/`:
 
-- Web phase 2 (TS, spec-gated)
+- Mesh Phase 2 (approved by Tom)
+  - Phase 2 requirements for node-first slice: `.tasks/backlog/TASK-046-phase2-requirements-crsql-mesh.md`
+  - Phase 1 RN runtime specs: `.tasks/backlog/TASK-047-phase1-react-native-runtime-specs.md`
+- Web phase 2 (TS, still blocked until its own Phase 2 specs exist)
   - Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
   - Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 - Mobile embedding docs (Zig)

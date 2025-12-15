@@ -73,3 +73,10 @@ NOTE: verifying unhex() presence as early as possible in layer creation so that 
 - TODO(Agent): add specs for react-native packages
 
 - @effect-native/crsql-mesh-runtime-node should rely on @effect/platform
+
+## Decisions Summary (for agents)
+- Core engine package name: `@effect-native/crsql-mesh`
+- First ship slice: protocol + transport interface + core engine + runtime-node
+- Bun: fold into runtime-node unless proven necessary
+- Electron: out of scope
+- Protocol: reuse `@effect-native/crsql` schemas; require SQLite `unhex()`; fail fast with `UnhexUnavailable`

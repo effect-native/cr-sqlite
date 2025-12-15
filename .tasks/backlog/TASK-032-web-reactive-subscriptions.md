@@ -24,7 +24,7 @@ This work is TypeScript-heavy.
 
 Per `AGENTS.md` (TypeScript Work Rule): **all TypeScript work happens in the `effect-native/` submodule** and must follow the spec-first workflow in `effect-native/.specs/AGENTS.md`.
 
-This task stays blocked until Tom explicitly approves proceeding beyond Phase 1 specs for the browser/runtime surface.
+This task stays blocked until Phase 2 requirements exist for the browser/runtime surface under `effect-native/.specs/AGENTS.md`.
 
 ## Description
 Provide a narrow notification/subscription surface so tab B can react when tab A writes.
