@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-15 (Round 29)
+> Last updated: 2025-12-14 (Round 30)
 
 ## Status
 
@@ -15,14 +15,19 @@ Pick disjoint tasks from `.tasks/backlog/`:
 - Web phase 2 (TS, blocked until Phase 2 specs exist for browser runtime)
   - Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
   - Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- Global mesh implementation (TS, ready for Phase 5 once approved)
-  - Start with `effect-native/.specs/crsql-mesh/plan.md`
-  - Then `effect-native/.specs/crsql-mesh-transport/plan.md` + `effect-native/.specs/crsql-mesh-protocol/plan.md`
+- Global mesh implementation (TS, ✅ Phase 4 complete, ready for Phase 5 integration)
+  - All 4 packages implemented: protocol, transport, mesh, runtime-node
+  - 69 tests passing across packages
 - Upstream goodwill (blocked on Tom)
   - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
 
+- **Mesh Phase 4 implementation (all packages)**: 4 packages implemented with 69 tests (2025-12-14)
+  - `@effect-native/crsql-mesh-protocol` — message schemas, decode helpers, unhex() check
+  - `@effect-native/crsql-mesh-transport` — Transport tag, InMemoryTransport for tests
+  - `@effect-native/crsql-mesh` — Mesh service, receive routing, version vectors, apply pipeline
+  - `@effect-native/crsql-mesh-runtime-node` — Node runtime layer, config validation, lifecycle
 - **Mesh Phase 2 requirements (node-first)**: `.tasks/done/TASK-046-phase2-requirements-crsql-mesh.md` (2025-12-14)
 - **Mesh Phase 3 designs + Phase 4 RGRTDD plans**: `effect-native/.specs/crsql-mesh/plan.md` (2025-12-15)
 - **Mesh protocol Phase 4 RGRTDD plan**: `effect-native/.specs/crsql-mesh-protocol/plan.md` (2025-12-15)
@@ -47,14 +52,15 @@ Source: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
-### Global mesh (Phase 4 planning)
+### Global mesh (Phase 4 ✅ complete, Phase 5 next)
 
 Source: `research/zig-cr/102-proposal-crsqlite-global-mesh.md` and `effect-native/.specs/crsqlite-global-mesh-packages/instructions.md`
 
-- [x] `@effect-native/crsql-mesh` Phase 4 plan → `effect-native/.specs/crsql-mesh/plan.md` (done 2025-12-15)
-- [x] `@effect-native/crsql-mesh-protocol` Phase 4 plan → `effect-native/.specs/crsql-mesh-protocol/plan.md` (done 2025-12-15)
-- [x] `@effect-native/crsql-mesh-transport` Phase 4 plan → `effect-native/.specs/crsql-mesh-transport/plan.md` (done 2025-12-15)
-- [x] `@effect-native/crsql-mesh-runtime-node` Phase 4 plan → `effect-native/.specs/crsql-mesh-runtime/plan.md` (done 2025-12-15)
+- [x] `@effect-native/crsql-mesh` Phase 4 plan → implemented (2025-12-14)
+- [x] `@effect-native/crsql-mesh-protocol` Phase 4 plan → implemented (2025-12-14)
+- [x] `@effect-native/crsql-mesh-transport` Phase 4 plan → implemented (2025-12-14)
+- [x] `@effect-native/crsql-mesh-runtime-node` Phase 4 plan → implemented (2025-12-14)
+- [ ] Phase 5: Real SQLite integration tests + production transport implementations
 
 ### Mobile static embedding docs
 
