@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-14 (Round 30)
+> Last updated: 2025-12-15 (Round 31)
 
 ## Status
 
@@ -15,19 +15,20 @@ Pick disjoint tasks from `.tasks/backlog/`:
 - Web phase 2 (TS, blocked until Phase 2 specs exist for browser runtime)
   - Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
   - Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- Global mesh implementation (TS, ✅ Phase 4 complete, ready for Phase 5 integration)
-  - All 4 packages implemented: protocol, transport, mesh, runtime-node
-  - 69 tests passing across packages
+- Global mesh implementation (TS, Phase 4 plans exist; implementation gaps remain)
+  - Protocol schema reuse alignment: `.tasks/backlog/TASK-048-crsql-mesh-protocol-schema-reuse.md`
+  - Mesh engine Phase 4 completion: `.tasks/backlog/TASK-049-crsql-mesh-engine-phase4.md`
+  - Node runtime Phase 4 completion: `.tasks/backlog/TASK-050-crsql-mesh-runtime-node-phase4.md`
 - Upstream goodwill (blocked on Tom)
   - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
 
-- **Mesh Phase 4 implementation (all packages)**: 4 packages implemented with 69 tests (2025-12-14)
-  - `@effect-native/crsql-mesh-protocol` — message schemas, decode helpers, unhex() check
-  - `@effect-native/crsql-mesh-transport` — Transport tag, InMemoryTransport for tests
-  - `@effect-native/crsql-mesh` — Mesh service, receive routing, version vectors, apply pipeline
-  - `@effect-native/crsql-mesh-runtime-node` — Node runtime layer, config validation, lifecycle
+- **Mesh packages (Phase 4 scaffolding + partial implementation)** (2025-12-14)
+  - `@effect-native/crsql-mesh-transport` — Transport tag + deterministic InMemoryTransport (good)
+  - `@effect-native/crsql-mesh-protocol` — unhex() check wired, but schema reuse vs `@effect-native/crsql/CrSqlSchema` needs alignment
+  - `@effect-native/crsql-mesh` — internal modules exist + unit-style tests, but `Mesh.run` orchestration is not implemented yet
+  - `@effect-native/crsql-mesh-runtime-node` — config validation exists; DB open/extension load/lifecycle hooks not implemented yet
 - **Mesh Phase 2 requirements (node-first)**: `.tasks/done/TASK-046-phase2-requirements-crsql-mesh.md` (2025-12-14)
 - **Mesh Phase 3 designs + Phase 4 RGRTDD plans**: `effect-native/.specs/crsql-mesh/plan.md` (2025-12-15)
 - **Mesh protocol Phase 4 RGRTDD plan**: `effect-native/.specs/crsql-mesh-protocol/plan.md` (2025-12-15)
@@ -52,15 +53,21 @@ Source: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
-### Global mesh (Phase 4 ✅ complete, Phase 5 next)
+### Global mesh (Phase 4 plans exist; implementation work is pending)
 
 Source: `research/zig-cr/102-proposal-crsqlite-global-mesh.md` and `effect-native/.specs/crsqlite-global-mesh-packages/instructions.md`
 
-- [x] `@effect-native/crsql-mesh` Phase 4 plan → implemented (2025-12-14)
-- [x] `@effect-native/crsql-mesh-protocol` Phase 4 plan → implemented (2025-12-14)
-- [x] `@effect-native/crsql-mesh-transport` Phase 4 plan → implemented (2025-12-14)
-- [x] `@effect-native/crsql-mesh-runtime-node` Phase 4 plan → implemented (2025-12-14)
-- [ ] Phase 5: Real SQLite integration tests + production transport implementations
+Spec artifacts:
+- [x] Phase 1 instructions: `.tasks/done/TASK-039-spec-global-mesh-package-map.md`
+- [x] Phase 2 requirements: `.tasks/done/TASK-046-phase2-requirements-crsql-mesh.md`
+- [x] Phase 3 designs: `effect-native/.specs/crsql-mesh*/design.md`
+- [x] Phase 4 plans: `effect-native/.specs/crsql-mesh*/plan.md`
+
+Implementation gaps tracked as tasks:
+- [ ] Protocol: ensure schema reuse from `@effect-native/crsql/CrSqlSchema` (FR-PROTO-001) → `.tasks/backlog/TASK-048-crsql-mesh-protocol-schema-reuse.md`
+- [ ] Mesh engine: implement anti-entropy loop + transactional apply per Phase 4 plan → `.tasks/backlog/TASK-049-crsql-mesh-engine-phase4.md`
+- [ ] Node runtime: implement DB open + CR-SQLite extension load + lifecycle hooks → `.tasks/backlog/TASK-050-crsql-mesh-runtime-node-phase4.md`
+- [ ] Phase 5: real SQLite integration + production transports (separate task once Phase 4 complete)
 
 ### Mobile static embedding docs
 

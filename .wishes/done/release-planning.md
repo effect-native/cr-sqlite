@@ -21,6 +21,5 @@ e.g. nix, npm, ???
 - Docs: In-repo, near code (README.md updates, browser-dist/README.md)
 
 **Next engineering tasks identified:**
-- TASK-037: Publish browser package to npm beta
-- TASK-038: Set up Zig Linux CI builds
-- TASK-039: Create platform-specific npm packages
+- zig-sqlite upstream feedback capture: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
+- Release engineering gaps: (create new `.tasks/backlog/` cards as needed; see `research/zig-cr/92-gap-backlog.md` Release section)
