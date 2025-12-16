@@ -2,10 +2,10 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
-- [ ] In Progress
-- [ ] Blocked (reason: depends on Phase 1 instructions approval)
-- [ ] Complete
+- [x] Assigned
+- [x] In Progress
+- [ ] Blocked
+- [x] Complete
 
 ## Priority
 high
@@ -47,4 +47,23 @@ Per Tom (2025-12-16), package boundaries and npm names are deferred until they b
 - Task created to unblock TS implementation tasks.
 
 ## Completion Notes
-[fill in when done]
+Completed 2025-12-16 as part of Round 35 unified mesh specs.
+
+All browser multi-tab requirements now exist in `effect-native/.specs/crsql-mesh/requirements.md` Section 5:
+- FR-MULTITAB-001 through FR-MULTITAB-012 cover:
+  - Single provider architecture
+  - SharedWorker/Service Worker coordinator
+  - No COOP/COEP requirement
+  - Provider election via Web Locks
+  - Provider death detection + re-election
+  - OPFS ownership
+  - DB version notifications (FR-MULTITAB-008)
+  - Idempotent write guard
+  - RPC interface
+  - Serial execution
+
+This unblocks TASK-031 (Service Worker fallback) and TASK-032 (Reactive subscriptions).
+
+Commits:
+- `bf2400ced` (effect-native) — unify mesh specs
+- `54fa767f` (root) — delegate round 35

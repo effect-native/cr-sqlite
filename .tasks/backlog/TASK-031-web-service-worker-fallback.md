@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [ ] Blocked (reason: TS work must follow spec-first in `effect-native/`)
+- [x] Blocked (reason: depends on TASK-063 browser foundation)
 - [ ] Complete
 
 ## Priority
@@ -17,11 +17,13 @@ subagent (general)
 - Proposal: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md` (SharedWorker primary, SW fallback)
 - Gap backlog: `research/zig-cr/92-gap-backlog.md` (Multi-tab Web Architecture)
 - TS workflow rules: `effect-native/.specs/AGENTS.md`
+- RGRTDD plan: `effect-native/.specs/crsql-mesh/plan.md` (F11-F12)
 - Browser spec tasks (unblock):
   - ✅ `.tasks/done/TASK-056-tom-browser-spec-naming.md` (concept name + boundary deferral)
   - ✅ `effect-native/.specs/crsql-mesh/requirements.md` (contains Phase 2 EARS for browser multi-tab)
   - ✅ `effect-native/.specs/crsql-mesh/design.md` (contains browser multi-tab design sketch)
   - ✅ `effect-native/.specs/crsql-mesh/plan.md` (contains RGRTDD slices)
+- **Blocked by**: `.tasks/backlog/TASK-063-browser-multitab-foundation.md` (F5-F8 must be done first)
 
 ## Constraint
 This work is TypeScript-heavy.

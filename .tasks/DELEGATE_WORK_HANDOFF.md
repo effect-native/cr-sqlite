@@ -378,3 +378,97 @@ Running 18 tests using 2 workers
 **Known gaps / unverified claims**
 - No tests run (spec-only changes)
 - TypeScript packages not type-checked this round
+
+---
+
+## Round 2025-12-16 (36) — Browser multi-tab foundation F5-F8 complete
+
+**Tasks executed**
+- `.tasks/done/TASK-063-browser-multitab-foundation.md`
+- `.tasks/done/TASK-053-spec-browser-runtime-phase1.md` (marked done, completed in Round 35)
+- `.tasks/done/TASK-054-spec-browser-runtime-phase2.md` (marked done, completed in Round 35)
+
+**Commits**
+- `62841a16f` (effect-native) — implement browser multi-tab foundation F5-F8: coordinator + provider (Round 36)
+- `889e02f7` (root) — delegate round 36: browser multi-tab foundation complete (TASK-063)
+
+**Modified files (effect-native submodule)**
+- `packages-native/crsql-mesh/src/browser/coordinator.ts` (new, 294 lines)
+- `packages-native/crsql-mesh/src/browser/provider.ts` (new, 335 lines)
+- `packages-native/crsql-mesh/src/browser/index.ts` (new, 51 lines)
+- `packages-native/crsql-mesh/test/browser/coordinator.test.ts` (new, 263 lines)
+- `packages-native/crsql-mesh/test/browser/provider.test.ts` (new, 300 lines)
+- `packages-native/crsql-mesh/src/index.ts` (modified, added Browser namespace export)
+
+**Modified files (root repo)**
+- `.tasks/done/TASK-063-browser-multitab-foundation.md` (moved from backlog, completed)
+- `.tasks/done/TASK-053-spec-browser-runtime-phase1.md` (moved from backlog, marked done)
+- `.tasks/done/TASK-054-spec-browser-runtime-phase2.md` (moved from backlog, marked done)
+- `.tasks/backlog/TASK-031-web-service-worker-fallback.md` (updated blocker)
+- `.tasks/backlog/TASK-032-web-reactive-subscriptions.md` (updated blocker)
+- `research/zig-cr/92-gap-backlog.md` (status update)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: pnpm, vitest 3.2.4, nix
+
+**Commands run (exact)**
+```bash
+pnpm -F @effect-native/crsql-mesh test
+pnpm -F @effect-native/crsql-mesh check
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>crsql-mesh tests (46 pass)</summary>
+
+```text
+ RUN  v3.2.4 /Users/tom/Developer/effect-native/cr-sqlite/effect-native/packages-native/crsql-mesh
+
+ ✓ test/browser/coordinator.test.ts (9 tests) 5ms
+ ✓ test/browser/provider.test.ts (14 tests) 6ms
+ ✓ test/Mesh.test.ts (7 tests) 106ms
+ ✓ test/Receive.test.ts (4 tests) 38ms
+ ✓ test/VersionVector.test.ts (3 tests) 31ms
+ ✓ test/Integration.test.ts (4 tests) 39ms
+ ✓ test/Apply.test.ts (5 tests) 40ms
+
+ Test Files  7 passed (7)
+      Tests  46 passed (46)
+   Start at  08:33:58
+   Duration  543ms
+```
+</details>
+
+<details>
+<summary>TypeScript check</summary>
+
+```text
+> @effect-native/crsql-mesh@0.1.0 check
+> tsc -b tsconfig.json
+
+(no output = success)
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd effect-native && pnpm install`
+3. `pnpm -F @effect-native/crsql-mesh test`
+4. `pnpm -F @effect-native/crsql-mesh check`
+
+**Work summary**
+1. Created browser foundation classes following RGRTDD plan.md F5-F8:
+   - **Coordinator**: Manages client connections, provider election via Web Locks pattern, request/response routing
+   - **Provider**: Owns OPFS database connection, serial execution queue, RPC interface (open, exec, query, close, ping)
+2. 23 new browser tests added (9 coordinator, 14 provider)
+3. All 46 mesh package tests pass
+4. TypeScript check passes
+5. Updated blockers on TASK-031/032 to reflect new foundation dependency is now satisfied
+
+**Known gaps / unverified claims**
+- No real browser integration tests (Playwright) — vitest mocks only
+- No coverage captured
+- Foundation provides the scaffolding but doesn't include actual OPFS or Web Locks — those require browser environment
+- Test file had concurrent test interference issue — fixed by removing `vi.clearAllMocks()` in `afterEach`

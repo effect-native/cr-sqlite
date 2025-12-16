@@ -2,10 +2,10 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
-- [ ] In Progress
-- [ ] Blocked (reason: requires Phase-approval workflow in `effect-native/.specs/AGENTS.md`)
-- [ ] Complete
+- [x] Assigned
+- [x] In Progress
+- [ ] Blocked
+- [x] Complete
 
 ## Priority
 high
@@ -51,4 +51,14 @@ Per Tom (2025-12-16), defer package boundaries and npm names until they block pr
 - Task created to unblock Phase 2 browser requirements.
 
 ## Completion Notes
-[fill in when done]
+Completed 2025-12-16 as part of Round 35 unified mesh specs.
+
+Work was done in TASK-057/058/059 which consolidated all browser multi-tab specs into the unified `effect-native/.specs/crsql-mesh/` directory:
+- Instructions: `instructions.md` updated with browser multi-tab context
+- Requirements: `requirements.md` Section 5 contains browser multi-tab EARS
+- Design: `design.md` contains browser multi-tab architecture sketch
+- Plan: `plan.md` Section F contains browser multi-tab RGRTDD slices
+
+Commits:
+- `bf2400ced` (effect-native) — unify mesh specs
+- `54fa767f` (root) — delegate round 35

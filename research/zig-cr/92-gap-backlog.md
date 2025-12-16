@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 35 — Unified mesh specs complete)
+> Last updated: 2025-12-16 (Round 36 — Browser multi-tab foundation F5-F8 complete)
 
 ## Status
 
@@ -15,21 +15,19 @@ Pick disjoint tasks from `.tasks/backlog/`:
 - **Tests now green**
   - Zig parity: 52/52 passing (TASK-051 done)
   - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
+  - Mesh tests: 46/46 passing (TASK-063 done — browser foundation added)
 
-- **Unified mesh spec complete (Round 35)**
-  - ✅ Tom decision: browser multi-tab concept + boundary deferral: `.tasks/done/TASK-056-tom-browser-spec-naming.md`
-  - ✅ Unify mesh requirements: `.tasks/done/TASK-057-unify-mesh-requirements.md`
-  - ✅ Unify mesh design: `.tasks/done/TASK-058-unify-mesh-design.md`
-  - ✅ Unify mesh plan: `.tasks/done/TASK-059-unify-mesh-plan.md`
-  - ✅ Redirect protocol spec: `.tasks/done/TASK-060-redirect-protocol-spec.md`
-  - ✅ Redirect transport spec: `.tasks/done/TASK-061-redirect-transport-spec.md`
-  - ✅ Redirect runtime spec: `.tasks/done/TASK-062-redirect-runtime-spec.md`
-  - (Unblocked) Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-  - (Unblocked) Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+- **Browser Multi-Tab Implementation (Round 36)**
+  - ✅ Browser foundation F5-F8: `.tasks/done/TASK-063-browser-multitab-foundation.md`
+    - Coordinator + Provider classes
+    - 9 coordinator tests, 14 provider tests
+  - ✅ Browser specs: `.tasks/done/TASK-053-spec-browser-runtime-phase1.md`, `.tasks/done/TASK-054-spec-browser-runtime-phase2.md`
+  - (Now unblocked) Service Worker fallback F11-F12: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
+  - (Now unblocked) Reactive subscriptions F9-F10: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 
-- **Upstream goodwill (blocked on Tom)**
-  - Scope decision: `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
-  - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
+- **Upstream goodwill (de-prioritized)**
+  - Scope decision (later): `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
+  - zig-sqlite feedback cards (later): `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
 
@@ -89,9 +87,12 @@ Spec redirects (completed 2025-12-16 Round 35):
 
 Note: per Tom (2025-12-16), browser multi-tab specs land in the unified full product spec under `effect-native/.specs/crsql-mesh/` and boundaries/names are deferred until they block progress (see `research/thing-golf.md`).
 
-Implementation tasks (now unblocked — specs exist):
-- [ ] Service Worker fallback when SharedWorker missing → `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-- [ ] Reactive subscriptions/notifications surface → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+Foundation (completed Round 36):
+- [x] Coordinator + Provider foundation (F5-F8) → `.tasks/done/TASK-063-browser-multitab-foundation.md`
+
+Implementation tasks (unblocked — foundation done):
+- [ ] Reactive subscriptions F9-F10 → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+- [ ] Service Worker fallback F11-F12 → `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 

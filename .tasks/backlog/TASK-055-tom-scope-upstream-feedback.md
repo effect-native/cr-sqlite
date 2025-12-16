@@ -8,7 +8,7 @@
 - [ ] Complete
 
 ## Priority
-medium
+low
 
 ## Assigned To
 Tom
@@ -19,7 +19,7 @@ Tom
 - Gap backlog: `research/zig-cr/92-gap-backlog.md`
 
 ## Description
-TASK-037 is blocked on scope from Tom. This task is a laser-focused decision capture so delegate work can proceed without guessing.
+TASK-037 is blocked on scope from Tom. Tom’s current direction: this is low priority until our own product work is done; upstream feedback capture may happen later, if ever.
 
 ## Files to Modify
 - `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`

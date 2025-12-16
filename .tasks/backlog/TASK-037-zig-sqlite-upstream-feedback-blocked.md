@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: waiting for Tom to pick items / scope)
+- [x] Blocked (reason: de-prioritized; focus on our own work first)
 - [ ] Complete
 
 ## Priority
