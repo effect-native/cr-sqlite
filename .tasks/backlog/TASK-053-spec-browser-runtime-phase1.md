@@ -22,12 +22,15 @@ subagent (general)
 - Gap backlog: `research/zig-cr/92-gap-backlog.md`
 
 ## Description
-Create Phase 1 spec instructions for the browser multi-tab runtime so that Phase 2 requirements can be written and TS implementation can become unblocked.
+Create Phase 1 spec instructions for browser multi-tab (“crsqlite-web-multitab”) as part of the unified full mesh product spec.
 
-This task produces only `instructions.md` (Phase 1) in a new spec directory under `effect-native/.specs/`.
+Per Tom (2025-12-16), defer package boundaries and npm names until they block progress (Thing Golf / minimize new Things). This task updates Phase 1 content in the unified spec and ensures it carries the web multi-tab constraints needed to write Phase 2 requirements later.
 
 ## Files to Modify
-- `effect-native/.specs/<new-browser-runtime-spec>/instructions.md`
+- `effect-native/.specs/crsql-mesh/instructions.md`
+- `effect-native/.specs/crsql-mesh/requirements.md`
+- `effect-native/.specs/crsql-mesh/design.md`
+- `effect-native/.specs/crsql-mesh/plan.md`
 - `effect-native/.specs/README.md` (add cross-link, if applicable)
 - `research/zig-cr/92-gap-backlog.md` (link to spec)
 

@@ -2,10 +2,10 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
+- [x] Assigned
 - [ ] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 medium
@@ -25,16 +25,19 @@ Before writing browser runtime specs, we need a crisp naming + boundary decision
 
 ## Files to Modify
 - `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
+- `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
 
 ## Acceptance Criteria
-- [ ] Update `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md` with:
-  - The chosen spec directory name under `effect-native/.specs/` (e.g., `crsqlite-web-multitab` vs `crsql-mesh-runtime-web`)
-  - The intended npm package name(s) (one package vs split coordinator/client/provider)
-  - One-sentence boundary statement for each package (“owns coordination”, “owns provider worker”, etc.)
+- [x] Decision recorded in `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`:
+  - Browser multi-tab concept name: `crsqlite-web-multitab`
+  - Spec source of truth: unify under `effect-native/.specs/crsql-mesh/` as the single full product spec
+  - Package boundaries and npm names: deferred until they block progress (Thing Golf rule)
+- [x] `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md` aligned to write Phase 2 requirements into the unified mesh spec
 
 ## Progress Log
 ### 2025-12-15
 - Task created to prevent mis-scoped browser spec work.
 
 ## Completion Notes
-[fill in when done]
+- 2025-12-16: Tom picked `crsqlite-web-multitab` for the browser multi-tab concept name.
+- 2025-12-16: Tom requested a single unified “full mesh product” spec, deferring package boundaries and names until they block progress (Thing Golf / minimize new Things).

@@ -328,3 +328,53 @@ Running 18 tests using 2 workers
 **Known gaps / unverified claims**
 - TypeScript packages have type errors (visible in project diagnostics) — these are pre-existing from Round 32, not introduced by this round
 - No coverage captured
+
+---
+
+## Round 2025-12-16 (35) — Unified mesh specs complete
+
+**Tasks executed**
+- `.tasks/done/TASK-057-unify-mesh-requirements.md`
+- `.tasks/done/TASK-058-unify-mesh-design.md`
+- `.tasks/done/TASK-059-unify-mesh-plan.md`
+- `.tasks/done/TASK-060-redirect-protocol-spec.md`
+- `.tasks/done/TASK-061-redirect-transport-spec.md`
+- `.tasks/done/TASK-062-redirect-runtime-spec.md`
+
+**Commits**
+- `bf2400ced` (effect-native) — unify mesh specs: requirements, design, plan + redirect notices (Round 35)
+- `54fa767f` (root) — delegate round 35: unified mesh specs complete (TASK-056 through TASK-062)
+
+**Modified files (effect-native submodule)**
+- `.specs/crsql-mesh/requirements.md` (+328 lines) — unified product requirements including browser multi-tab
+- `.specs/crsql-mesh/design.md` (+126 lines) — unified product design including browser multi-tab sketch
+- `.specs/crsql-mesh/plan.md` (+96 lines) — unified RGRTDD plan including browser multi-tab slices
+- `.specs/crsql-mesh/instructions.md` (+21 lines) — minor updates
+- `.specs/crsql-mesh-protocol/instructions.md` (+6 lines) — redirect notice
+- `.specs/crsql-mesh-transport/instructions.md` (+6 lines) — redirect notice
+- `.specs/crsql-mesh-runtime/instructions.md` (+6 lines) — redirect notice
+- `.specs/README.md` (+6 lines) — cross-links
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: pnpm, nix
+
+**Commands run (exact)**
+- No tests run (spec-only changes, no code modified)
+
+**Work summary**
+1. TASK-057: Consolidated protocol, transport, runtime, and browser multi-tab requirements into `effect-native/.specs/crsql-mesh/requirements.md` using EARS notation
+2. TASK-058: Added browser multi-tab design sketch to `effect-native/.specs/crsql-mesh/design.md` (coordinator/provider/client responsibilities, OPFS invariant, Web Locks election, notifications)
+3. TASK-059: Added browser multi-tab RGRTDD slices (F1-F15) to `effect-native/.specs/crsql-mesh/plan.md`
+4. TASK-060/061/062: Added redirect notices to legacy spec directories pointing to unified spec
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd effect-native && git diff --stat` — shows spec file changes
+3. Review `effect-native/.specs/crsql-mesh/requirements.md` for browser multi-tab EARS requirements
+4. Review `effect-native/.specs/crsql-mesh/design.md` for browser multi-tab design section
+5. Review `effect-native/.specs/crsql-mesh/plan.md` for Section F browser multi-tab slices
+
+**Known gaps / unverified claims**
+- No tests run (spec-only changes)
+- TypeScript packages not type-checked this round

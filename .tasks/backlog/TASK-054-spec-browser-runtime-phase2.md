@@ -22,15 +22,18 @@ subagent (general)
 - Gap backlog: `research/zig-cr/92-gap-backlog.md`
 
 ## Description
-Write Phase 2 requirements (EARS) for the browser multi-tab runtime.
+Write Phase 2 requirements (EARS) for browser multi-tab (“crsqlite-web-multitab”) as part of the unified full mesh product spec.
 
 Goal: unblock implementation tasks by creating a testable, unambiguous requirement set for:
 - SharedWorker coordinator primary path
 - Service Worker fallback path
 - minimal “db_version advanced” subscription surface
 
+Per Tom (2025-12-16), package boundaries and npm names are deferred until they block progress (Thing Golf / minimize new Things).
+
 ## Files to Modify
-- `effect-native/.specs/<new-browser-runtime-spec>/requirements.md`
+- `effect-native/.specs/crsql-mesh/requirements.md`
+- `effect-native/.specs/crsql-mesh/design.md` (if required for clarification)
 - `research/zig-cr/92-gap-backlog.md` (link to spec)
 
 ## Acceptance Criteria

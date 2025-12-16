@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-15 (Round 34 — Zig parity fixed, browser tests green)
+> Last updated: 2025-12-16 (Round 35 — Unified mesh specs complete)
 
 ## Status
 
@@ -16,18 +16,28 @@ Pick disjoint tasks from `.tasks/backlog/`:
   - Zig parity: 52/52 passing (TASK-051 done)
   - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
 
-- **Unblock browser specs (to unblock TS work)**
-  - Tom decision: browser spec naming + package boundary: `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
-  - Phase 1 instructions: `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
-  - Phase 2 requirements: `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
-  - (Then implement) Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-  - (Then implement) Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+- **Unified mesh spec complete (Round 35)**
+  - ✅ Tom decision: browser multi-tab concept + boundary deferral: `.tasks/done/TASK-056-tom-browser-spec-naming.md`
+  - ✅ Unify mesh requirements: `.tasks/done/TASK-057-unify-mesh-requirements.md`
+  - ✅ Unify mesh design: `.tasks/done/TASK-058-unify-mesh-design.md`
+  - ✅ Unify mesh plan: `.tasks/done/TASK-059-unify-mesh-plan.md`
+  - ✅ Redirect protocol spec: `.tasks/done/TASK-060-redirect-protocol-spec.md`
+  - ✅ Redirect transport spec: `.tasks/done/TASK-061-redirect-transport-spec.md`
+  - ✅ Redirect runtime spec: `.tasks/done/TASK-062-redirect-runtime-spec.md`
+  - (Unblocked) Service Worker fallback: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
+  - (Unblocked) Reactive subscriptions: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 
 - **Upstream goodwill (blocked on Tom)**
   - Scope decision: `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
   - zig-sqlite feedback cards: `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
 
 ## Done (recent)
+
+- **Unified mesh specs** (2025-12-16)
+  - Mesh requirements unified: `.tasks/done/TASK-057-unify-mesh-requirements.md` — Protocol, transport, runtime, browser multi-tab requirements consolidated
+  - Mesh design unified: `.tasks/done/TASK-058-unify-mesh-design.md` — Browser multi-tab design sketch added
+  - Mesh plan unified: `.tasks/done/TASK-059-unify-mesh-plan.md` — Browser multi-tab RGRTDD slices added
+  - Redirect notices: `.tasks/done/TASK-060-redirect-protocol-spec.md`, `.tasks/done/TASK-061-redirect-transport-spec.md`, `.tasks/done/TASK-062-redirect-runtime-spec.md`
 
 - **Mesh Phase 4 implementation complete** (2025-12-15)
   - Protocol schema reuse: `.tasks/done/TASK-048-crsql-mesh-protocol-schema-reuse.md` — Types now re-exported from CrSqlSchema, 26 tests pass
@@ -66,12 +76,20 @@ Source: `.tasks/DELEGATE_WORK_HANDOFF.md` (Round 34)
 
 Source: `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`
 
-Spec unblock (required before TS implementation):
-- [ ] Tom decision: choose spec + package boundary → `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
-- [ ] Phase 1 instructions (browser runtime) → `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
-- [ ] Phase 2 requirements (browser runtime) → `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
+Spec unblock (completed 2025-12-16 Round 35):
+- [x] Tom decision: choose spec concept + defer boundaries → `.tasks/done/TASK-056-tom-browser-spec-naming.md`
+- [x] Unify mesh requirements (including browser multi-tab EARS) → `.tasks/done/TASK-057-unify-mesh-requirements.md`
+- [x] Unify mesh design (including browser multi-tab sketch) → `.tasks/done/TASK-058-unify-mesh-design.md`
+- [x] Unify mesh plan (delegation-friendly RGRTDD) → `.tasks/done/TASK-059-unify-mesh-plan.md`
 
-Implementation tasks (blocked until requirements exist):
+Spec redirects (completed 2025-12-16 Round 35):
+- [x] Redirect protocol spec → `.tasks/done/TASK-060-redirect-protocol-spec.md`
+- [x] Redirect transport spec → `.tasks/done/TASK-061-redirect-transport-spec.md`
+- [x] Redirect runtime spec → `.tasks/done/TASK-062-redirect-runtime-spec.md`
+
+Note: per Tom (2025-12-16), browser multi-tab specs land in the unified full product spec under `effect-native/.specs/crsql-mesh/` and boundaries/names are deferred until they block progress (see `research/thing-golf.md`).
+
+Implementation tasks (now unblocked — specs exist):
 - [ ] Service Worker fallback when SharedWorker missing → `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
 - [ ] Reactive subscriptions/notifications surface → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 
