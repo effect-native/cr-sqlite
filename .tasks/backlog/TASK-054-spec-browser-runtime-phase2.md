@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: depends on Phase 1 instructions approval)
+- [ ] Blocked (reason: depends on Phase 1 instructions approval)
 - [ ] Complete
 
 ## Priority
@@ -37,10 +37,10 @@ Per Tom (2025-12-16), package boundaries and npm names are deferred until they b
 - `research/zig-cr/92-gap-backlog.md` (link to spec)
 
 ## Acceptance Criteria
-- [ ] Requirements use EARS notation per `effect-native/.specs/AGENTS.md`.
-- [ ] Service Worker fallback behavior is specified precisely enough to implement `.tasks/backlog/TASK-031-web-service-worker-fallback.md`.
-- [ ] Subscription/notification behavior is specified precisely enough to implement `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`.
-- [ ] Requirements define clear failure modes (e.g., provider death / re-election semantics at MVP level).
+- [x] Requirements use EARS notation per `effect-native/.specs/AGENTS.md`.
+- [x] Service Worker fallback behavior is specified precisely enough to implement `.tasks/backlog/TASK-031-web-service-worker-fallback.md`.
+- [x] Subscription/notification behavior is specified precisely enough to implement `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`.
+- [x] Requirements define clear failure modes (e.g., provider death / re-election semantics at MVP level).
 
 ## Progress Log
 ### 2025-12-15

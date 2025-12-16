@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: TS work must follow spec-first in `effect-native/`)
+- [ ] Blocked (reason: TS work must follow spec-first in `effect-native/`)
 - [ ] Complete
 
 ## Priority
@@ -18,16 +18,17 @@ subagent (general)
 - Gap backlog: `research/zig-cr/92-gap-backlog.md` (Multi-tab Web Architecture)
 - TS workflow rules: `effect-native/.specs/AGENTS.md`
 - Browser spec tasks (unblock):
-  - `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
-  - `.tasks/backlog/TASK-053-spec-browser-runtime-phase1.md`
-  - `.tasks/backlog/TASK-054-spec-browser-runtime-phase2.md`
+  - ✅ `.tasks/done/TASK-056-tom-browser-spec-naming.md` (concept name + boundary deferral)
+  - ✅ `effect-native/.specs/crsql-mesh/requirements.md` (contains Phase 2 EARS for browser multi-tab)
+  - ✅ `effect-native/.specs/crsql-mesh/design.md` (contains browser multi-tab design sketch)
+  - ✅ `effect-native/.specs/crsql-mesh/plan.md` (contains RGRTDD slices)
 
 ## Constraint
 This work is TypeScript-heavy.
 
 Per `AGENTS.md` (TypeScript Work Rule): **all TypeScript work happens in the `effect-native/` submodule** and must follow the spec-first workflow in `effect-native/.specs/AGENTS.md`.
 
-This task stays blocked until Phase 2 requirements exist for the browser/runtime surface under `effect-native/.specs/AGENTS.md`.
+This task is unblocked: Phase 2 requirements now exist in `effect-native/.specs/crsql-mesh/requirements.md` (browser multi-tab section).
 
 ## Description
 Provide a narrow notification/subscription surface so tab B can react when tab A writes.

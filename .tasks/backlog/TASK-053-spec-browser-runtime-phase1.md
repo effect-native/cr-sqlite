@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: requires Phase-approval workflow in `effect-native/.specs/AGENTS.md`)
+- [ ] Blocked (reason: requires Phase-approval workflow in `effect-native/.specs/AGENTS.md`)
 - [ ] Complete
 
 ## Priority
@@ -35,16 +35,16 @@ Per Tom (2025-12-16), defer package boundaries and npm names until they block pr
 - `research/zig-cr/92-gap-backlog.md` (link to spec)
 
 ## Acceptance Criteria
-- [ ] New Phase 1 spec exists with:
+- [x] Unified Phase 1 spec exists in `effect-native/.specs/crsql-mesh/instructions.md` with:
   - Context
   - User Story
   - High-Level Goals
   - Out of Scope
-- [ ] The spec explicitly references the constraints from `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`:
+- [x] The spec explicitly references the constraints from `research/zig-cr/96-proposal-multitab-wasm-sqlite-crsqlite.md`:
   - SharedWorker preferred, Service Worker fallback
   - No COOP/COEP requirement
   - Provider-tab dedicated worker owns OPFS
-- [ ] The spec calls out the minimal “notification/subscription” goal (db_version advanced events) needed by `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`.
+- [x] The spec calls out the minimal “notification/subscription” goal (db_version advanced events) needed by `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`.
 
 ## Progress Log
 ### 2025-12-15
