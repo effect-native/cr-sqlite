@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 40 — scratchpad demos wired)
+> Last updated: 2025-12-17 (backlog empty — MVP milestone)
 
 ## Status
 
@@ -10,28 +10,21 @@
 
 ## Now (next parallel assignments)
 
-Pick disjoint tasks from `.tasks/backlog/`:
+**Backlog is empty.** All planned work complete.
 
-- **Tests now green**
-  - Zig parity: 52/52 passing (TASK-051 done)
-  - Browser tests: 30/30 passing (Round 39 — added 12 extension tests for sqlite-vec/FTS5/JSONB)
-  - Mesh tests: 81/81 passing (Round 38 — F13-F14 + Phase 5 integration)
+- **Tests all green**
+  - Zig parity: 52/52 passing
+  - Browser tests: 30/30 passing (sqlite-vec/FTS5/JSONB)
+  - Mesh tests: 81/81 passing
+  - TypeScript: clean
 
-- **Browser Multi-Tab Implementation (Round 37 — complete)**
-  - ✅ Browser foundation F5-F8: `.tasks/done/TASK-063-browser-multitab-foundation.md`
-    - Coordinator + Provider classes
-    - 9 coordinator tests, 14 provider tests
-  - ✅ Browser specs: `.tasks/done/TASK-053-spec-browser-runtime-phase1.md`, `.tasks/done/TASK-054-spec-browser-runtime-phase2.md`
-  - ✅ Reactive subscriptions F9-F10: `.tasks/done/TASK-032-web-reactive-subscriptions.md`
-    - db_version notification broadcast from provider to clients
-    - 8 new tests (4 coordinator, 4 provider)
-  - ✅ Service Worker fallback F11-F12: `.tasks/done/TASK-031-web-service-worker-fallback.md`
-    - ServiceWorkerCoordinator class
-    - 12 new tests
+- **Browser Multi-Tab Implementation — complete**
+  - ✅ Foundation F5-F8, Reactive subscriptions F9-F10, SW fallback F11-F12, Migration F13-F14, Polish F15
 
-- **Upstream goodwill (de-prioritized)**
-  - Scope decision (later): `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
-  - zig-sqlite feedback cards (later): `.tasks/backlog/TASK-037-zig-sqlite-upstream-feedback-blocked.md`
+- **Upstream goodwill — cancelled (2025-12-17)**
+  - Per Tom: "skip all zig-sqlite stuff"
+  - `.tasks/done/TASK-055-tom-scope-upstream-feedback.md` (cancelled)
+  - `.tasks/done/TASK-037-zig-sqlite-upstream-feedback-blocked.md` (cancelled)
 
 ## Done (recent)
 
@@ -68,6 +61,11 @@ Pick disjoint tasks from `.tasks/backlog/`:
 ## Gaps (only what’s still open)
 
 - Effect Bun scratchpad (blocked on Tom / TS spec-gate): `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
+
+### Wishes satisfied (2025-12-17)
+
+- `.wishes/done/scratchpad.md` — bun + browser scratchpads wired (Round 40)
+- `.wishes/done/small-prod-builds.md` — size report shows healthy 105% overhead (Round 38)
 
 ### Scratchpad demos (done Round 40)
 
