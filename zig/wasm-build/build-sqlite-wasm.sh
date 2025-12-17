@@ -130,10 +130,50 @@ fi
 echo "✓ Amalgamation ready: ${AMALGAMATION}"
 
 # =============================================================================
-# Step 2: Create C glue code for extension auto-initialization
+# Step 2: Download and prepare sqlite-vec extension
 # =============================================================================
 echo ""
-echo "=== Step 2: Create extension glue code ==="
+echo "=== Step 2: Download sqlite-vec extension ==="
+
+SQLITE_VEC_VERSION="0.1.6"
+SQLITE_VEC_C="${BUILD_DIR}/sqlite-vec.c"
+SQLITE_VEC_H="${BUILD_DIR}/sqlite-vec.h"
+
+if [[ -f "${SQLITE_VEC_C}" && -f "${SQLITE_VEC_H}" && $(wc -c < "${SQLITE_VEC_H}") -gt 100 ]]; then
+    echo "Using cached sqlite-vec source..."
+else
+    echo "Downloading sqlite-vec v${SQLITE_VEC_VERSION} amalgamation..."
+    SQLITE_VEC_AMALG_URL="https://github.com/asg017/sqlite-vec/releases/download/v${SQLITE_VEC_VERSION}/sqlite-vec-${SQLITE_VEC_VERSION}-amalgamation.tar.gz"
+    SQLITE_VEC_TAR="${BUILD_DIR}/cache/sqlite-vec-${SQLITE_VEC_VERSION}-amalgamation.tar.gz"
+    
+    mkdir -p "${BUILD_DIR}/cache"
+    
+    if [[ ! -f "${SQLITE_VEC_TAR}" ]]; then
+        echo "  Downloading ${SQLITE_VEC_AMALG_URL}..."
+        curl -L -o "${SQLITE_VEC_TAR}" "${SQLITE_VEC_AMALG_URL}"
+    fi
+    
+    echo "  Extracting..."
+    tar -xzf "${SQLITE_VEC_TAR}" -C "${BUILD_DIR}/cache"
+    cp "${BUILD_DIR}/cache/sqlite-vec.c" "${SQLITE_VEC_C}"
+    cp "${BUILD_DIR}/cache/sqlite-vec.h" "${SQLITE_VEC_H}"
+fi
+
+if [[ ! -f "${SQLITE_VEC_C}" ]]; then
+    echo "ERROR: Failed to get sqlite-vec source"
+    exit 1
+fi
+if [[ ! -f "${SQLITE_VEC_H}" || $(wc -c < "${SQLITE_VEC_H}") -lt 100 ]]; then
+    echo "ERROR: sqlite-vec.h missing or invalid"
+    exit 1
+fi
+echo "✓ sqlite-vec ready: ${SQLITE_VEC_C}"
+
+# =============================================================================
+# Step 3: Create C glue code for extension auto-initialization
+# =============================================================================
+echo ""
+echo "=== Step 3: Create extension glue code ==="
 
 cat > "${BUILD_DIR}/crsqlite_glue.c" << 'GLUE_EOF'
 /*
@@ -155,6 +195,13 @@ cat > "${BUILD_DIR}/crsqlite_glue.c" << 'GLUE_EOF'
 
 /* Forward declaration of the CR-SQLite init function (defined in Zig) */
 extern int sqlite3_crsqlite_init(
+    sqlite3 *db,
+    char **pzErrMsg,
+    const sqlite3_api_routines *pApi
+);
+
+/* Forward declaration of sqlite-vec init function */
+extern int sqlite3_vec_init(
     sqlite3 *db,
     char **pzErrMsg,
     const sqlite3_api_routines *pApi
@@ -200,6 +247,17 @@ static int crsqlite_auto_init(
 }
 
 /*
+ * Auto-initialization callback for sqlite-vec extension.
+ */
+static int sqlite_vec_auto_init(
+    sqlite3 *db,
+    char **pzErrMsg,
+    const sqlite3_api_routines *pApi
+) {
+    return sqlite3_vec_init(db, pzErrMsg, pApi);
+}
+
+/*
  * SQLITE_EXTRA_INIT function called once during sqlite3_initialize().
  * 
  * We use this to register our auto-extension, which then gets called
@@ -213,22 +271,31 @@ static int crsqlite_auto_init(
 int crsqlite_extra_init(const char *unused) {
     (void)unused;
     
+    int rc;
+    
     /* 
      * Register auto-extension. The cast is required because sqlite3_auto_extension
      * takes void(*)(void) but our callback has the proper extension signature.
      * SQLite internally knows to call it with (db, pzErrMsg, pApi) arguments.
      */
-    return sqlite3_auto_extension((void (*)(void))crsqlite_auto_init);
+    rc = sqlite3_auto_extension((void (*)(void))crsqlite_auto_init);
+    if (rc != 0) return rc;
+    
+    /* Register sqlite-vec auto-extension */
+    rc = sqlite3_auto_extension((void (*)(void))sqlite_vec_auto_init);
+    if (rc != 0) return rc;
+    
+    return 0;
 }
 GLUE_EOF
 
 echo "✓ Glue code created: ${BUILD_DIR}/crsqlite_glue.c"
 
 # =============================================================================
-# Step 3: Create sql.js-compatible API wrapper
+# Step 4: Create sql.js-compatible API wrapper
 # =============================================================================
 echo ""
-echo "=== Step 3: Create API wrapper ==="
+echo "=== Step 4: Create API wrapper ==="
 
 cat > "${BUILD_DIR}/api-pre.js" << 'API_EOF'
 /**
@@ -357,10 +424,10 @@ RUNTIME_EOF
 echo "✓ API wrapper created"
 
 # =============================================================================
-# Step 4: Compile SQLite + CR-SQLite with Emscripten
+# Step 5: Compile SQLite + CR-SQLite + Extensions with Emscripten
 # =============================================================================
 echo ""
-echo "=== Step 4: Compile with Emscripten ==="
+echo "=== Step 5: Compile with Emscripten ==="
 
 # SQLite compilation flags
 # These match sql.js configuration with additions for CR-SQLite
@@ -467,19 +534,29 @@ emcc "${SQLITE_FLAGS[@]}" \
     -o "${BUILD_DIR}/crsqlite_glue.o"
 echo "✓ crsqlite_glue.o compiled"
 
+echo "Compiling sqlite-vec..."
+emcc "${SQLITE_FLAGS[@]}" \
+    -DSQLITE_CORE \
+    -DSQLITE_VEC_OMIT_FS \
+    -DNDEBUG \
+    -c "${SQLITE_VEC_C}" \
+    -o "${BUILD_DIR}/sqlite-vec.o"
+echo "✓ sqlite-vec.o compiled"
+
 echo "Linking final WASM bundle..."
 emcc "${EMFLAGS[@]}" \
     "${BUILD_DIR}/sqlite3.o" \
     "${BUILD_DIR}/crsqlite_glue.o" \
+    "${BUILD_DIR}/sqlite-vec.o" \
     "${CRSQLITE_LIB}" \
     -o "${OUTPUT_JS}"
 echo "✓ WASM bundle created"
 
 # =============================================================================
-# Step 5: Verify output
+# Step 6: Verify output
 # =============================================================================
 echo ""
-echo "=== Step 5: Verify output ==="
+echo "=== Step 6: Verify output ==="
 
 if [[ -f "${OUTPUT_JS}" && -f "${OUTPUT_WASM}" ]]; then
     JS_SIZE=$(wc -c < "${OUTPUT_JS}" | tr -d ' ')

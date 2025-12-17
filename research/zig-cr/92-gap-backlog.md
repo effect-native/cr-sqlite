@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 38 — Browser migration F13-F14 + Phase 5 + Size report)
+> Last updated: 2025-12-16 (Round 39 — Browser polish F15 + WASM baked-in extensions)
 
 ## Status
 
@@ -14,7 +14,7 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 - **Tests now green**
   - Zig parity: 52/52 passing (TASK-051 done)
-  - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
+  - Browser tests: 30/30 passing (Round 39 — added 12 extension tests for sqlite-vec/FTS5/JSONB)
   - Mesh tests: 81/81 passing (Round 38 — F13-F14 + Phase 5 integration)
 
 - **Browser Multi-Tab Implementation (Round 37 — complete)**
@@ -67,8 +67,15 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 ## Gaps (only what’s still open)
 
-- WASM baked-in extensions (sqlite-vec / FTS / BJSON): `.tasks/backlog/TASK-067-zig-wasm-baked-in-extensions.md`
 - Scratchpad demos wiring: `.tasks/backlog/TASK-069-wire-scratchpads.md`
+
+### WASM baked-in extensions (done Round 39)
+
+- [x] WASM baked-in extensions (sqlite-vec / FTS5 / JSONB): `.tasks/done/TASK-067-zig-wasm-baked-in-extensions.md`
+  - sqlite-vec v0.1.6 statically linked
+  - FTS5 enabled
+  - JSONB enabled
+  - 12 new browser tests (30 total)
 
 ### Test infrastructure (resolved)
 
@@ -106,8 +113,10 @@ Implementation tasks (completed Round 38):
   - 12 new tests (5 coordinator migration, 7 provider idempotency)
   - Idempotent write guard via txId
 
-Remaining browser multi-tab work:
-- [ ] Browser integration polish F15 → `.tasks/backlog/TASK-065-browser-multitab-integration-polish.md`
+Implementation tasks (completed Round 39):
+- [x] Browser integration polish F15 → `.tasks/done/TASK-065-browser-multitab-integration-polish.md`
+  - No code changes needed — already tree-shakeable, no node deps, clean exports
+  - Verification: 81 tests pass, build succeeds
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 

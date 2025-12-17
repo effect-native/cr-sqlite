@@ -697,3 +697,129 @@ Size Comparison:
 - Browser integration polish F15 remains (packaging/treeshake verification)
 
 ---
+
+## Round 2025-12-16 (39) — Browser polish F15 + WASM baked-in extensions
+
+**Tasks executed**
+- `.tasks/done/TASK-065-browser-multitab-integration-polish.md`
+- `.tasks/done/TASK-067-zig-wasm-baked-in-extensions.md`
+
+**Commits**
+- `5dc8b4ce` — delegate round 39: browser polish F15 + WASM baked-in extensions (sqlite-vec/FTS5/JSONB)
+
+**Modified files (root repo)**
+- `zig/wasm-build/build-sqlite-wasm.sh` — Added sqlite-vec v0.1.6 download and linking
+- `zig/browser-test/tests/crsql-wasm.spec.ts` — Added 12 new extension tests
+- `zig/browser-test/fixtures/sql-wasm.js` — Rebuilt WASM bundle
+- `zig/browser-test/fixtures/sql-wasm.wasm` — Rebuilt WASM bundle
+- `zig/browser-dist/sql-wasm.js` — Rebuilt WASM bundle
+- `zig/browser-dist/sql-wasm.wasm` — Rebuilt WASM bundle
+- `.tasks/done/TASK-065-browser-multitab-integration-polish.md` — Completed (moved from backlog)
+- `.tasks/done/TASK-067-zig-wasm-baked-in-extensions.md` — Completed (moved from backlog)
+- `research/zig-cr/92-gap-backlog.md` — Updated status
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: pnpm, vitest 3.2.4, nix, zig (via nix), playwright
+
+**Commands run (exact)**
+```bash
+# TASK-065 verification
+pnpm -F @effect-native/crsql-mesh check
+pnpm -F @effect-native/crsql-mesh test --run
+pnpm --filter "@effect-native/crsql-mesh" build
+
+# TASK-067 verification
+make -C zig test-browser
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-065: crsql-mesh tests (81 pass) + TypeScript check + build</summary>
+
+```text
+$ pnpm -F @effect-native/crsql-mesh check
+> tsc -b tsconfig.json
+(no errors)
+
+$ pnpm -F @effect-native/crsql-mesh test --run
+ ✓ test/browser/coordinator-sw.test.ts (12 tests) 5ms
+ ✓ test/browser/coordinator.test.ts (18 tests) 13ms
+ ✓ test/browser/provider.test.ts (25 tests) 43ms
+ ✓ test/IntegrationSqlite.test.ts (3 tests) 31ms
+ ✓ test/Receive.test.ts (4 tests) 43ms
+ ✓ test/Mesh.test.ts (7 tests) 110ms
+ ✓ test/VersionVector.test.ts (3 tests) 44ms
+ ✓ test/Integration.test.ts (4 tests) 54ms
+ ✓ test/Apply.test.ts (5 tests) 60ms
+
+Test Files  9 passed (9)
+     Tests  81 passed (81)
+
+$ pnpm --filter "@effect-native/crsql-mesh" build
+Successfully compiled 11 files with Babel
+```
+
+**Result:** No code changes needed — exports already tree-shakeable, no node-only dependencies, clean public surface.
+</details>
+
+<details>
+<summary>TASK-067: browser tests (30 pass)</summary>
+
+```text
+$ make -C zig test-browser
+Running 30 tests using 2 workers
+
+  ✓  1 tests/multitab-basic.spec.ts › Multi-tab Database Coordination › two tabs can connect to SharedWorker
+  ✓  2 tests/crsql-wasm.spec.ts › SQLite WASM in Browser › sql.js loads and initializes successfully
+  ... (18 existing tests)
+  ✓ 19 tests/crsql-wasm.spec.ts › Baked-in Extensions › FTS5 › FTS5 virtual table can be created
+  ✓ 20 tests/crsql-wasm.spec.ts › Baked-in Extensions › FTS5 › FTS5 full-text search works
+  ✓ 21 tests/crsql-wasm.spec.ts › Baked-in Extensions › JSON/JSONB Functions › json() function works
+  ✓ 22 tests/crsql-wasm.spec.ts › Baked-in Extensions › JSON/JSONB Functions › json_extract() function works
+  ✓ 23 tests/crsql-wasm.spec.ts › Baked-in Extensions › JSON/JSONB Functions › jsonb() function works (SQLite 3.45+)
+  ✓ 24 tests/crsql-wasm.spec.ts › Baked-in Extensions › JSON/JSONB Functions › json_array() and json_object() work
+  ✓ 25 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec_version() returns a version string
+  ✓ 26 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec_f32() creates a float32 vector
+  ✓ 27 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec_distance_l2() calculates L2 distance
+  ✓ 28 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec_distance_cosine() calculates cosine distance
+  ✓ 29 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec0 virtual table can be created
+  ✓ 30 tests/crsql-wasm.spec.ts › Baked-in Extensions › sqlite-vec Extension › vec0 supports vector insert and KNN query
+
+  30 passed (18.0s)
+```
+
+**Extensions baked in:**
+- **FTS5**: Full-text search (compile-time flag)
+- **JSON/JSONB**: JSON1 + JSONB (compile-time flags, JSONB in SQLite 3.45+)
+- **sqlite-vec v0.1.6**: Vector similarity search (statically linked)
+
+**WASM size:** 1,440,717 bytes (increased ~100KB due to sqlite-vec)
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd effect-native && pnpm install`
+3. `pnpm -F @effect-native/crsql-mesh check`
+4. `pnpm -F @effect-native/crsql-mesh test --run`
+5. `pnpm --filter "@effect-native/crsql-mesh" build`
+6. `make -C zig test-browser`
+
+**Work summary**
+1. **TASK-065 (F15)**: Browser multi-tab integration polish — verified already correct, no changes needed
+   - Tree-shakeability: explicit named exports, no barrel files
+   - No node-only dependencies: zero external imports in browser modules
+   - Clean public surface: Browser namespace export + direct imports supported
+
+2. **TASK-067**: WASM baked-in extensions
+   - Added sqlite-vec v0.1.6 download and static linking
+   - FTS5 and JSONB already enabled via compile flags
+   - 12 new tests proving each extension works
+   - WASM size increased by ~100KB (acceptable tradeoff for features)
+
+**Known gaps / unverified claims**
+- No coverage captured
+- `.wishes/wasm-extras.md` satisfied — could move to `.wishes/done/`
+
+---

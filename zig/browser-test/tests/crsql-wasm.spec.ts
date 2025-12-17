@@ -255,6 +255,289 @@ test.describe('CR-SQLite Extension', () => {
   });
 });
 
+test.describe('Baked-in Extensions', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(
+      () => window.testState?.ready === true,
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+  });
+
+  test.describe('FTS5 (Full-Text Search)', () => {
+    test('FTS5 virtual table can be created', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          window.execSql(mod, dbPtr, 'CREATE VIRTUAL TABLE fts_docs USING fts5(title, body)');
+          const tables = window.execSql(mod, dbPtr, 
+            "SELECT name FROM sqlite_master WHERE name='fts_docs'");
+          return { success: true, tables };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+    });
+
+    test('FTS5 full-text search works', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // Use unique table name to avoid conflicts with other tests
+          window.execSql(mod, dbPtr, 'CREATE VIRTUAL TABLE fts_search2 USING fts5(content)');
+          window.execSql(mod, dbPtr, "INSERT INTO fts_search2 VALUES ('hello world')");
+          window.execSql(mod, dbPtr, "INSERT INTO fts_search2 VALUES ('goodbye world')");
+          window.execSql(mod, dbPtr, "INSERT INTO fts_search2 VALUES ('hello universe')");
+          
+          // Use COUNT(*) to get the number of matches since execSql returns scalar
+          const matchCount = window.execSql(mod, dbPtr, 
+            "SELECT COUNT(*) FROM fts_search2 WHERE fts_search2 MATCH 'hello'");
+          return { success: true, matchCount: matchCount };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.matchCount).toBe(2);
+    });
+  });
+
+  test.describe('JSON/JSONB Functions', () => {
+    test('json() function works', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          const jsonResult = window.execSql(mod, dbPtr, 
+            "SELECT json('{\"a\":1,\"b\":2}')");
+          return { success: true, json: jsonResult[0] };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+    });
+
+    test('json_extract() function works', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // execSql returns the scalar value directly, not an array
+          const extracted = window.execSql(mod, dbPtr, 
+            "SELECT json_extract('{\"name\":\"test\",\"value\":42}', '$.value')");
+          return { success: true, value: extracted };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.value).toBe(42);
+    });
+
+    test('jsonb() function works (SQLite 3.45+)', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // jsonb returns binary JSON format - verify it doesn't error
+          // execSql returns the scalar value directly
+          const jsonbResult = window.execSql(mod, dbPtr, 
+            "SELECT typeof(jsonb('{\"a\":1}'))");
+          return { success: true, type: jsonbResult };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.type).toBe('blob'); // jsonb returns a blob
+    });
+
+    test('json_array() and json_object() work', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // execSql returns scalar values directly
+          const arr = window.execSql(mod, dbPtr, "SELECT json_array(1, 2, 'three')");
+          const obj = window.execSql(mod, dbPtr, "SELECT json_object('key', 'value')");
+          return { success: true, array: arr, object: obj };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.array).toBe('[1,2,"three"]');
+      expect(result.object).toBe('{"key":"value"}');
+    });
+  });
+
+  test.describe('sqlite-vec Extension', () => {
+    test('vec_version() returns a version string', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          const version = window.execSql(mod, dbPtr, 'SELECT vec_version()');
+          return { success: true, version: version[0] };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.version).toBeTruthy();
+      expect(typeof result.version).toBe('string');
+    });
+
+    test('vec_f32() creates a float32 vector', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // execSql returns scalar values directly
+          const vecLength = window.execSql(mod, dbPtr, 
+            "SELECT vec_length(vec_f32('[1.0, 2.0, 3.0]'))");
+          return { success: true, length: vecLength };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.length).toBe(3);
+    });
+
+    test('vec_distance_l2() calculates L2 distance', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // execSql returns scalar values directly
+          const distance = window.execSql(mod, dbPtr, 
+            "SELECT vec_distance_l2(vec_f32('[1.0, 0.0, 0.0]'), vec_f32('[0.0, 1.0, 0.0]'))");
+          return { success: true, distance: distance };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      // L2 distance between [1,0,0] and [0,1,0] is sqrt(2) ≈ 1.414
+      expect(result.distance).toBeCloseTo(Math.sqrt(2), 3);
+    });
+
+    test('vec_distance_cosine() calculates cosine distance', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          // execSql returns scalar values directly
+          // Same vectors should have cosine distance of 0
+          const sameDistance = window.execSql(mod, dbPtr, 
+            "SELECT vec_distance_cosine(vec_f32('[1.0, 0.0]'), vec_f32('[1.0, 0.0]'))");
+          // Orthogonal vectors should have cosine distance of 1
+          const orthDistance = window.execSql(mod, dbPtr, 
+            "SELECT vec_distance_cosine(vec_f32('[1.0, 0.0]'), vec_f32('[0.0, 1.0]'))");
+          return { success: true, same: sameDistance, orthogonal: orthDistance };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.same).toBeCloseTo(0, 5);
+      expect(result.orthogonal).toBeCloseTo(1, 5);
+    });
+
+    test('vec0 virtual table can be created', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          window.execSql(mod, dbPtr, 
+            'CREATE VIRTUAL TABLE vec_test USING vec0(embedding float[4])');
+          const tables = window.execSql(mod, dbPtr, 
+            "SELECT name FROM sqlite_master WHERE name='vec_test'");
+          return { success: true, tableExists: tables.length > 0 };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.tableExists).toBe(true);
+    });
+
+    test('vec0 supports vector insert and KNN query', async ({ page }) => {
+      const result = await page.evaluate(() => {
+        const mod = window.testState.crsqliteModule;
+        const dbPtr = window.testState.crsqliteDb;
+        if (!mod || !dbPtr) return { error: 'CR-SQLite not initialized' };
+        
+        try {
+          window.execSql(mod, dbPtr, 
+            'CREATE VIRTUAL TABLE vec_knn USING vec0(embedding float[3])');
+          
+          // Insert some vectors
+          window.execSql(mod, dbPtr, 
+            "INSERT INTO vec_knn(rowid, embedding) VALUES (1, '[1.0, 0.0, 0.0]')");
+          window.execSql(mod, dbPtr, 
+            "INSERT INTO vec_knn(rowid, embedding) VALUES (2, '[0.0, 1.0, 0.0]')");
+          window.execSql(mod, dbPtr, 
+            "INSERT INTO vec_knn(rowid, embedding) VALUES (3, '[0.0, 0.0, 1.0]')");
+          
+          // KNN query - find closest to [1, 0, 0]
+          // execSql returns scalar values directly
+          const closest = window.execSql(mod, dbPtr, 
+            "SELECT rowid FROM vec_knn WHERE embedding MATCH '[1.0, 0.0, 0.0]' ORDER BY distance LIMIT 1");
+          
+          return { success: true, closestRowid: closest };
+        } catch (e: any) {
+          return { error: e.message };
+        }
+      });
+      
+      expect(result.error).toBeUndefined();
+      expect(result.closestRowid).toBe(1); // Should find itself as closest
+    });
+  });
+});
+
 // Type declarations for the test page's global state
 declare global {
   interface Window {
