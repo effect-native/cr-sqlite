@@ -21,21 +21,23 @@ subagent (general)
 Wire up the existing scratchpad projects so they are runnable and demonstrate realistic scenarios:
 
 - `scratch/browser-scratchpad`: minimal bun+react app demonstrating browser multi-tab DB.
-- `scratch/bun-scratchpad`: minimal bun script using bun sqlite.
-- `scratch/effect-bun-scratchpad`: minimal Effect+SQL bun project using effect-native packages.
+- `scratch/bun-scratchpad`: minimal bun script using `bun:sqlite`.
 
-This task is likely to be blocked by TypeScript spec-gates for the Effect TS scratchpad; if so, split and mark blocked accordingly.
+The original wish also asked for an Effect+SQL Bun scratchpad. That is **TypeScript-heavy** and (per repo rules) must live in the `effect-native/` submodule and be spec-gated.
+
+Track that separately as a Tom-blocked wish:
+- `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
 
 ## Files to Modify
 - `scratch/browser-scratchpad/*`
 - `scratch/bun-scratchpad/*`
-- `scratch/effect-bun-scratchpad/*` (if present; otherwise create)
 - `research/zig-cr/92-gap-backlog.md`
 
 ## Acceptance Criteria
 - [ ] Each scratchpad has a single documented command to run.
 - [ ] Browser scratchpad demonstrates cross-tab read/write visibility.
-- [ ] No TypeScript spec-gate violations (if blocked, document and split).
+- [ ] Bun scratchpad demonstrates CR-SQLite usage with `bun:sqlite`.
+- [ ] No TypeScript spec-gate violations (Effect scratchpad tracked separately as blocked).
 
 ## Progress Log
 ### 2025-12-17

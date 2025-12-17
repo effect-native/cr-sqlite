@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 39 — Browser polish F15 + WASM baked-in extensions)
+> Last updated: 2025-12-17 (Update tasks — scratchpad + wish triage)
 
 ## Status
 
@@ -68,6 +68,7 @@ Pick disjoint tasks from `.tasks/backlog/`:
 ## Gaps (only what’s still open)
 
 - Scratchpad demos wiring: `.tasks/backlog/TASK-069-wire-scratchpads.md`
+- Effect Bun scratchpad (blocked on Tom / TS spec-gate): `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
 
 ### WASM baked-in extensions (done Round 39)
 
