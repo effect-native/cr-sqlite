@@ -4,7 +4,7 @@
 - [x] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: depends on TASK-063 browser foundation)
+- [ ] Blocked
 - [ ] Complete
 
 ## Priority
@@ -23,14 +23,18 @@ subagent (general)
   - ✅ `effect-native/.specs/crsql-mesh/requirements.md` (contains Phase 2 EARS for browser multi-tab)
   - ✅ `effect-native/.specs/crsql-mesh/design.md` (contains browser multi-tab design sketch)
   - ✅ `effect-native/.specs/crsql-mesh/plan.md` (contains RGRTDD slices)
-- **Blocked by**: `.tasks/backlog/TASK-063-browser-multitab-foundation.md` (F5-F8 must be done first)
+- ✅ Unblocked by: `.tasks/done/TASK-063-browser-multitab-foundation.md` (F5-F8 complete)
 
 ## Constraint
 This work is TypeScript-heavy.
 
 Per `AGENTS.md` (TypeScript Work Rule): **all TypeScript work happens in the `effect-native/` submodule** and must follow the spec-first workflow in `effect-native/.specs/AGENTS.md`.
 
-This task is unblocked: Phase 2 requirements now exist in `effect-native/.specs/crsql-mesh/requirements.md` (browser multi-tab section).
+Unblocked prerequisites:
+- ✅ Specs exist: `effect-native/.specs/crsql-mesh/requirements.md`, `effect-native/.specs/crsql-mesh/design.md`, `effect-native/.specs/crsql-mesh/plan.md`
+- ✅ Foundation exists: `.tasks/done/TASK-063-browser-multitab-foundation.md` (Coordinator/Provider unit-tested scaffolding)
+
+Remaining blocker: needs Tom authorization to proceed with TS Phase 5 coding per `effect-native/.specs/AGENTS.md`.
 
 ## Description
 Provide a narrow notification/subscription surface so tab B can react when tab A writes.

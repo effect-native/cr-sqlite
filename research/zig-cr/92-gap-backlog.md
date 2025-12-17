@@ -22,8 +22,8 @@ Pick disjoint tasks from `.tasks/backlog/`:
     - Coordinator + Provider classes
     - 9 coordinator tests, 14 provider tests
   - ✅ Browser specs: `.tasks/done/TASK-053-spec-browser-runtime-phase1.md`, `.tasks/done/TASK-054-spec-browser-runtime-phase2.md`
-  - (Now unblocked) Service Worker fallback F11-F12: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-  - (Now unblocked) Reactive subscriptions F9-F10: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+- (Unblocked; needs TS authorization gate) Service Worker fallback F11-F12: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
+- (Unblocked; needs TS authorization gate) Reactive subscriptions F9-F10: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
 
 - **Upstream goodwill (de-prioritized)**
   - Scope decision (later): `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
@@ -91,8 +91,8 @@ Foundation (completed Round 36):
 - [x] Coordinator + Provider foundation (F5-F8) → `.tasks/done/TASK-063-browser-multitab-foundation.md`
 
 Implementation tasks (unblocked — foundation done):
-- [ ] Reactive subscriptions F9-F10 → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
-- [ ] Service Worker fallback F11-F12 → `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
+- [ ] Reactive subscriptions F9-F10 → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md` (unblocked; TS authorization gate)
+- [ ] Service Worker fallback F11-F12 → `.tasks/backlog/TASK-031-web-service-worker-fallback.md` (unblocked; TS authorization gate)
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
