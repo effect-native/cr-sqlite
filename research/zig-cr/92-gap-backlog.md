@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-17 (Update tasks — scratchpad + wish triage)
+> Last updated: 2025-12-16 (Round 40 — scratchpad demos wired)
 
 ## Status
 
@@ -67,8 +67,13 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 ## Gaps (only what’s still open)
 
-- Scratchpad demos wiring: `.tasks/backlog/TASK-069-wire-scratchpads.md`
 - Effect Bun scratchpad (blocked on Tom / TS spec-gate): `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
+
+### Scratchpad demos (done Round 40)
+
+- [x] Scratchpad demos wiring → `.tasks/done/TASK-069-wire-scratchpads.md`
+  - Bun scratchpad: `bun run scratch/bun-scratchpad/index.ts`
+  - Browser scratchpad: `bun --hot scratch/browser-scratchpad/src/index.ts`
 
 ### WASM baked-in extensions (done Round 39)
 

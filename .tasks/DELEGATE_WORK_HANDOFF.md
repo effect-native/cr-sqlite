@@ -823,3 +823,125 @@ Running 30 tests using 2 workers
 - `.wishes/wasm-extras.md` satisfied — could move to `.wishes/done/`
 
 ---
+
+## Round 2025-12-16 (40) — Scratchpad demos wired
+
+**Tasks executed**
+- `.tasks/done/TASK-069-wire-scratchpads.md`
+
+**Commits**
+- `7883f934` — delegate round 40: wire scratchpad demos (TASK-069)
+
+**Modified files (root repo)**
+- `scratch/bun-scratchpad/index.ts` — CR-SQLite demo with bun:sqlite
+- `scratch/bun-scratchpad/README.md` — updated run instructions
+- `scratch/browser-scratchpad/src/index.ts` — server serving WASM files
+- `scratch/browser-scratchpad/src/App.tsx` — React multi-tab demo UI
+- `scratch/browser-scratchpad/README.md` — updated run instructions
+- `.tasks/done/TASK-069-wire-scratchpads.md` — moved from backlog, marked complete
+- `.wishes/blocked-on-tom/effect-bun-scratchpad.md` — new (Effect scratchpad spec-gated)
+- `research/zig-cr/92-gap-backlog.md` — updated scratchpad section
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: bun 1.x, nix
+
+**Commands run (exact)**
+```bash
+bun run scratch/bun-scratchpad/index.ts
+bun --hot scratch/browser-scratchpad/src/index.ts
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>Bun scratchpad output (working)</summary>
+
+```text
+=== CR-SQLite Demo with bun:sqlite ===
+
+1. Loading custom libsqlite3 from: .../effect-native/packages-native/libsqlite/lib/darwin-aarch64/libsqlite3.dylib
+2. Created in-memory SQLite database
+   SQLite version: 3.50.2
+
+3. Loading CR-SQLite extension from: .../lib/crsqlite-zig-darwin-aarch64.dylib
+   Extension loaded! Version: 0.0.1-zig-scaffold
+
+4. Creating 'items' table...
+5. Converting to CRR with crsql_as_crr('items')...
+   Table is now a CRR!
+
+6. Initial db_version: 0
+
+7. Inserting items...
+   Inserted: Apples (qty: 10)
+   Inserted: Bananas (qty: 5)
+   Inserted: Oranges (qty: 8)
+
+8. db_version after inserts: 3
+
+9. Querying all items:
+   - Apples: 10 (id: item-1)
+   - Bananas: 5 (id: item-2)
+   - Oranges: 8 (id: item-3)
+
+10. Updating Apples quantity to 15...
+    db_version after update: 4
+
+11. Deleting Oranges...
+    db_version after delete: 5
+
+12. Final items:
+    - Apples: 15
+    - Bananas: 5
+
+13. Changes tracked in crsql_changes (since version 0):
+    v1: items.name = Apples
+    v2: items.name = Bananas
+    v2: items.quantity = 5
+    v4: items.quantity = 15
+
+14. This database's site_id: df3bf744a82649d289b9169382fbbe3b
+
+=== Demo complete! ===
+```
+</details>
+
+<details>
+<summary>Browser scratchpad output (server starts)</summary>
+
+```text
+=== CR-SQLite Browser Demo ===
+
+Server running at: http://localhost:3000/
+
+Open TWO browser tabs to this URL to test cross-tab sync!
+
+Tab 1 and Tab 2 will share the same database through a SharedWorker.
+Changes made in one tab will be visible in the other.
+```
+
+Server serves:
+- `/` — React app with multi-tab item list
+- `/coordinator.js` — SharedWorker coordinator from browser-dist
+- `/provider.js` — Provider worker from browser-dist
+- `/sql-wasm.wasm` — CR-SQLite WASM build
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bun run scratch/bun-scratchpad/index.ts`
+3. `bun --hot scratch/browser-scratchpad/src/index.ts`
+4. Open http://localhost:3000 in two browser tabs
+
+**Work summary**
+1. **Bun scratchpad**: Full CR-SQLite demo using `Database.setCustomSQLite()` to load extension-enabled libsqlite3, then `db.loadExtension()` to load the Zig-built CR-SQLite. Demonstrates CRR tables, CRUD, db_version tracking, crsql_changes, site_id.
+
+2. **Browser scratchpad**: React app with SharedWorker coordination for multi-tab database access. Shows provider election (first tab owns DB), cross-tab sync via 1s polling, db_version updates. Server routes WASM files from `zig/browser-dist/`.
+
+**Known gaps / unverified claims**
+- No automated tests added (scratchpads are demos, not library code)
+- Browser demo currently loads sql.js from CDN in provider.js rather than local CR-SQLite WASM build — full CR-SQLite WASM integration pending
+- Effect-TS scratchpad deferred as spec-gated (blocked on Tom)
+
+---

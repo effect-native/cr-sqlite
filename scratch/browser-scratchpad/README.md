@@ -1,21 +1,52 @@
-# bun-react-tailwind-shadcn-template
+# browser-scratchpad
 
-To install dependencies:
+CR-SQLite browser demo with multi-tab sync using SharedWorker coordination.
 
-```bash
-bun install
-```
-
-To start a development server:
+## Run
 
 ```bash
-bun dev
+bun --hot scratch/browser-scratchpad/src/index.ts
 ```
 
-To run for production:
+Then open **two browser tabs** to `http://localhost:3000` to test cross-tab sync.
 
-```bash
-bun start
+## What it demonstrates
+
+1. Loading CR-SQLite WASM in the browser
+2. SharedWorker-based multi-tab coordination (one tab becomes the "provider")
+3. Cross-tab database visibility (changes in one tab appear in others)
+4. CRR (conflict-free replicated relation) table operations
+5. Real-time `crsql_db_version()` tracking
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────┐
+│   Tab 1     │     │   Tab 2     │
+│  (Provider) │     │  (Client)   │
+└──────┬──────┘     └──────┬──────┘
+       │                   │
+       └───────────────────┘
+              │
+       ┌──────┴──────┐
+       │ SharedWorker │  ← coordinator.js
+       │  (Router)    │
+       └──────┬──────┘
+              │
+       ┌──────┴──────┐
+       │  Provider   │  ← provider.js
+       │  Worker     │
+       │  (SQLite)   │
+       └─────────────┘
 ```
 
-This project was created using `bun init` in bun v1.3.4. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+- The first tab that opens becomes the **provider** and owns the database
+- Other tabs are **clients** that proxy requests through the SharedWorker
+- If the provider tab closes, another tab automatically takes over (failover)
+
+## Files served
+
+- `/crsql-multitab.js` - DbClient API for the main thread
+- `/coordinator.js` - SharedWorker for routing messages between tabs
+- `/provider.js` - Dedicated Worker that runs SQLite WASM
+- `/sql-wasm.js` + `/sql-wasm.wasm` - CR-SQLite WASM build
