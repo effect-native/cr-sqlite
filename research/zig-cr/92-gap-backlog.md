@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-15 (Round 34 — Zig parity fixed, browser tests green)
+> Last updated: 2025-12-17 (Added CI health + Zig completeness tasks)
 
 ## Status
 
@@ -12,9 +12,11 @@
 
 Pick disjoint tasks from `.tasks/backlog/`:
 
-- **Tests now green**
-  - Zig parity: 52/52 passing (TASK-051 done)
-  - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
+- **CI and Zig implementation health**
+  - Fix GitHub Actions test failures: `.tasks/backlog/TASK-057-fix-github-actions-test-failures.md`
+  - Ensure all Zig functionality fully implemented: `.tasks/backlog/TASK-058-ensure-zig-functionality-complete.md`
+  - Design tests to expose unimplemented Zig functionality: `.tasks/backlog/TASK-059-design-tests-expose-unimplemented-zig.md`
+  - *(Note: Local tests passing - 154/154 MVP, 52/52 parity, but CI is red)*
 
 - **Unblock browser specs (to unblock TS work)**
   - Tom decision: browser spec naming + package boundary: `.tasks/backlog/TASK-056-tom-browser-spec-naming.md`
@@ -55,7 +57,15 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 ## Gaps (only what’s still open)
 
-### Test infrastructure (resolved)
+### CI and Zig implementation gaps
+
+Source: GitHub Actions workflow failures + feature matrix audit
+
+- [ ] Fix GitHub Actions test failures → `.tasks/backlog/TASK-057-fix-github-actions-test-failures.md` (2025-12-17)
+- [ ] Ensure all Zig functionality fully implemented → `.tasks/backlog/TASK-058-ensure-zig-functionality-complete.md` (2025-12-17)
+- [ ] Design tests to expose unimplemented Zig functionality → `.tasks/backlog/TASK-059-design-tests-expose-unimplemented-zig.md` (2025-12-17)
+
+### Test infrastructure (previously resolved)
 
 Source: `.tasks/DELEGATE_WORK_HANDOFF.md` (Round 34)
 
