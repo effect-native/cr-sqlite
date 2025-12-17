@@ -67,6 +67,9 @@ Pick disjoint tasks from `.tasks/backlog/`:
 
 ## Gaps (only what’s still open)
 
+- WASM baked-in extensions (sqlite-vec / FTS / BJSON): `.tasks/backlog/TASK-067-zig-wasm-baked-in-extensions.md`
+- Scratchpad demos wiring: `.tasks/backlog/TASK-069-wire-scratchpads.md`
+
 ### Test infrastructure (resolved)
 
 Source: `.tasks/DELEGATE_WORK_HANDOFF.md` (Round 34)
@@ -99,8 +102,8 @@ Implementation tasks (completed Round 37):
 - [x] Service Worker fallback F11-F12 → `.tasks/done/TASK-031-web-service-worker-fallback.md`
 
 Remaining browser multi-tab work:
-- [ ] Provider migration F13-F14 (re-election on tab close, idempotent write guard)
-- [ ] Browser integration polish F15 (tree-shaking, public API)
+- [ ] Provider migration F13-F14 → `.tasks/backlog/TASK-064-browser-multitab-provider-migration.md`
+- [ ] Browser integration polish F15 → `.tasks/backlog/TASK-065-browser-multitab-integration-polish.md`
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
@@ -118,7 +121,7 @@ Implementation (Phase 4 complete):
 - [x] Protocol: schema type reuse from CrSqlSchema → `.tasks/done/TASK-048-crsql-mesh-protocol-schema-reuse.md`
 - [x] Mesh engine: anti-entropy loop + transactional apply → `.tasks/done/TASK-049-crsql-mesh-engine-phase4.md`
 - [x] Node runtime: DB open + CR-SQLite extension load + lifecycle hooks → `.tasks/done/TASK-050-crsql-mesh-runtime-node-phase4.md`
-- [ ] Phase 5: real SQLite integration + production transports (separate task once Phase 4 complete)
+- [ ] Phase 5: real SQLite integration evidence → `.tasks/backlog/TASK-066-mesh-phase5-real-sqlite-integration.md`
 
 ### Mobile static embedding docs
 
@@ -138,4 +141,5 @@ Source wish: `.wishes/gather-upstream-feedback.md`
 Source: `research/zig-cr/103-release-planning-proposal.md`
 
 - Zig artifacts exist for macOS; Linux CI + platform packages are the next shipping blockers.
+- Size regression observability: `.tasks/backlog/TASK-068-zig-artifact-size-regression.md`
 - Track release engineering tasks in `.tasks/backlog/` (create new ones as needed).
