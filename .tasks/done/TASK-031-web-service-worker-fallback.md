@@ -2,10 +2,10 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 medium
@@ -34,7 +34,7 @@ Unblocked prerequisites:
 - ✅ Specs exist: `effect-native/.specs/crsql-mesh/requirements.md`, `effect-native/.specs/crsql-mesh/design.md`, `effect-native/.specs/crsql-mesh/plan.md`
 - ✅ Foundation exists: `.tasks/done/TASK-063-browser-multitab-foundation.md` (Coordinator/Provider unit-tested scaffolding)
 
-Remaining blocker: needs Tom authorization to proceed with TS Phase 5 coding per `effect-native/.specs/AGENTS.md`.
+**Tom authorized Phase 5 implementation on 2025-12-16.**
 
 ## Description
 Add a Service Worker fallback for environments where SharedWorker is unavailable.
@@ -55,5 +55,26 @@ Do not attempt to move OPFS access into the Service Worker.
 ### 2025-12-14
 - Task created during gap review; awaiting Tom opt-in due to TS constraint
 
+### 2025-12-16
+- Tom authorized Phase 5 implementation
+- Implemented F11-F12 from RGRTDD plan
+
 ## Completion Notes
-[fill in when done]
+**Date:** 2025-12-16
+
+**Files created:**
+- `effect-native/packages-native/crsql-mesh/src/browser/coordinator-sw.ts` (348 lines)
+- `effect-native/packages-native/crsql-mesh/test/browser/coordinator-sw.test.ts` (12 tests)
+
+**Files modified:**
+- `effect-native/packages-native/crsql-mesh/src/browser/index.ts` (added SW exports)
+
+**Implementation:**
+- `ServiceWorkerCoordinator` class mirrors SharedWorker coordinator API
+- Uses Service Worker Clients API instead of MessagePorts
+- Same election semantics via Web Locks
+- Same message routing patterns
+- Includes `createServiceWorkerScript()` for bootstrapping
+
+**Tests:** 12 new tests, all passing
+**TypeScript:** Check passes

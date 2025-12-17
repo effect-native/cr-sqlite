@@ -2,10 +2,10 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 medium
@@ -34,7 +34,7 @@ Unblocked prerequisites:
 - ✅ Specs exist: `effect-native/.specs/crsql-mesh/requirements.md`, `effect-native/.specs/crsql-mesh/design.md`, `effect-native/.specs/crsql-mesh/plan.md`
 - ✅ Foundation exists: `.tasks/done/TASK-063-browser-multitab-foundation.md` (Coordinator/Provider unit-tested scaffolding)
 
-Remaining blocker: needs Tom authorization to proceed with TS Phase 5 coding per `effect-native/.specs/AGENTS.md`.
+**Tom authorized Phase 5 implementation on 2025-12-16.**
 
 ## Description
 Provide a narrow notification/subscription surface so tab B can react when tab A writes.
@@ -54,5 +54,25 @@ MVP can be a "db_version advanced" event broadcast; leave "observable queries" a
 ### 2025-12-14
 - Task created during gap review; awaiting Tom opt-in due to TS constraint
 
+### 2025-12-16
+- Tom authorized Phase 5 implementation
+- Implemented F9-F10 from RGRTDD plan
+
 ## Completion Notes
-[fill in when done]
+**Date:** 2025-12-16
+
+**Files modified:**
+- `effect-native/packages-native/crsql-mesh/src/browser/provider.ts`
+  - Added `DbVersionNotification` interface
+  - Added `onVersionChange(callback)` subscription method
+  - Added `checkAndNotifyVersionChange()` after writes
+  - Provider queries `crsql_db_version()` after exec and notifies on advance
+- `effect-native/packages-native/crsql-mesh/src/browser/coordinator.ts`
+  - Added `DbVersionChangedMessage` interface
+  - Added `handleDbVersionChanged()` to broadcast notifications
+  - Routes `db-version-changed` messages from provider to all clients
+- `effect-native/packages-native/crsql-mesh/src/browser/index.ts`
+  - Exported new types
+
+**Tests:** 8 new tests (4 coordinator, 4 provider), all passing
+**TypeScript:** Check passes

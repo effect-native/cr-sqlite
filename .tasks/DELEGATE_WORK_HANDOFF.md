@@ -472,3 +472,99 @@ pnpm -F @effect-native/crsql-mesh check
 - No coverage captured
 - Foundation provides the scaffolding but doesn't include actual OPFS or Web Locks — those require browser environment
 - Test file had concurrent test interference issue — fixed by removing `vi.clearAllMocks()` in `afterEach`
+
+---
+
+## Round 2025-12-16 (37) — Browser multi-tab F9-F12 complete
+
+**Tasks executed**
+- `.tasks/done/TASK-031-web-service-worker-fallback.md`
+- `.tasks/done/TASK-032-web-reactive-subscriptions.md`
+
+**Commits**
+- `848c2a66c` (effect-native) — implement browser multi-tab F9-F12: reactive subscriptions + SW fallback (Round 37)
+- `efe3dacd` (root) — delegate round 37: browser multi-tab F9-F12 complete (TASK-031, TASK-032)
+
+**Modified files (effect-native submodule)**
+- `packages-native/crsql-mesh/src/browser/coordinator.ts` — added `DbVersionChangedMessage` and broadcast handler
+- `packages-native/crsql-mesh/src/browser/provider.ts` — added `DbVersionNotification`, `onVersionChange()`, notification after writes
+- `packages-native/crsql-mesh/src/browser/coordinator-sw.ts` — NEW: Service Worker coordinator fallback
+- `packages-native/crsql-mesh/src/browser/index.ts` — added exports for new types and SW coordinator
+- `packages-native/crsql-mesh/test/browser/coordinator.test.ts` — added 4 notification broadcast tests
+- `packages-native/crsql-mesh/test/browser/provider.test.ts` — added 4 db_version notification tests
+- `packages-native/crsql-mesh/test/browser/coordinator-sw.test.ts` — NEW: 12 tests for SW coordinator
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: pnpm, vitest 3.2.4
+
+**Commands run (exact)**
+```bash
+source ~/.zshrc
+cd /Users/tom/Developer/effect-native/cr-sqlite/effect-native
+pnpm -F @effect-native/crsql-mesh test --run
+pnpm -F @effect-native/crsql-mesh check
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>crsql-mesh tests (66 pass)</summary>
+
+```text
+ RUN  v3.2.4 /Users/tom/Developer/effect-native/cr-sqlite/effect-native/packages-native/crsql-mesh
+
+ ✓ test/browser/coordinator.test.ts (13 tests) 6ms
+ ✓ test/browser/coordinator-sw.test.ts (12 tests) 5ms
+ ✓ test/browser/provider.test.ts (18 tests) 10ms
+ ✓ test/Receive.test.ts (4 tests) 41ms
+ ✓ test/Mesh.test.ts (7 tests) 126ms
+ ✓ test/VersionVector.test.ts (3 tests) 30ms
+ ✓ test/Integration.test.ts (4 tests) 34ms
+ ✓ test/Apply.test.ts (5 tests) 47ms
+
+ Test Files  8 passed (8)
+      Tests  66 passed (66)
+   Start at  21:57:25
+   Duration  626ms
+```
+</details>
+
+<details>
+<summary>TypeScript check</summary>
+
+```text
+> @effect-native/crsql-mesh@0.1.0 check
+> tsc -b tsconfig.json
+
+(no output = success)
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd effect-native && pnpm install`
+3. `pnpm -F @effect-native/crsql-mesh test --run`
+4. `pnpm -F @effect-native/crsql-mesh check`
+
+**Work summary**
+1. **TASK-032 (F9-F10)**: Reactive subscriptions
+   - Provider now queries `crsql_db_version()` after each `exec` call
+   - Provider tracks `lastKnownDbVersion` and emits `DbVersionNotification` when it advances
+   - Coordinator routes `db-version-changed` messages from provider to all client tabs
+   - Subscriber pattern: `provider.onVersionChange(callback)` returns unsubscribe function
+   - 8 new tests added
+
+2. **TASK-031 (F11-F12)**: Service Worker fallback
+   - `ServiceWorkerCoordinator` class mirrors SharedWorker coordinator API
+   - Uses Service Worker Clients API (`self.clients.get(id)`) instead of MessagePorts
+   - Same election semantics via Web Locks pattern
+   - Same message routing: forward-request, forward-response, broadcast
+   - `createServiceWorkerScript()` helper for bootstrapping
+   - 12 new tests added
+
+**Known gaps / unverified claims**
+- No real browser integration tests (Playwright) — vitest mocks only
+- No coverage captured
+- Actual OPFS and Web Locks require browser environment
+- Provider migration (F13-F14) not yet implemented — that's the next slice

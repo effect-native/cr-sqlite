@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 36 — Browser multi-tab foundation F5-F8 complete)
+> Last updated: 2025-12-16 (Round 37 — Browser multi-tab F9-F12 complete)
 
 ## Status
 
@@ -17,13 +17,17 @@ Pick disjoint tasks from `.tasks/backlog/`:
   - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
   - Mesh tests: 46/46 passing (TASK-063 done — browser foundation added)
 
-- **Browser Multi-Tab Implementation (Round 36)**
+- **Browser Multi-Tab Implementation (Round 37 — complete)**
   - ✅ Browser foundation F5-F8: `.tasks/done/TASK-063-browser-multitab-foundation.md`
     - Coordinator + Provider classes
     - 9 coordinator tests, 14 provider tests
   - ✅ Browser specs: `.tasks/done/TASK-053-spec-browser-runtime-phase1.md`, `.tasks/done/TASK-054-spec-browser-runtime-phase2.md`
-- (Unblocked; needs TS authorization gate) Service Worker fallback F11-F12: `.tasks/backlog/TASK-031-web-service-worker-fallback.md`
-- (Unblocked; needs TS authorization gate) Reactive subscriptions F9-F10: `.tasks/backlog/TASK-032-web-reactive-subscriptions.md`
+  - ✅ Reactive subscriptions F9-F10: `.tasks/done/TASK-032-web-reactive-subscriptions.md`
+    - db_version notification broadcast from provider to clients
+    - 8 new tests (4 coordinator, 4 provider)
+  - ✅ Service Worker fallback F11-F12: `.tasks/done/TASK-031-web-service-worker-fallback.md`
+    - ServiceWorkerCoordinator class
+    - 12 new tests
 
 - **Upstream goodwill (de-prioritized)**
   - Scope decision (later): `.tasks/backlog/TASK-055-tom-scope-upstream-feedback.md`
@@ -90,9 +94,13 @@ Note: per Tom (2025-12-16), browser multi-tab specs land in the unified full pro
 Foundation (completed Round 36):
 - [x] Coordinator + Provider foundation (F5-F8) → `.tasks/done/TASK-063-browser-multitab-foundation.md`
 
-Implementation tasks (unblocked — foundation done):
-- [ ] Reactive subscriptions F9-F10 → `.tasks/backlog/TASK-032-web-reactive-subscriptions.md` (unblocked; TS authorization gate)
-- [ ] Service Worker fallback F11-F12 → `.tasks/backlog/TASK-031-web-service-worker-fallback.md` (unblocked; TS authorization gate)
+Implementation tasks (completed Round 37):
+- [x] Reactive subscriptions F9-F10 → `.tasks/done/TASK-032-web-reactive-subscriptions.md`
+- [x] Service Worker fallback F11-F12 → `.tasks/done/TASK-031-web-service-worker-fallback.md`
+
+Remaining browser multi-tab work:
+- [ ] Provider migration F13-F14 (re-election on tab close, idempotent write guard)
+- [ ] Browser integration polish F15 (tree-shaking, public API)
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
 
