@@ -568,3 +568,132 @@ pnpm -F @effect-native/crsql-mesh check
 - No coverage captured
 - Actual OPFS and Web Locks require browser environment
 - Provider migration (F13-F14) not yet implemented — that's the next slice
+
+---
+
+## Round 2025-12-16 (38) — Browser migration F13-F14 + Phase 5 + Size report
+
+**Tasks executed**
+- `.tasks/done/TASK-064-browser-multitab-provider-migration.md`
+- `.tasks/done/TASK-066-mesh-phase5-real-sqlite-integration.md`
+- `.tasks/done/TASK-068-zig-artifact-size-regression.md`
+
+**Commits**
+- `f09a0b169` (effect-native) — implement browser migration F13-F14 + mesh Phase 5 integration tests (Round 38)
+- `dede38a8` (root) — delegate round 38: browser F13-F14, Phase 5, size report (TASK-064, 066, 068)
+
+**Modified files (effect-native submodule)**
+- `packages-native/crsql-mesh/src/browser/coordinator.ts`
+- `packages-native/crsql-mesh/src/browser/provider.ts`
+- `packages-native/crsql-mesh/test/browser/coordinator.test.ts`
+- `packages-native/crsql-mesh/test/browser/provider.test.ts`
+- `packages-native/crsql-mesh/test/IntegrationSqlite.test.ts` (new)
+
+**Modified files (root repo)**
+- `zig/Makefile` (added `size-report` target)
+- `.github/workflows/zig-tests.yaml` (added Size Report step)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: pnpm, vitest 3.2.4, nix, zig (via nix)
+
+**Commands run (exact)**
+```bash
+source ~/.zshrc && cd effect-native && pnpm vitest packages-native/crsql-mesh --run
+source ~/.zshrc && pnpm -F @effect-native/crsql-mesh check
+make -C zig size-report
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>crsql-mesh tests (81 pass)</summary>
+
+```text
+ RUN  v3.2.4 /Users/tom/Developer/effect-native/cr-sqlite/effect-native
+
+ ✓ |@effect-native/crsql-mesh| test/browser/coordinator.test.ts (18 tests) 12ms
+ ✓ |@effect-native/crsql-mesh| test/browser/coordinator-sw.test.ts (12 tests) 10ms
+ ✓ |@effect-native/crsql-mesh| test/browser/provider.test.ts (25 tests) 16ms
+ ✓ |@effect-native/crsql-mesh| test/IntegrationSqlite.test.ts (3 tests) 31ms
+ ✓ |@effect-native/crsql-mesh| test/Mesh.test.ts (7 tests) 100ms
+ ✓ |@effect-native/crsql-mesh| test/Receive.test.ts (4 tests) 55ms
+ ✓ |@effect-native/crsql-mesh| test/Integration.test.ts (4 tests) 56ms
+ ✓ |@effect-native/crsql-mesh| test/Apply.test.ts (5 tests) 67ms
+ ✓ |@effect-native/crsql-mesh| test/VersionVector.test.ts (3 tests) 64ms
+
+ Test Files  9 passed (9)
+      Tests  81 passed (81)
+   Start at  22:36:35
+   Duration  770ms
+```
+</details>
+
+<details>
+<summary>TypeScript check</summary>
+
+```text
+> @effect-native/crsql-mesh@0.1.0 check
+> tsc -b tsconfig.json
+
+(no output = success)
+```
+</details>
+
+<details>
+<summary>Size report (example output)</summary>
+
+```text
+════════════════════════════════════════════════════════════════
+  CR-SQLite Artifact Size Report
+════════════════════════════════════════════════════════════════
+
+Baseline (SQLite from nixpkgs):
+  libsqlite3.dylib:    1.75 MB (1844224 bytes)
+
+CR-SQLite Zig Build Artifacts:
+  libcrsqlite.dylib:   1.85 MB (1949776 bytes)
+  libcrsql.a (static): 2.87 MB (3012600 bytes)
+  crsqlite.wasm:       .76 MB (801460 bytes)
+
+Size Comparison:
+  crsqlite/sqlite ratio:  105.72%
+  Overhead vs sqlite:     +103.07 KB
+  Size looks healthy
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd effect-native && pnpm install`
+3. `pnpm vitest packages-native/crsql-mesh --run`
+4. `pnpm -F @effect-native/crsql-mesh check`
+5. `make -C zig size-report`
+
+**Work summary**
+1. **TASK-064 (F13-F14)**: Provider migration + idempotent writes
+   - Coordinator tests (5 new): re-election on disconnect, request queuing during migration, client reconnect
+   - Provider tests (7 new): txId enforcement, idempotency guard, duplicate detection
+   - Provider tracks `committedTxIds` and creates `crsqlite_web_last_tx` table
+   - Writes without txId return `TXID_REQUIRED` error
+   - Duplicate txId returns `DUPLICATE_TX` error
+
+2. **TASK-066 (E1-E2)**: Mesh Phase 5 integration tests
+   - 3 new tests proving MeshDatabase interface works with mesh diff/apply logic
+   - Bidirectional sync test
+   - Error propagation test
+   - Note: Direct real-SQLite integration blocked by Effect version mismatch between packages
+
+3. **TASK-068**: Size regression observability
+   - `make -C zig size-report` command
+   - Reports dylib, static lib, WASM sizes vs SQLite baseline
+   - Zig crsqlite is only 105.72% of SQLite (~103KB overhead)
+   - CI step added to emit size report in GitHub Actions logs
+
+**Known gaps / unverified claims**
+- No real browser integration tests (Playwright) — vitest mocks only
+- No coverage captured
+- Effect version mismatch (3.19.8 vs 3.19.12) prevents direct real-SQLite integration tests in mesh package
+- Browser integration polish F15 remains (packaging/treeshake verification)
+
+---

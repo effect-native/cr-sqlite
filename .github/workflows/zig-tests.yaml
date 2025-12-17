@@ -40,6 +40,23 @@ jobs:
         working-directory: zig
         run: zig build
 
+      - name: Size Report
+        working-directory: zig
+        run: |
+          echo "════════════════════════════════════════════════════════════════"
+          echo "  CR-SQLite Artifact Size Report"
+          echo "════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "CR-SQLite Zig Build Artifacts:"
+          for f in zig-out/lib/*; do
+            if [ -f "$f" ]; then
+              SIZE=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
+              SIZE_MB=$(echo "scale=2; $SIZE / 1024 / 1024" | bc)
+              echo "  $(basename $f): ${SIZE_MB} MB (${SIZE} bytes)"
+            fi
+          done
+          echo ""
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

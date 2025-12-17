@@ -11,7 +11,7 @@
 
 .PHONY: all test test-unit test-parity test-browser build clean help \
         _test-unit _test-parity _test-browser dist \
-        universal build-arm64 build-x64
+        universal build-arm64 build-x64 size-report
 
 # ANSI colors for output
 CYAN := \033[36m
@@ -204,6 +204,74 @@ clean:
 	@rm -f ../.tmp/test-*.log ../.tmp/test-*.exit
 	@echo "$(GREEN)Clean complete$(RESET)"
 
+# Size report - shows artifact sizes and comparison to sqlite baseline
+size-report: build
+	@echo ""
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "$(CYAN)$(BOLD)  CR-SQLite Artifact Size Report$(RESET)"
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo ""
+	@# Get sqlite baseline size (find actual library file, not symlinks)
+	@SQLITE_PATH=$$(nix build nixpkgs#sqlite.out --print-out-paths --no-link 2>/dev/null); \
+	if [ -n "$$SQLITE_PATH" ]; then \
+		SQLITE_LIB=$$(find "$$SQLITE_PATH/lib" -name 'libsqlite3*' -type f \( -name '*.dylib' -o -name '*.so' \) 2>/dev/null | head -1); \
+		if [ -n "$$SQLITE_LIB" ]; then \
+			SQLITE_SIZE=$$(stat -f%z "$$SQLITE_LIB" 2>/dev/null || stat -c%s "$$SQLITE_LIB" 2>/dev/null || echo 0); \
+		else \
+			SQLITE_SIZE=0; \
+		fi; \
+	else \
+		SQLITE_SIZE=0; \
+	fi; \
+	echo "$(BOLD)Baseline (SQLite from nixpkgs):$(RESET)"; \
+	if [ "$$SQLITE_SIZE" -gt 0 ]; then \
+		echo "  libsqlite3.dylib:    $$(echo "scale=2; $$SQLITE_SIZE / 1024 / 1024" | bc) MB ($$SQLITE_SIZE bytes)"; \
+	else \
+		echo "  $(YELLOW)SQLite baseline not available (nix not found or build failed)$(RESET)"; \
+	fi; \
+	echo ""; \
+	echo "$(BOLD)CR-SQLite Zig Build Artifacts:$(RESET)"; \
+	if [ -f "zig-out/lib/libcrsqlite.dylib" ]; then \
+		CRSQL_SIZE=$$(stat -f%z "zig-out/lib/libcrsqlite.dylib" 2>/dev/null || stat -c%s "zig-out/lib/libcrsqlite.dylib"); \
+		echo "  libcrsqlite.dylib:   $$(echo "scale=2; $$CRSQL_SIZE / 1024 / 1024" | bc) MB ($$CRSQL_SIZE bytes)"; \
+	elif [ -f "zig-out/lib/libcrsqlite.so" ]; then \
+		CRSQL_SIZE=$$(stat -f%z "zig-out/lib/libcrsqlite.so" 2>/dev/null || stat -c%s "zig-out/lib/libcrsqlite.so"); \
+		echo "  libcrsqlite.so:      $$(echo "scale=2; $$CRSQL_SIZE / 1024 / 1024" | bc) MB ($$CRSQL_SIZE bytes)"; \
+	else \
+		CRSQL_SIZE=0; \
+		echo "  $(YELLOW)No native library found$(RESET)"; \
+	fi; \
+	if [ -f "zig-out/lib/libcrsql.a" ]; then \
+		STATIC_SIZE=$$(stat -f%z "zig-out/lib/libcrsql.a" 2>/dev/null || stat -c%s "zig-out/lib/libcrsql.a"); \
+		echo "  libcrsql.a (static): $$(echo "scale=2; $$STATIC_SIZE / 1024 / 1024" | bc) MB ($$STATIC_SIZE bytes)"; \
+	fi; \
+	if [ -f "zig-out/lib/crsqlite.wasm" ]; then \
+		WASM_SIZE=$$(stat -f%z "zig-out/lib/crsqlite.wasm" 2>/dev/null || stat -c%s "zig-out/lib/crsqlite.wasm"); \
+		echo "  crsqlite.wasm:       $$(echo "scale=2; $$WASM_SIZE / 1024 / 1024" | bc) MB ($$WASM_SIZE bytes)"; \
+	fi; \
+	echo ""; \
+	echo "$(BOLD)Size Comparison:$(RESET)"; \
+	if [ "$$SQLITE_SIZE" -gt 0 ] && [ "$$CRSQL_SIZE" -gt 0 ]; then \
+		RATIO=$$(echo "scale=2; $$CRSQL_SIZE * 100 / $$SQLITE_SIZE" | bc); \
+		OVERHEAD=$$(echo "scale=2; ($$CRSQL_SIZE - $$SQLITE_SIZE) / 1024" | bc); \
+		echo "  crsqlite/sqlite ratio:  $$RATIO%"; \
+		if [ $$(echo "$$CRSQL_SIZE > $$SQLITE_SIZE" | bc) -eq 1 ]; then \
+			echo "  Overhead vs sqlite:     +$$OVERHEAD KB"; \
+		else \
+			echo "  $(GREEN)crsqlite is smaller than sqlite!$(RESET)"; \
+		fi; \
+		if [ $$(echo "$$RATIO > 200" | bc) -eq 1 ]; then \
+			echo "  $(RED)WARNING: crsqlite is more than 2x sqlite size$(RESET)"; \
+		elif [ $$(echo "$$RATIO > 150" | bc) -eq 1 ]; then \
+			echo "  $(YELLOW)NOTE: crsqlite is 1.5x+ sqlite size$(RESET)"; \
+		else \
+			echo "  $(GREEN)Size looks healthy$(RESET)"; \
+		fi; \
+	else \
+		echo "  $(YELLOW)Cannot compute ratio (missing baseline or artifact)$(RESET)"; \
+	fi; \
+	echo ""
+
 # Help target
 help:
 	@echo "$(BOLD)Zig CR-SQLite Makefile$(RESET)"
@@ -219,6 +287,7 @@ help:
 	@echo "  $(CYAN)make universal$(RESET)    - Build macOS universal binary (aarch64 + x86_64)"
 	@echo "  $(CYAN)make build-arm64$(RESET)  - Build aarch64-macos only"
 	@echo "  $(CYAN)make build-x64$(RESET)    - Build x86_64-macos only"
+	@echo "  $(CYAN)make size-report$(RESET)  - Show artifact sizes and sqlite comparison"
 	@echo "  $(CYAN)make clean$(RESET)        - Clean build artifacts"
 	@echo ""
 	@echo "$(BOLD)Other:$(RESET)"

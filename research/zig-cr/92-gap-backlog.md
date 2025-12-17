@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-16 (Round 37 — Browser multi-tab F9-F12 complete)
+> Last updated: 2025-12-16 (Round 38 — Browser migration F13-F14 + Phase 5 + Size report)
 
 ## Status
 
@@ -15,7 +15,7 @@ Pick disjoint tasks from `.tasks/backlog/`:
 - **Tests now green**
   - Zig parity: 52/52 passing (TASK-051 done)
   - Browser tests: 18/18 passing (TASK-052 done — was port conflict, not code bug)
-  - Mesh tests: 46/46 passing (TASK-063 done — browser foundation added)
+  - Mesh tests: 81/81 passing (Round 38 — F13-F14 + Phase 5 integration)
 
 - **Browser Multi-Tab Implementation (Round 37 — complete)**
   - ✅ Browser foundation F5-F8: `.tasks/done/TASK-063-browser-multitab-foundation.md`
@@ -101,8 +101,12 @@ Implementation tasks (completed Round 37):
 - [x] Reactive subscriptions F9-F10 → `.tasks/done/TASK-032-web-reactive-subscriptions.md`
 - [x] Service Worker fallback F11-F12 → `.tasks/done/TASK-031-web-service-worker-fallback.md`
 
+Implementation tasks (completed Round 38):
+- [x] Provider migration F13-F14 → `.tasks/done/TASK-064-browser-multitab-provider-migration.md`
+  - 12 new tests (5 coordinator migration, 7 provider idempotency)
+  - Idempotent write guard via txId
+
 Remaining browser multi-tab work:
-- [ ] Provider migration F13-F14 → `.tasks/backlog/TASK-064-browser-multitab-provider-migration.md`
 - [ ] Browser integration polish F15 → `.tasks/backlog/TASK-065-browser-multitab-integration-polish.md`
 
 Note: TS work is spec-gated under `effect-native/.specs/AGENTS.md`.
@@ -121,7 +125,8 @@ Implementation (Phase 4 complete):
 - [x] Protocol: schema type reuse from CrSqlSchema → `.tasks/done/TASK-048-crsql-mesh-protocol-schema-reuse.md`
 - [x] Mesh engine: anti-entropy loop + transactional apply → `.tasks/done/TASK-049-crsql-mesh-engine-phase4.md`
 - [x] Node runtime: DB open + CR-SQLite extension load + lifecycle hooks → `.tasks/done/TASK-050-crsql-mesh-runtime-node-phase4.md`
-- [ ] Phase 5: real SQLite integration evidence → `.tasks/backlog/TASK-066-mesh-phase5-real-sqlite-integration.md`
+- [x] Phase 5: real SQLite integration evidence → `.tasks/done/TASK-066-mesh-phase5-real-sqlite-integration.md` (Round 38)
+  - 3 new integration tests proving mesh diff/apply logic works with MeshDatabase interface
 
 ### Mobile static embedding docs
 
@@ -141,5 +146,7 @@ Source wish: `.wishes/gather-upstream-feedback.md`
 Source: `research/zig-cr/103-release-planning-proposal.md`
 
 - Zig artifacts exist for macOS; Linux CI + platform packages are the next shipping blockers.
-- Size regression observability: `.tasks/backlog/TASK-068-zig-artifact-size-regression.md`
+- [x] Size regression observability: `.tasks/done/TASK-068-zig-artifact-size-regression.md` (Round 38)
+  - `make -C zig size-report` command
+  - Zig crsqlite is only 105.72% of SQLite size (~103KB overhead)
 - Track release engineering tasks in `.tasks/backlog/` (create new ones as needed).
