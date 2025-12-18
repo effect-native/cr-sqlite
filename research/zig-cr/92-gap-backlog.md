@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-18 (new test-gap backlog)
+> Last updated: 2025-12-18 (added oracle-based parity tests TASK-089 through TASK-094)
 
 ## Status
 
@@ -33,6 +33,14 @@ Missing-feature RGRTDD tracks (spec then impl):
 - [ ] **TASK-086** — Implement `crsql_config_get/set` in Zig → `.tasks/backlog/TASK-086-impl-config.md`
 - [ ] **TASK-087** — Spec merge atomicity for batch apply → `.tasks/backlog/TASK-087-spec-merge-atomicity.md`
 - [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
+
+Oracle-based parity tests (Rust/C as golden master):
+- [ ] **TASK-089** — API surface completeness: pragma_function_list/module_list comparison → `.tasks/backlog/TASK-089-api-surface-completeness.md`
+- [ ] **TASK-090** — Trigger/clock logic equivalence: col_version/db_version/seq match → `.tasks/backlog/TASK-090-trigger-clock-logic-equivalence.md`
+- [ ] **TASK-091** — Fract index algorithm parity: crsql_fract_key_between output match → `.tasks/backlog/TASK-091-fract-index-algorithm-parity.md`
+- [ ] **TASK-092** — db_version advancement parity: version increments at same moments → `.tasks/backlog/TASK-092-db-version-advancement-parity.md`
+- [ ] **TASK-093** — rows_impacted counter timing: reset timing match → `.tasks/backlog/TASK-093-rows-impacted-counter-timing.md`
+- [ ] **TASK-094** — ALTER TABLE history preservation: clock history + backfill match → `.tasks/backlog/TASK-094-alter-table-history-preservation.md`
 
 ## Context / Evidence
 
