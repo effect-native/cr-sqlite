@@ -68,7 +68,128 @@ Artifacts:
 
 ---
 
-## Round 2025-12-15 (32) — Phase 4 Mesh implementation complete
+## Round 2025-12-17 (41) — Oracle parity tests (4 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-089-api-surface-completeness.md`
+- `.tasks/done/TASK-090-trigger-clock-logic-equivalence.md`
+- `.tasks/done/TASK-091-fract-index-algorithm-parity.md`
+- `.tasks/done/TASK-092-db-version-advancement-parity.md`
+
+**Commits**
+- `5fda98a2` — `++` (batched oracle parity tests)
+- (and 5 earlier `++` commits from subagents)
+
+**Modified files (root repo)**
+- `zig/harness/test-api-surface.sh` (new, 205 lines)
+- `zig/harness/test-trigger-parity.sh` (new, 456 lines)
+- `zig/harness/test-fract-parity.sh` (new, 277 lines)
+- `zig/harness/test-db-version-parity.sh` (new, 442 lines)
+- `zig/harness/test-parity.sh` (updated, wired in all new tests)
+- Task cards in `.tasks/done/`
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, sqlite3, bash
+
+**Commands run (exact)**
+```bash
+make -C zig test-parity
+bash zig/harness/test-api-surface.sh
+bash zig/harness/test-trigger-parity.sh
+bash zig/harness/test-fract-parity.sh
+bash zig/harness/test-db-version-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-089 API Surface (10 gaps found)</summary>
+
+```text
+Functions Missing from Zig (4 actionable):
+- crsql_automigrate
+- crsql_config_get
+- crsql_config_set
+- crsql_get_seq
+
+Functions Intentionally Excluded (4 internal):
+- crsql_after_delete, crsql_after_insert, crsql_after_update (trigger functions)
+- crsql_sha (debug utility)
+
+Modules Missing from Zig (2):
+- clset
+- crsql_unpack_columns
+
+Result: FAIL (10 gaps documented)
+```
+</details>
+
+<details>
+<summary>TASK-090 Trigger/Clock Parity (13 divergences)</summary>
+
+```text
+Key Divergences:
+1. Sentinel row timing: Zig creates sentinel on every INSERT, Rust only on resurrection
+2. Resurrection col_version: Zig resets to 1, Rust increments through cycle (col_version=3)
+3. Seq ordering: Different strategies for ordering changes within a transaction
+
+Result: 2 passed, 13 failed (divergences documented)
+```
+</details>
+
+<details>
+<summary>TASK-091 Fract Index Parity (byte-identical)</summary>
+
+```text
+12 test cases comparing crsql_fract_key_between(a, b):
+- (NULL, NULL) → 'a ' ✓
+- ('a ', NULL) → 'a!' ✓
+- (NULL, 'a ') → 'Z~' ✓
+- Between values → byte-identical ✓
+- Long strings → byte-identical ✓
+- Error cases → both reject invalid input ✓
+
+Result: 12/12 passed — Zig and Rust/C are byte-identical
+```
+</details>
+
+<details>
+<summary>TASK-092 db_version Parity (1 divergence)</summary>
+
+```text
+Test 1-5, 7-8: PASS (initial, INSERT, UPDATE, TX, DELETE, merge, no-op merge)
+Test 6: No-op UPDATE (same value)
+  - Rust/C: db_version advances (1 → 2)
+  - Zig: db_version unchanged (1 → 1)
+
+Result: 12 passed, 1 failed
+Critical divergence: No-op UPDATE handling differs
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig test-parity`
+3. Or run individual tests: `bash zig/harness/test-api-surface.sh`
+
+**Known gaps / unverified claims**
+- Trigger/clock divergences are significant (sentinel row, resurrection col_version, seq ordering)
+- API surface has 10 gaps (4 actionable functions + 2 modules)
+- db_version no-op UPDATE divergence may or may not be intentional
+- Tests run against local extension builds — CI integration not verified this round
+
+**Summary**
+This round created 4 oracle-based parity test scripts that use Rust/C as the golden master:
+1. **API surface** — enumerated all functions/modules, found 10 gaps
+2. **Trigger/clock** — compared clock table outputs, found 13 divergences in sentinel/resurrection behavior
+3. **Fract index** — verified byte-identical output across 12 test cases
+4. **db_version** — found 1 critical divergence in no-op UPDATE handling
+
+These tests now run as part of `make -C zig test-parity` and will catch regressions.
+
+---
+
 
 **Tasks executed**
 - `.tasks/done/TASK-048-crsql-mesh-protocol-schema-reuse.md`
