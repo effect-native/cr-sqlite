@@ -18,6 +18,22 @@ Goal: invalidate the hypothesis that “Zig is done” by expanding cross-implem
 - [ ] **TASK-073** — Compare Rust integration suite vs Zig harness; create missing-test tasks → `.tasks/backlog/TASK-073-compare-rust-zig-tests.md`
 - [ ] **TASK-074** — Expand Zig↔Rust/C wire compat tests beyond happy path → `.tasks/backlog/TASK-074-cross-impl-compat-expanded.md`
 
+Missing-feature RGRTDD tracks (spec then impl):
+- [ ] **TASK-075** — Spec `crsql_automigrate` behavior → `.tasks/backlog/TASK-075-spec-automigrate.md`
+- [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md`
+- [ ] **TASK-077** — Spec `crsql_as_crr` backfill behavior → `.tasks/backlog/TASK-077-spec-as-crr-backfill.md`
+- [ ] **TASK-078** — Implement `crsql_as_crr` backfill in Zig → `.tasks/backlog/TASK-078-impl-as-crr-backfill.md`
+- [ ] **TASK-079** — Spec `clset` virtual table module → `.tasks/backlog/TASK-079-spec-clset-vtab.md`
+- [ ] **TASK-080** — Implement `clset` module in Zig → `.tasks/backlog/TASK-080-impl-clset-vtab.md`
+- [ ] **TASK-081** — Spec `crsql_unpack_columns` vtab → `.tasks/backlog/TASK-081-spec-unpack-columns-vtab.md`
+- [ ] **TASK-082** — Implement `crsql_unpack_columns` vtab in Zig → `.tasks/backlog/TASK-082-impl-unpack-columns-vtab.md`
+- [ ] **TASK-083** — Spec table compatibility checks for `crsql_as_crr` → `.tasks/backlog/TASK-083-spec-table-compat.md`
+- [ ] **TASK-084** — Implement table compatibility checks in Zig → `.tasks/backlog/TASK-084-impl-table-compat.md`
+- [ ] **TASK-085** — Spec `crsql_config_get/set` + `merge-equal-values` behavior → `.tasks/backlog/TASK-085-spec-config.md`
+- [ ] **TASK-086** — Implement `crsql_config_get/set` in Zig → `.tasks/backlog/TASK-086-impl-config.md`
+- [ ] **TASK-087** — Spec merge atomicity for batch apply → `.tasks/backlog/TASK-087-spec-merge-atomicity.md`
+- [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
+
 ## Context / Evidence
 
 - C reference runner lists suites in `core/src/tests.c`:
