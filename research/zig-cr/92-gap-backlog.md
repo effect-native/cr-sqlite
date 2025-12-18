@@ -35,10 +35,13 @@ Missing-feature RGRTDD tracks (spec then impl):
 - [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
 
 Oracle-based parity tests (Rust/C as golden master):
-- [ ] **TASK-089** — API surface completeness: pragma_function_list/module_list comparison → `.tasks/backlog/TASK-089-api-surface-completeness.md`
+- [ ] **TASK-089** — API surface completeness: pragma_function_list/module_list comparison → `.tasks/active/TASK-089-api-surface-completeness.md`
 - [ ] **TASK-090** — Trigger/clock logic equivalence: col_version/db_version/seq match → `.tasks/backlog/TASK-090-trigger-clock-logic-equivalence.md`
 - [ ] **TASK-091** — Fract index algorithm parity: crsql_fract_key_between output match → `.tasks/backlog/TASK-091-fract-index-algorithm-parity.md`
-- [ ] **TASK-092** — db_version advancement parity: version increments at same moments → `.tasks/backlog/TASK-092-db-version-advancement-parity.md`
+- [x] **TASK-092** — db_version advancement parity: version increments at same moments → `.tasks/active/TASK-092-db-version-advancement-parity.md`
+  - **DIVERGENCE FOUND**: No-op UPDATE advances db_version in Rust/C but NOT in Zig
+  - Zig: 1 → 1 (no change); Rust/C: 1 → 2 (advances)
+  - All other test cases pass (12 passed, 1 failed, 1 divergence)
 - [ ] **TASK-093** — rows_impacted counter timing: reset timing match → `.tasks/backlog/TASK-093-rows-impacted-counter-timing.md`
 - [ ] **TASK-094** — ALTER TABLE history preservation: clock history + backfill match → `.tasks/backlog/TASK-094-alter-table-history-preservation.md`
 

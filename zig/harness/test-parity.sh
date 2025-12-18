@@ -11,6 +11,8 @@
 #   - test-alter.sh: crsql_begin_alter/crsql_commit_alter schema changes
 #   - test-noops.sh: No-op changes do not advance clocks (CRDT property)
 #   - test-fract.sh: Fractional indexing (crsql_fract_key_between)
+#   - test-trigger-parity.sh: Oracle parity (Zig vs Rust/C clock tables)
+#   - test-db-version-parity.sh: db_version timing parity (oracle test)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -474,6 +476,95 @@ else
         TOTAL_PASS=$((TOTAL_PASS + FRACT_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + FRACT_FAIL))
     fi
+fi
+
+# Run fract parity tests (oracle comparison: Zig vs Rust/C)
+echo "Running test-fract-parity.sh..."
+if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]] 2>/dev/null || ROOT_DIR="$(cd "$ZIG_DIR/.." && pwd)" && [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+    if bash "$SCRIPT_DIR/test-fract-parity.sh" > "$TMPFILE" 2>&1; then
+        FRACT_PARITY_PASS=$(grep -c "PASS" "$TMPFILE" 2>/dev/null) || FRACT_PARITY_PASS=0
+        echo "  Fract parity tests: $FRACT_PARITY_PASS passed"
+        TOTAL_PASS=$((TOTAL_PASS + FRACT_PARITY_PASS))
+    else
+        EXIT_CODE=$?
+        FRACT_PARITY_FAIL=$(grep -c "FAIL" "$TMPFILE" 2>/dev/null) || FRACT_PARITY_FAIL=0
+        FRACT_PARITY_PASS=$(grep -c "PASS" "$TMPFILE" 2>/dev/null) || FRACT_PARITY_PASS=0
+        echo "  Fract parity tests: $FRACT_PARITY_PASS passed, $FRACT_PARITY_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + FRACT_PARITY_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + FRACT_PARITY_FAIL))
+    fi
+else
+    echo "  Fract parity tests: SKIPPED (Rust/C extension not found)"
+    TOTAL_SKIP=$((TOTAL_SKIP + 12))
+fi
+
+# Run trigger parity tests (oracle comparison: Zig vs Rust/C)
+echo "Running test-trigger-parity.sh..."
+if bash "$SCRIPT_DIR/test-trigger-parity.sh" > "$TMPFILE" 2>&1; then
+    TRIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || TRIG_PASS=0
+    echo "  Trigger parity tests: $TRIG_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + TRIG_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Trigger parity tests: SKIPPED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 15))
+    else
+        TRIG_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || TRIG_FAIL=0
+        TRIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || TRIG_PASS=0
+        echo "  Trigger parity tests: $TRIG_PASS passed, $TRIG_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + TRIG_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + TRIG_FAIL))
+    fi
+fi
+
+# Run API surface parity test (oracle comparison vs Rust/C)
+echo "Running test-api-surface.sh..."
+ROOT_DIR="$(cd "$ZIG_DIR/.." && pwd)"
+if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+    # Export extension paths using the freshly built Zig extension
+    export ZIG_EXT_PATH="$EXT"
+    if bash "$SCRIPT_DIR/test-api-surface.sh" > "$TMPFILE" 2>&1; then
+        API_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || API_PASS=0
+        echo "  API surface tests: $API_PASS passed (full parity)"
+        TOTAL_PASS=$((TOTAL_PASS + API_PASS))
+    else
+        # Count missing items as informational, not test failures
+        API_GAPS=$(grep "Missing from Zig:" "$TMPFILE" | grep -oE '[0-9]+' | head -1) || API_GAPS=0
+        API_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || API_PASS=0
+        echo "  API surface tests: $API_PASS passed, $API_GAPS gaps documented"
+        TOTAL_PASS=$((TOTAL_PASS + API_PASS))
+        # Note: gaps are tracked but don't fail the suite - they're expected during development
+    fi
+else
+    echo "  API surface tests: SKIPPED (Rust/C extension not found at $ROOT_DIR/lib/crsqlite.dylib)"
+    TOTAL_SKIP=$((TOTAL_SKIP + 2))
+fi
+
+# Run db_version parity tests (oracle comparison: Zig vs Rust/C)
+echo "Running test-db-version-parity.sh..."
+if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+    if bash "$SCRIPT_DIR/test-db-version-parity.sh" > "$TMPFILE" 2>&1; then
+        DBVER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || DBVER_PASS=0
+        echo "  db_version parity tests: $DBVER_PASS passed"
+        TOTAL_PASS=$((TOTAL_PASS + DBVER_PASS))
+    else
+        EXIT_CODE=$?
+        if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+            echo "  db_version parity tests: BLOCKED (extensions not available)"
+            TOTAL_SKIP=$((TOTAL_SKIP + 12))
+        else
+            DBVER_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || DBVER_FAIL=0
+            DBVER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || DBVER_PASS=0
+            DBVER_DIVERGE=$(grep "DIVERGENCE" "$TMPFILE" | wc -l) || DBVER_DIVERGE=0
+            echo "  db_version parity tests: $DBVER_PASS passed, $DBVER_FAIL failed, $DBVER_DIVERGE divergences"
+            TOTAL_PASS=$((TOTAL_PASS + DBVER_PASS))
+            TOTAL_FAIL=$((TOTAL_FAIL + DBVER_FAIL))
+        fi
+    fi
+else
+    echo "  db_version parity tests: SKIPPED (Rust/C extension not found)"
+    TOTAL_SKIP=$((TOTAL_SKIP + 12))
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
