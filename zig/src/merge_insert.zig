@@ -654,6 +654,19 @@ pub fn insertIntoPksTable(
     pks_blob: [*]const u8,
     pks_len: usize,
 ) MergeError!void {
+    _ = try insertIntoPksTableAndGetPk(db, table_name, base_rowid, pks_blob, pks_len);
+}
+
+/// Insert into __crsql_pks table and return the pk (auto-increment key) that was assigned.
+/// Uses ON CONFLICT to handle resurrection (update base_rowid if blob exists).
+/// Returns the pk column value (NOT the base_rowid) for use in clock table entries.
+pub fn insertIntoPksTableAndGetPk(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    base_rowid: i64,
+    pks_blob: [*]const u8,
+    pks_len: usize,
+) MergeError!i64 {
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, ?) ON CONFLICT(pks) DO UPDATE SET base_rowid = excluded.base_rowid", .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -670,6 +683,96 @@ pub fn insertIntoPksTable(
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
+
+    // Now query back the pk for this pks blob
+    var pk_buf: [256]u8 = undefined;
+    const pk_sql = std.fmt.bufPrintZ(&pk_buf, "SELECT pk FROM \"{s}__crsql_pks\" WHERE pks = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var pk_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, pk_sql, -1, &pk_stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(pk_stmt);
+
+    _ = api.bind_blob(pk_stmt, 1, pks_blob, @intCast(pks_len), api.getTransientDestructor());
+
+    if (api.step(pk_stmt) == api.SQLITE_ROW) {
+        return api.column_int64(pk_stmt, 0);
+    }
+
+    return MergeError.NoRows;
+}
+
+/// Insert a row into a PK-only table (table with no non-PK columns).
+/// Decodes the pk blob to get the PK value and inserts a row with just that value.
+/// Returns the new rowid.
+pub fn insertPkOnlyRow(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk_blob: [*]const u8,
+    pk_blob_len: usize,
+) MergeError!i64 {
+    // Decode the PK blob to get the PK value
+    const pk_slice = pk_blob[0..pk_blob_len];
+    const values = codec.unpack(std.heap.page_allocator, pk_slice) catch return MergeError.DecodeError;
+    defer {
+        for (values) |v| {
+            switch (v) {
+                .Text => |s| std.heap.page_allocator.free(s),
+                .Blob => |b| std.heap.page_allocator.free(b),
+                else => {},
+            }
+        }
+        std.heap.page_allocator.free(values);
+    }
+
+    if (values.len == 0) return MergeError.DecodeError;
+
+    // For MVP, only handle single integer PK
+    const pk_value = values[0];
+    const pk_int: i64 = switch (pk_value) {
+        .Integer => |i| i,
+        else => return MergeError.DecodeError, // Only integer PKs supported for MVP
+    };
+
+    // Get the PK column name from the table schema
+    const pk_col_name = try getPkColumnName(db, table_name);
+
+    var buf: [1024]u8 = undefined;
+    var stmt: ?*api.sqlite3_stmt = null;
+
+    if (pk_col_name) |pk_col| {
+        // Table has a declared PK column - insert using that column name
+        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+        const pk_col_slice = pk_col[0..pk_col_len];
+
+        // Build: INSERT INTO "{table}" ("{pk_col}") VALUES (?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\") VALUES (?)", .{ table_name, pk_col_slice }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // No declared PK column - use rowid directly
+        // Build: INSERT INTO "{table}" (rowid) VALUES (?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid) VALUES (?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    }
+    defer _ = api.finalize(stmt);
+
+    // Bind the PK value
+    _ = api.bind_int64(stmt, 1, pk_int);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+
+    // Return the pk_int as the rowid
+    return pk_int;
 }
 
 /// Insert a row for resurrection using existing pk (rowid).

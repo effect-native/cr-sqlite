@@ -749,23 +749,21 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     return vtab.SQLITE_OK;
 }
 
-/// Check if the current row is a sentinel row (col_name = '-1')
-/// Sentinel rows with EVEN col_version are tombstones (deleted rows) and MUST be included
-/// for sync to work correctly. Only odd col_version sentinels (row-creation markers) are filtered.
-/// Reference: CR-SQLite uses even col_version = deleted, odd = live
+/// Check if the current row is a sentinel row (col_name = '-1') that should be skipped.
+/// 
+/// Sentinel rows (cid = '-1') are emitted ONLY for PK-only tables to track row existence.
+/// For tables with non-PK columns, no sentinels are emitted on INSERT (column changes suffice).
+/// 
+/// Tombstone sentinels (even col_version) are always included - they represent deleted rows.
+/// Live sentinels (odd col_version) for PK-only tables are included - they're the only change.
+/// 
+/// Since we now only emit sentinels for PK-only tables, we should never skip them.
+/// The only sentinels to skip are tombstone markers during resurrection (not applicable here).
 fn isSentinelRow(stmt: ?*api.sqlite3_stmt) bool {
-    const col_name_ptr = columnTextFromStmt(stmt, 1);
-    if (col_name_ptr) |cn| {
-        const col_name_slice = std.mem.span(cn);
-        if (std.mem.eql(u8, col_name_slice, "-1")) {
-            // This is a sentinel row - check col_version to determine if it's a tombstone
-            const col_version = columnInt64FromStmt(stmt, 2);
-            // Even col_version = deleted (tombstone) -> include in crsql_changes
-            // Odd col_version = live (row-creation marker) -> exclude from crsql_changes
-            // We return true (skip) only for odd (live) sentinels
-            return @mod(col_version, 2) == 1;
-        }
-    }
+    _ = stmt;
+    // Now that INSERT triggers only emit sentinels for PK-only tables,
+    // all sentinels in the clock table should be included in crsql_changes.
+    // Tombstones (even col_version) and live sentinels (odd col_version) are both valid changes.
     return false;
 }
 
@@ -1096,26 +1094,32 @@ fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []cons
 }
 
 /// Fetch the causal length from the sentinel row (col_name = '-1')
+/// For tables without a sentinel (non-PK-only tables), returns 1 if the row has any clock entries
+/// (meaning the row exists - odd cl = live).
 fn fetchCausalLength(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64) i64 {
     var sql_buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch {
-        return 0;
+        return 1; // Default to 1 (live) on error
     };
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
-        return 0;
+        return 1; // Default to 1 (live) on error
     }
     defer _ = finalizeStmt(stmt);
 
     if (api.bind_int64(stmt, 1, pk) != vtab.SQLITE_OK) {
-        return 0;
+        return 1; // Default to 1 (live) on error
     }
 
     if (stepStmt(stmt) == vtab.SQLITE_ROW) {
         return columnInt64FromStmt(stmt, 0);
     }
-    return 0;
+
+    // No sentinel row - for non-PK-only tables, this is normal.
+    // If we're querying cl for a row that has clock entries, the row must exist (cl = 1, odd = live).
+    // The caller is iterating over clock entries, so we know the row exists.
+    return 1;
 }
 
 /// xColumn - Return column value
@@ -1520,10 +1524,47 @@ fn changesUpdate(
             // Handle sentinel operations (cid = "-1") for non-existent rows
             const is_sentinel_for_new = std.mem.eql(u8, cid_slice, "-1");
             if (is_sentinel_for_new) {
-                // Sentinel for non-existent row - this is a tombstone/delete marker
-                // We need to create just the clock entry without a base table row
-                // For now, skip - the row doesn't exist and we're being told to delete it
-                log.debug("changesUpdate: sentinel for non-existent row, skipping", .{});
+                // Sentinel with even cl = tombstone for non-existent row (skip)
+                // Sentinel with odd cl = row creation marker (need to create row for PK-only tables)
+                const is_tombstone = @mod(cl, 2) == 0;
+                if (is_tombstone) {
+                    // Tombstone for non-existent row - nothing to delete
+                    log.debug("changesUpdate: tombstone sentinel for non-existent row, skipping", .{});
+                    pRowid.* = 0;
+                    return vtab.SQLITE_OK;
+                }
+                // Live sentinel (odd cl) - this is a PK-only table row creation
+                // We need to create the row with just the PK columns
+                log.debug("changesUpdate: live sentinel for PK-only table, creating row", .{});
+
+                // For PK-only tables, we insert a row with just the PK values (extracted from pk blob)
+                // The pk blob contains the packed PK column values
+                const base_rowid = merge_insert.insertPkOnlyRow(api_db, table_slice, pk_ptr, @intCast(pk_len)) catch {
+                    log.debug("changesUpdate: insertPkOnlyRow failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+
+                // Insert into __crsql_pks table and get the pk (auto-increment key)
+                const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, base_rowid, pk_ptr, @intCast(pk_len)) catch {
+                    log.debug("changesUpdate: insertIntoPksTableAndGetPk for PK-only failed", .{});
+                    return vtab.SQLITE_ERROR;
+                };
+
+                // Insert sentinel clock entry using pks_pk (NOT base_rowid)
+                const site_id_ptr_sentinel: ?[*]const u8 = @ptrCast(site_id_blob);
+                if (merge_stmts) |stmts| {
+                    merge_insert.setWinnerClockCached(stmts, pks_pk, "-1", col_version, db_version, site_id_ptr_sentinel, @intCast(site_id_len), seq) catch {
+                        log.debug("changesUpdate: setWinnerClockCached for PK-only sentinel failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                } else {
+                    merge_insert.setWinnerClock(api_db, table_slice, pks_pk, "-1", col_version, db_version, site_id_ptr_sentinel, @intCast(site_id_len), seq) catch {
+                        log.debug("changesUpdate: setWinnerClock for PK-only sentinel failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                }
+
+                rows_impacted.incrementRowsImpacted();
                 pRowid.* = 0;
                 return vtab.SQLITE_OK;
             }
@@ -1534,47 +1575,41 @@ fn changesUpdate(
             // Get the value from argv[5] (column 3: val)
             const insert_value = toApiValue(argv[5]);
 
-            // Step 1a: Insert into base table
-            const new_pk = merge_insert.insertIntoBaseTable(api_db, table_slice, cid_slice, insert_value, pk_ptr, @intCast(pk_len)) catch {
+            // Step 1a: Insert into base table (returns the base table rowid)
+            const base_rowid = merge_insert.insertIntoBaseTable(api_db, table_slice, cid_slice, insert_value, pk_ptr, @intCast(pk_len)) catch {
                 log.debug("changesUpdate: insertIntoBaseTable failed", .{});
                 return vtab.SQLITE_ERROR;
             };
 
-            // Step 1b: Insert into __crsql_pks table (use cached if available)
-            if (merge_stmts) |stmts| {
-                merge_insert.insertIntoPksTableCached(stmts, new_pk, pk_ptr, @intCast(pk_len)) catch {
-                    log.debug("changesUpdate: insertIntoPksTableCached failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
-            } else {
-                merge_insert.insertIntoPksTable(api_db, table_slice, new_pk, pk_ptr, @intCast(pk_len)) catch {
-                    log.debug("changesUpdate: insertIntoPksTable failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
-            }
+            // Step 1b: Insert into __crsql_pks table and get the pk (auto-increment key)
+            // The pk is what we use for clock table entries, NOT the base table rowid
+            const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, base_rowid, pk_ptr, @intCast(pk_len)) catch {
+                log.debug("changesUpdate: insertIntoPksTableAndGetPk failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
 
-            // Step 1c: Insert clock entry for the column (use cached if available)
+            // Step 1c: Insert clock entry for the column using pks_pk (NOT base_rowid)
             const site_id_ptr_insert: ?[*]const u8 = @ptrCast(site_id_blob);
             if (merge_stmts) |stmts| {
-                merge_insert.setWinnerClockCached(stmts, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClockCached(stmts, pks_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClockCached for new row failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
             } else {
-                merge_insert.setWinnerClock(api_db, table_slice, new_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClock(api_db, table_slice, pks_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClock for new row failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
             }
 
-            // Step 1d: Insert sentinel clock entry with the incoming cl (use cached if available)
+            // Step 1d: Insert sentinel clock entry with the incoming cl using pks_pk
             if (merge_stmts) |stmts| {
-                merge_insert.setWinnerClockCached(stmts, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClockCached(stmts, pks_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClockCached for sentinel failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
             } else {
-                merge_insert.setWinnerClock(api_db, table_slice, new_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClock(api_db, table_slice, pks_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
                     return vtab.SQLITE_ERROR;
                 };

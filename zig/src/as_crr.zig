@@ -241,12 +241,20 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
 /// - Packs PK column values using crsql_pack_columns()
 /// - Creates pks entry with auto-increment key
 /// - Creates clock entries for each non-PK column using pks key (not base rowid)
-/// - Creates sentinel row ('-1') for row creation tracking
+/// - For PK-only tables: creates sentinel row ('-1') for row existence tracking
 fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     // Get table column information
     const info = try getTableInfo(db, table_name);
     if (info.count == 0) {
         return error.NoColumns;
+    }
+
+    // Count non-PK columns to determine if this is a PK-only table
+    var non_pk_count: usize = 0;
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            non_pk_count += 1;
+        }
     }
 
     var buf: [SQL_BUF_SIZE]u8 = undefined;
@@ -321,32 +329,38 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         }
     }
 
-    // Sentinel row for row creation tracking
-    // Use subquery to get the pks key for this blob
-    writer.print(
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  VALUES
-        \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
+    // Sentinel row for PK-only tables (no non-PK columns)
+    // This emits a change with cid='-1' to track row existence when there are no column changes to emit.
+    // For tables with non-PK columns, the column changes themselves serve as existence markers.
+    // Reference: Rust/C behavior - only emits sentinel for PK-only tables.
+    if (non_pk_count == 0) {
+        writer.print(
+            \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
+            \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+            \\  VALUES
+            \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+        , .{ table_name, table_name }) catch return error.BufferOverflow;
 
-    // Rewrite pk columns for subquery
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |pk_col| {
-            if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
+        // Rewrite pk columns for subquery
+        pk_written = 0;
+        pk_order = 1;
+        while (pk_written < info.pk_count) : (pk_order += 1) {
+            for (info.columns[0..info.count]) |pk_col| {
+                if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
+                    if (pk_written > 0) {
+                        writer.writeAll(", ") catch return error.BufferOverflow;
+                    }
+                    writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                    pk_written += 1;
+                    break;
                 }
-                writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
             }
         }
+
+        writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\n") catch return error.BufferOverflow;
     }
 
-    writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\nEND;") catch return error.BufferOverflow;
+    writer.writeAll("END;") catch return error.BufferOverflow;
 
     // Null-terminate the SQL
     const sql_len = fbs.pos;
