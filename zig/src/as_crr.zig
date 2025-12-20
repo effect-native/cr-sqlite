@@ -1247,6 +1247,229 @@ fn dropPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
 }
 
+/// Internal function to create CRR infrastructure without savepoint wrapper.
+/// Used by clset_vtab during xCreate when savepoints may not be allowed.
+/// 
+/// Parameters:
+///   - db: Database connection
+///   - table_name: Name of the table to convert to a CRR (as a slice)
+///
+/// Returns error on failure, otherwise void on success.
+pub fn createCrrInternal(db: ?*api.sqlite3, table_name: []const u8) !void {
+    // Convert slice to null-terminated string for internal functions
+    var name_buf: [MAX_TABLE_NAME_LEN]u8 = undefined;
+    if (table_name.len >= MAX_TABLE_NAME_LEN) {
+        return error.TableNameTooLong;
+    }
+    @memcpy(name_buf[0..table_name.len], table_name);
+    name_buf[table_name.len] = 0;
+    const table_name_z: [*:0]const u8 = @ptrCast(&name_buf);
+
+    // Create clock table
+    try createClockTable(db, table_name_z);
+
+    // Create pks table
+    try createPksTable(db, table_name_z);
+
+    // Create INSERT trigger
+    try createInsertTrigger(db, table_name_z);
+
+    // Create UPDATE trigger (for non-PK column changes)
+    try createUpdateTrigger(db, table_name_z);
+
+    // Create PK UPDATE trigger (for PK column changes)
+    createPkUpdateTrigger(db, table_name_z) catch |err| {
+        // NoPrimaryKey is not an error - just means table has no explicit PK columns to track
+        if (err != error.NoPrimaryKey) {
+            return err;
+        }
+    };
+
+    // Create DELETE trigger
+    try createDeleteTrigger(db, table_name_z);
+
+    // Backfill existing rows WITHOUT savepoint (critical for xCreate context)
+    try backfillExistingRowsNoTx(db, table_name_z);
+}
+
+/// Backfill existing rows without transaction wrapper.
+/// Used internally when called from contexts where savepoints aren't allowed.
+fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    // Get table column information
+    const info = try getTableInfo(db, table_name);
+    if (info.count == 0) {
+        return; // Empty schema, nothing to do
+    }
+
+    // Count non-PK columns
+    var non_pk_count: usize = 0;
+    for (info.columns[0..info.count]) |col| {
+        if (col.pk_index == 0) {
+            non_pk_count += 1;
+        }
+    }
+
+    // Build the SELECT query to find rows not yet backfilled
+    var select_buf: [SQL_BUF_SIZE]u8 = undefined;
+    var select_fbs = std.io.fixedBufferStream(&select_buf);
+    const select_writer = select_fbs.writer();
+
+    select_writer.print("SELECT rowid", .{}) catch return error.BufferOverflow;
+
+    // Add PK columns in order for crsql_pack_columns
+    var pk_order: usize = 1;
+    var pk_written: usize = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                select_writer.print(", \"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    // Find rows not yet in pks table
+    select_writer.print(" FROM \"{s}\" WHERE rowid NOT IN (SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE base_rowid IS NOT NULL)", .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    const select_len = select_fbs.pos;
+    if (select_len >= SQL_BUF_SIZE) return error.BufferOverflow;
+    select_buf[select_len] = 0;
+
+    const select_sql: [*:0]const u8 = @ptrCast(&select_buf);
+
+    // Prepare the SELECT statement
+    var select_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, select_sql, -1, &select_stmt, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(select_stmt);
+
+    // Build INSERT statement for pks table
+    var pks_insert_buf: [SQL_BUF_SIZE]u8 = undefined;
+    var pks_fbs = std.io.fixedBufferStream(&pks_insert_buf);
+    const pks_writer = pks_fbs.writer();
+
+    pks_writer.print("INSERT OR IGNORE INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, crsql_pack_columns(", .{table_name}) catch return error.BufferOverflow;
+
+    // Add placeholders for each PK column value
+    for (0..info.pk_count) |i| {
+        if (i > 0) {
+            pks_writer.writeAll(", ") catch return error.BufferOverflow;
+        }
+        pks_writer.writeAll("?") catch return error.BufferOverflow;
+    }
+
+    pks_writer.writeAll("))") catch return error.BufferOverflow;
+
+    const pks_len = pks_fbs.pos;
+    if (pks_len >= SQL_BUF_SIZE) return error.BufferOverflow;
+    pks_insert_buf[pks_len] = 0;
+
+    const pks_insert_sql: [*:0]const u8 = @ptrCast(&pks_insert_buf);
+
+    // Prepare pks INSERT statement
+    var pks_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, pks_insert_sql, -1, &pks_stmt, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(pks_stmt);
+
+    // Build INSERT statement for clock entries
+    var clock_insert_buf: [SQL_BUF_SIZE]u8 = undefined;
+    const clock_insert_sql = std.fmt.bufPrintZ(&clock_insert_buf,
+        \\INSERT OR IGNORE INTO "{s}__crsql_clock"
+        \\  (pk, col_name, col_version, db_version, site_id, seq)
+        \\VALUES
+        \\  (?, ?, 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq())
+    , .{table_name}) catch return error.BufferOverflow;
+
+    // Prepare clock INSERT statement
+    var clock_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, clock_insert_sql, -1, &clock_stmt, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+    defer _ = api.finalize(clock_stmt);
+
+    // Iterate over rows that need backfilling
+    while (api.step(select_stmt) == api.SQLITE_ROW) {
+        const rowid = api.column_int64(select_stmt, 0);
+
+        // Insert into pks table
+        if (api.bind_int64(pks_stmt, 1, rowid) != api.SQLITE_OK) {
+            return error.SqliteError;
+        }
+
+        // Bind PK column values
+        for (1..info.pk_count + 1) |i| {
+            const col_idx: c_int = @intCast(i);
+            const bind_idx: c_int = @intCast(i + 1);
+            const value = api.column_value(select_stmt, col_idx);
+            if (value) |v| {
+                const val_type = api.value_type(v);
+                const bind_rc = switch (val_type) {
+                    api.SQLITE_INTEGER => api.bind_int64(pks_stmt, bind_idx, api.value_int64(v)),
+                    api.SQLITE_FLOAT => api.bind_double(pks_stmt, bind_idx, api.value_double(v)),
+                    api.SQLITE_TEXT => blk: {
+                        const text = api.value_text(v);
+                        const len = api.value_bytes(v);
+                        if (text) |t| {
+                            break :blk api.bind_text(pks_stmt, bind_idx, t, len, api.getTransientDestructor());
+                        } else {
+                            break :blk api.bind_null(pks_stmt, bind_idx);
+                        }
+                    },
+                    api.SQLITE_BLOB => blk: {
+                        const blob = api.value_blob(v);
+                        const len = api.value_bytes(v);
+                        break :blk api.bind_blob(pks_stmt, bind_idx, blob, len, api.getTransientDestructor());
+                    },
+                    else => api.bind_null(pks_stmt, bind_idx),
+                };
+                if (bind_rc != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+            } else {
+                if (api.bind_null(pks_stmt, bind_idx) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+            }
+        }
+
+        _ = api.step(pks_stmt);
+        _ = api.reset(pks_stmt);
+
+        // Insert clock entries for each non-PK column
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == 0) {
+                if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+
+                const col_name_slice = col.name[0..col.name_len];
+                if (api.bind_text(clock_stmt, 2, @ptrCast(col_name_slice.ptr), @intCast(col.name_len), api.getTransientDestructor()) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+
+                _ = api.step(clock_stmt);
+                _ = api.reset(clock_stmt);
+            }
+        }
+
+        // If there are no non-PK columns, insert sentinel row
+        if (non_pk_count == 0) {
+            if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+                return error.SqliteError;
+            }
+            if (api.bind_text(clock_stmt, 2, "-1", 2, api.SQLITE_STATIC) != api.SQLITE_OK) {
+                return error.SqliteError;
+            }
+            _ = api.step(clock_stmt);
+            _ = api.reset(clock_stmt);
+        }
+    }
+}
+
 /// Register the crsql_as_crr and crsql_as_table functions with a database connection.
 pub fn register(db: ?*api.sqlite3) c_int {
     var rc = api.create_function_v2(

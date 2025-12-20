@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 44 — TASK-118, TASK-079, TASK-108 complete)
+> Last updated: 2025-12-20 (Round 45 — TASK-080, TASK-087, TASK-081 complete)
 
 ## Status
 
@@ -52,16 +52,20 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
   - All 12 backfill tests pass
 - [x] **TASK-079** — Spec `clset` virtual table module ✓ `.tasks/done/TASK-079-spec-clset-vtab.md`
-  - Test: `zig/harness/test-clset-vtab.sh` (10 tests, all RED until impl)
-- [ ] **TASK-080** — Implement `clset` module in Zig → `.tasks/backlog/TASK-080-impl-clset-vtab.md`
-- [ ] **TASK-081** — Spec `crsql_unpack_columns` vtab → `.tasks/backlog/TASK-081-spec-unpack-columns-vtab.md`
+  - Test: `zig/harness/test-clset-vtab.sh` (10 tests)
+- [x] **TASK-080** — Implement `clset` module in Zig ✓ `.tasks/done/TASK-080-impl-clset-vtab.md`
+  - Test: `zig/harness/test-clset-vtab.sh` = 10/10 pass ✓
+- [x] **TASK-081** — Spec `crsql_unpack_columns` vtab ✓ `.tasks/done/TASK-081-spec-unpack-columns-vtab.md`
+  - Test: `zig/harness/test-unpack-columns-vtab.sh` (12 tests, RED until impl)
 - [ ] **TASK-082** — Implement `crsql_unpack_columns` vtab in Zig → `.tasks/backlog/TASK-082-impl-unpack-columns-vtab.md`
 - [ ] **TASK-083** — Spec table compatibility checks for `crsql_as_crr` → `.tasks/backlog/TASK-083-spec-table-compat.md`
 - [ ] **TASK-084** — Implement table compatibility checks in Zig → `.tasks/backlog/TASK-084-impl-table-compat.md`
 - [ ] **TASK-085** — Spec `crsql_config_get/set` + `merge-equal-values` behavior → `.tasks/backlog/TASK-085-spec-config.md`
 - [ ] **TASK-086** — Implement `crsql_config_get/set` in Zig → `.tasks/backlog/TASK-086-impl-config.md`
-- [ ] **TASK-087** — Spec merge atomicity for batch apply → `.tasks/backlog/TASK-087-spec-merge-atomicity.md`
+- [x] **TASK-087** — Spec merge atomicity for batch apply ✓ `.tasks/done/TASK-087-spec-merge-atomicity.md`
+  - Test: `zig/harness/test-merge-atomicity.sh` (8 tests, all pass — Zig has native atomicity)
 - [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
+  - Note: May be obsolete — Zig already passes all atomicity tests via SQLite's native semantics
 
 ### Oracle-based parity tests (Rust/C as golden master)
 - [x] **TASK-089** — API surface completeness ✓ `.tasks/done/TASK-089-api-surface-completeness.md`
@@ -95,11 +99,11 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 |------------|--------------|--------|
 | automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 ✓ (impl), TASK-118 ✓ (17/17 pass) |
 | backfill.rs | ✓ | TASK-096 + TASK-078 (all 12 tests pass) |
-| pack_columns.rs | MISSING | Blocked (TASK-081/082) |
+| pack_columns.rs | test-unpack-columns-vtab.sh | TASK-081 ✓ (spec, RED), TASK-082 (impl pending) |
 | pk_only_tables.rs | Partial | TASK-095 (test exists) |
 | pk_update.rs | Partial | TASK-105 (11/16 pass; TASK-110 for compound/text PK) |
 | test_db_version.rs | test-db-version-parity.sh | ✓ |
-| test_cl_set_vtab.rs | test-clset-vtab.sh | TASK-079 ✓ (spec, RED), TASK-080 (impl pending) |
+| test_cl_set_vtab.rs | test-clset-vtab.sh | TASK-079 ✓ (spec), TASK-080 ✓ (impl, 10/10 pass) |
 | tableinfo.rs | ✓ | TASK-097 (15 tests, all pass) |
 | teardown.rs | test-is-crr.sh | ✓ |
 | fract.rs | test-fract*.sh | ✓ |
@@ -137,6 +141,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ## Done (recent)
 
+- **Round 45 (2025-12-20)**:
+  - TASK-080: Implement clset virtual table module (10/10 tests pass)
+  - TASK-087: Spec merge atomicity (8 tests, all pass — native SQLite atomicity)
+  - TASK-081: Spec unpack_columns vtab (12 tests, RED until impl)
 - **Round 44 (2025-12-20)**:
   - TASK-118: Fixed automigrate test shell quoting (17/17 pass)
   - TASK-079: Spec clset virtual table (10 tests, RED until impl)

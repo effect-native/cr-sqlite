@@ -23,6 +23,7 @@
 #   - test-automigrate.sh: crsql_automigrate() behavior spec (RGRTDD)
 #   - test-is-crr.sh: crsql_is_crr() detection (is-crr.test.c)
 #   - test-crsqlite.sh: Core crsqlite behaviors (crsqlite.test.c)
+#   - test-unpack-columns-vtab.sh: crsql_unpack_columns virtual table (RGRTDD)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -826,6 +827,51 @@ else
         echo "  Automigrate tests: $AUTOMIG_PASS passed, $AUTOMIG_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + AUTOMIG_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + AUTOMIG_FAIL))
+    fi
+fi
+
+# Run unpack_columns virtual table tests (RGRTDD spec - expected to SKIP until implemented)
+echo "Running test-unpack-columns-vtab.sh..."
+if bash "$SCRIPT_DIR/test-unpack-columns-vtab.sh" > "$TMPFILE" 2>&1; then
+    UNPACK_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || UNPACK_PASS=0
+    echo "  Unpack columns vtab tests: $UNPACK_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + UNPACK_PASS))
+else
+    EXIT_CODE=$?
+    # Exit 1 with "RED PHASE" = module not yet implemented (expected)
+    if grep -q "RED PHASE" "$TMPFILE"; then
+        UNPACK_EXPECTED=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || UNPACK_EXPECTED=0
+        echo "  Unpack columns vtab tests: SKIPPED ($UNPACK_EXPECTED tests await implementation)"
+        TOTAL_SKIP=$((TOTAL_SKIP + UNPACK_EXPECTED))
+    elif [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Unpack columns vtab tests: SKIPPED (crsql_unpack_columns not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        UNPACK_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || UNPACK_FAIL=0
+        UNPACK_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || UNPACK_PASS=0
+        echo "  Unpack columns vtab tests: $UNPACK_PASS passed, $UNPACK_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + UNPACK_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + UNPACK_FAIL))
+    fi
+fi
+
+# Run merge atomicity tests (RGRTDD spec - batch application atomicity)
+echo "Running test-merge-atomicity.sh..."
+if bash "$SCRIPT_DIR/test-merge-atomicity.sh" > "$TMPFILE" 2>&1; then
+    ATOMICITY_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ATOMICITY_PASS=0
+    echo "  Merge atomicity tests: $ATOMICITY_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + ATOMICITY_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Merge atomicity tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 8))
+    else
+        ATOMICITY_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ATOMICITY_FAIL=0
+        ATOMICITY_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ATOMICITY_PASS=0
+        echo "  Merge atomicity tests: $ATOMICITY_PASS passed, $ATOMICITY_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + ATOMICITY_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + ATOMICITY_FAIL))
     fi
 fi
 
