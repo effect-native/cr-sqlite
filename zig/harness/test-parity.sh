@@ -21,6 +21,8 @@
 #   - test-extdata.sh: ExtData lifecycle (schema changes, table tracking)
 #   - test-sandbox.sh: Sandbox tests (basic sync, convergence, oracle parity)
 #   - test-automigrate.sh: crsql_automigrate() behavior spec (RGRTDD)
+#   - test-is-crr.sh: crsql_is_crr() detection (is-crr.test.c)
+#   - test-crsqlite.sh: Core crsqlite behaviors (crsqlite.test.c)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -759,6 +761,46 @@ else
         echo "  Sandbox tests: $SANDBOX_PASS passed, $SANDBOX_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + SANDBOX_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + SANDBOX_FAIL))
+    fi
+fi
+
+# Run is_crr detection tests (is-crr.test.c parity)
+echo "Running test-is-crr.sh..."
+if bash "$SCRIPT_DIR/test-is-crr.sh" > "$TMPFILE" 2>&1; then
+    ISCRR_PASS=$(grep -c "PASS" "$TMPFILE" 2>/dev/null) || ISCRR_PASS=0
+    echo "  is_crr tests: $ISCRR_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + ISCRR_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  is_crr tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 3))
+    else
+        ISCRR_FAIL=$(grep -c "FAIL" "$TMPFILE" 2>/dev/null) || ISCRR_FAIL=0
+        ISCRR_PASS=$(grep -c "PASS" "$TMPFILE" 2>/dev/null) || ISCRR_PASS=0
+        echo "  is_crr tests: $ISCRR_PASS passed, $ISCRR_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + ISCRR_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + ISCRR_FAIL))
+    fi
+fi
+
+# Run crsqlite core behavior tests (crsqlite.test.c parity)
+echo "Running test-crsqlite.sh..."
+if bash "$SCRIPT_DIR/test-crsqlite.sh" > "$TMPFILE" 2>&1; then
+    CRSQLITE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || CRSQLITE_PASS=0
+    echo "  crsqlite tests: $CRSQLITE_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + CRSQLITE_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  crsqlite tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 6))
+    else
+        CRSQLITE_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || CRSQLITE_FAIL=0
+        CRSQLITE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || CRSQLITE_PASS=0
+        echo "  crsqlite tests: $CRSQLITE_PASS passed, $CRSQLITE_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + CRSQLITE_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + CRSQLITE_FAIL))
     fi
 fi
 
