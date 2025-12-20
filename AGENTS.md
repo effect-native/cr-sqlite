@@ -174,3 +174,9 @@ run_zig() {
 - Function conflicts (both register `crsql_as_crr`, etc.)
 - Double triggers on CRR tables
 - Invalid test results
+
+## Temporary Files
+
+**Use `.tmp/` for all temporary files, never `/tmp/`.**
+
+This keeps temp files within the repo (gitignored) for easier debugging and cleanup.

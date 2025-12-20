@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 51 — TASK-121, TASK-122 complete — zero divergences)
+> Last updated: 2025-12-20 (Round 52 — TASK-123, TASK-124 complete — clock schema + site_id cross-open fixed)
 
 ## Status
 
@@ -13,8 +13,13 @@
 Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementation parity coverage and adding real-system tests.
 
 ### Open Gaps (Parity Divergences)
-- [ ] **TASK-123** — Fix clock table schema parity (pk vs key, index) `.tasks/backlog/TASK-123-fix-clock-table-schema-parity.md`
-- [ ] **TASK-124** — Fix site_id preservation on cross-open `.tasks/backlog/TASK-124-fix-site-id-cross-open-parity.md`
+- [x] **TASK-123** — Fix clock table schema parity (pk vs key, index) ✓ `.tasks/done/TASK-123-fix-clock-table-schema-parity.md`
+  - Column renamed `pk` → `key`, added STRICT mode, added `_dbv_idx` index
+- [x] **TASK-124** — Fix site_id preservation on cross-open ✓ `.tasks/done/TASK-124-fix-site-id-cross-open-parity.md`
+  - Added `crsqlite_version|160300` to `crsql_master` on init
+
+### Remaining Divergences (from oracle-parity test)
+- [ ] Merge resolution (Test 3a/3b): Remote wins / site_id tiebreaker differs — needs investigation
 
 ### Parity/Coverage Tasks (ready to assign)
 - [x] **TASK-070** — Cover missing C suites: ext-data + sandbox ✓ `.tasks/done/TASK-070-zig-parity-extdata-sandbox.md`

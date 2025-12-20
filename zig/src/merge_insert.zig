@@ -56,13 +56,13 @@ pub const TableMergeStmts = struct {
 
     // Cached statements - null until first use, then reused
 
-    /// SELECT col_version FROM "{table}__crsql_clock" WHERE pk = ? AND col_name = '-1'
+    /// SELECT col_version FROM "{table}__crsql_clock" WHERE key = ? AND col_name = '-1'
     get_cl_stmt: ?*api.sqlite3_stmt = null,
 
-    /// SELECT 1 FROM "{table}__crsql_clock" WHERE pk = ? LIMIT 1
+    /// SELECT 1 FROM "{table}__crsql_clock" WHERE key = ? LIMIT 1
     row_exists_stmt: ?*api.sqlite3_stmt = null,
 
-    /// SELECT col_version FROM "{table}__crsql_clock" WHERE pk = ? AND col_name = ?
+    /// SELECT col_version FROM "{table}__crsql_clock" WHERE key = ? AND col_name = ?
     get_col_version_stmt: ?*api.sqlite3_stmt = null,
 
     /// INSERT OR REPLACE INTO "{table}__crsql_clock" (...) VALUES (?, ?, ?, ?, ?, ?)
@@ -77,13 +77,13 @@ pub const TableMergeStmts = struct {
     /// DELETE FROM "{table}" WHERE rowid = ?
     delete_base_stmt: ?*api.sqlite3_stmt = null,
 
-    /// DELETE FROM "{table}__crsql_clock" WHERE pk = ? AND col_name != '-1'
+    /// DELETE FROM "{table}__crsql_clock" WHERE key = ? AND col_name != '-1'
     drop_non_sentinel_stmt: ?*api.sqlite3_stmt = null,
 
     /// INSERT INTO "{table}__crsql_pks" (pk, pks) VALUES (?, ?)
     insert_pks_stmt: ?*api.sqlite3_stmt = null,
 
-    /// UPDATE "{table}__crsql_clock" SET col_version = 0 WHERE pk = ? AND col_name != '-1'
+    /// UPDATE "{table}__crsql_clock" SET col_version = 0 WHERE key = ? AND col_name != '-1'
     zero_clock_resurrect_stmt: ?*api.sqlite3_stmt = null,
 
     // SQL buffers for dynamically-generated queries
@@ -111,15 +111,15 @@ pub const TableMergeStmts = struct {
         };
 
         // Pre-format SQL strings (they're used repeatedly)
-        _ = std.fmt.bufPrintZ(&self.sql_get_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_get_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
-        _ = std.fmt.bufPrintZ(&self.sql_row_exists, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE pk = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_row_exists, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE key = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
 
-        _ = std.fmt.bufPrintZ(&self.sql_get_col_version, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = ?", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_get_col_version, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
         _ = std.fmt.bufPrintZ(&self.sql_set_winner_clock,
             \\INSERT OR REPLACE INTO "{s}__crsql_clock"
-            \\  ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+            \\  ("key", "col_name", "col_version", "db_version", "site_id", "seq")
             \\VALUES (?, ?, ?, ?, ?, ?)
         , .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -129,11 +129,11 @@ pub const TableMergeStmts = struct {
 
         _ = std.fmt.bufPrintZ(&self.sql_delete_base, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
-        _ = std.fmt.bufPrintZ(&self.sql_drop_non_sentinel, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_drop_non_sentinel, "DELETE FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
         _ = std.fmt.bufPrintZ(&self.sql_insert_pks, "INSERT INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, ?) ON CONFLICT(pks) DO UPDATE SET base_rowid = excluded.base_rowid", .{table_name}) catch return MergeError.BufferOverflow;
 
-        _ = std.fmt.bufPrintZ(&self.sql_zero_clock_resurrect, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_zero_clock_resurrect, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE key = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
         return self;
     }
@@ -184,13 +184,13 @@ pub const TableMergeStmts = struct {
 /// Get the local causal length (cl) for a row.
 /// Returns 0 if no local row exists.
 ///
-/// Query: SELECT col_version FROM "{table}__crsql_clock" WHERE pk = ? AND col_name = '-1'
+/// Query: SELECT col_version FROM "{table}__crsql_clock" WHERE key = ? AND col_name = '-1'
 /// If no sentinel exists, check if any clock entry exists (return 1 if so, 0 otherwise)
 pub fn getLocalCl(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!i64 {
     var buf: [512]u8 = undefined;
 
     // First try to get sentinel col_version (which stores cl)
-    const sql = std.fmt.bufPrintZ(&buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -206,7 +206,7 @@ pub fn getLocalCl(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError
 
     // No sentinel - check if row exists at all
     var exists_buf: [512]u8 = undefined;
-    const exists_sql = std.fmt.bufPrintZ(&exists_buf, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE pk = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+    const exists_sql = std.fmt.bufPrintZ(&exists_buf, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE key = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
 
     var exists_stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, exists_sql, -1, &exists_stmt, null) != api.SQLITE_OK) {
@@ -227,7 +227,7 @@ pub fn getLocalCl(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError
 /// Returns 0 if no local entry exists.
 pub fn getLocalColVersion(db: ?*api.sqlite3, table_name: []const u8, pk: i64, col_name: []const u8) MergeError!i64 {
     var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = ?", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -472,7 +472,7 @@ pub fn rowExistsInBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) 
 /// Used when merging a remote delete - removes column clock entries but keeps the sentinel.
 pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
     var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -494,7 +494,7 @@ pub fn dropNonSentinelClocks(db: ?*api.sqlite3, table_name: []const u8, pk: i64)
 /// This matches the Rust impl's `zero_clocks_on_resurrect`.
 pub fn zeroClockOnResurrect(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
     var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE key = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {

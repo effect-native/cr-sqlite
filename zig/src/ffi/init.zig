@@ -26,6 +26,14 @@ const sync_bit = @import("../sync_bit.zig");
 /// This is returned by the `crsql_zig_version()` SQL function.
 pub const CRSQL_ZIG_VERSION = "0.0.1-zig-scaffold";
 
+/// CR-SQLite version as integer (for crsql_master compatibility with Rust/C).
+/// Format: MAJOR * 10000 + MINOR * 100 + PATCH
+/// Rust/C uses 160300 (16.3.0), so we match that for cross-implementation compatibility.
+/// When Rust/C opens a database, it checks this version to determine if the database
+/// was properly initialized. Without this, Rust/C treats the database as uninitialized
+/// and may overwrite the site_id.
+pub const CRSQLITE_VERSION_INT: i64 = 160300;
+
 /// Implementation of the `crsql_zig_version()` SQL function.
 /// Returns the version string to prove the extension loaded correctly.
 fn crsqlZigVersionFunc(
@@ -38,6 +46,25 @@ fn crsqlZigVersionFunc(
 }
 
 
+
+/// Write the crsqlite_version to crsql_master table.
+/// Uses INSERT OR IGNORE to avoid overwriting an existing version.
+fn writeVersionToMaster(db: ?*api.sqlite3) c_int {
+    const sql = "INSERT OR IGNORE INTO \"crsql_master\" (\"key\", \"value\") VALUES ('crsqlite_version', ?)";
+    var stmt: ?*api.sqlite3_stmt = null;
+    var rc = api.prepare_v2(db, sql, -1, &stmt, null);
+    if (rc != api.SQLITE_OK) return rc;
+    defer _ = api.finalize(stmt);
+
+    rc = api.bind_int64(stmt, 1, CRSQLITE_VERSION_INT);
+    if (rc != api.SQLITE_OK) return rc;
+
+    rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE and rc != api.SQLITE_ROW) {
+        return api.SQLITE_ERROR;
+    }
+    return api.SQLITE_OK;
+}
 
 /// Register all CR-SQLite functions with the database connection.
 fn registerFunctions(db: ?*api.sqlite3) c_int {
@@ -174,6 +201,17 @@ pub export fn sqlite3_crsqlite_init(
     );
     if (create_master_rc != api.SQLITE_OK) {
         return create_master_rc;
+    }
+
+    // Write the crsqlite_version to crsql_master for cross-implementation compatibility.
+    // This is critical: when Rust/C opens a Zig-created database, it checks this version
+    // to determine if the database is properly initialized. Without this version entry,
+    // Rust/C treats the database as uninitialized and may generate a new site_id,
+    // breaking cross-implementation sync.
+    // Using INSERT OR IGNORE so we don't overwrite an existing version on re-open.
+    const write_version_rc = writeVersionToMaster(db);
+    if (write_version_rc != api.SQLITE_OK) {
+        return write_version_rc;
     }
 
     // Initialize site_id (creates table if needed, loads or generates site_id)

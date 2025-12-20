@@ -377,12 +377,12 @@ fn deleteOrphanedClockEntries(db: ?*api.sqlite3, table_name: [*:0]const u8) !voi
     //   - col_name = '-1' AND col_version is odd (not a tombstone, since even = deleted)
     // AND there's no corresponding row in the base table (checked via rowid)
     //
-    // The pk column in __crsql_clock stores the rowid of the base table row.
-    // We check if that rowid still exists in the base table.
+    // The key column in __crsql_clock references pk in __crsql_pks table.
+    // We check if that key still points to an existing base table row.
     const sql = std.fmt.bufPrintZ(&buf,
         \\DELETE FROM "{s}__crsql_clock" 
         \\WHERE (col_name != '-1' OR (col_name = '-1' AND col_version % 2 != 0))
-        \\  AND pk NOT IN (SELECT rowid FROM "{s}")
+        \\  AND key NOT IN (SELECT rowid FROM "{s}")
     , .{ table_name, table_name }) catch return error.BufferOverflow;
 
     if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
@@ -397,7 +397,7 @@ fn deleteOrphanedPkLookasides(db: ?*api.sqlite3, table_name: [*:0]const u8) !voi
 
     const sql = std.fmt.bufPrintZ(&buf,
         \\DELETE FROM "{s}__crsql_pks" WHERE pk NOT IN (
-        \\  SELECT pk FROM "{s}__crsql_clock"
+        \\  SELECT key FROM "{s}__crsql_clock"
         \\)
     , .{ table_name, table_name }) catch return error.BufferOverflow;
 
@@ -655,11 +655,11 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         if (col.pk_index == 0) {
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  SELECT
                 \\    NEW.rowid,
                 \\    '{s}',
-                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = NEW.rowid AND col_name = '{s}'), 0) + 1,
+                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE key = NEW.rowid AND col_name = '{s}'), 0) + 1,
                 \\    crsql_next_db_version(),
                 \\    0,
                 \\    crsql_increment_and_get_seq()
@@ -705,12 +705,12 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\BEGIN
         \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  SELECT
         \\    OLD.rowid,
         \\    '-1',
         \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE pk = OLD.rowid AND col_name = '-1'),
+        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE key = OLD.rowid AND col_name = '-1'),
         \\      2
         \\    ),
         \\    crsql_next_db_version(),
@@ -718,7 +718,7 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\    crsql_increment_and_get_seq();
         \\  -- Drop all clock entries except the sentinel
         \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE pk = OLD.rowid AND col_name IS NOT '-1';
+        \\  WHERE key = OLD.rowid AND col_name IS NOT '-1';
         \\END;
     , .{ table_name, table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
 

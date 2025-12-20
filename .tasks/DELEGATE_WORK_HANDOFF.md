@@ -68,6 +68,84 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (52) — Fix clock schema + site_id cross-open parity (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-123-fix-clock-table-schema-parity.md`
+- `.tasks/done/TASK-124-fix-site-id-cross-open-parity.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-oracle-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-123: Clock table schema parity (PASS)</summary>
+
+```text
+Test 2: Clock Table Schema Parity
+Test 2a: __crsql_clock table columns
+  PASS: __crsql_clock schema matches
+Test 2b: __crsql_clock index structure
+  PASS: __crsql_clock index count matches (1)
+```
+
+**Fix:** Renamed `pk` column to `key` in clock table, added STRICT mode, added `_dbv_idx` index on `db_version`.
+
+Files modified:
+- `zig/src/as_crr.zig` — clock table creation, triggers, backfill
+- `zig/src/merge_insert.zig` — statement caches and helper functions
+- `zig/src/schema_alter.zig` — alter table triggers and cleanup
+- `zig/src/changes_vtab.zig` — changes virtual table queries
+</details>
+
+<details>
+<summary>TASK-124: Site ID cross-open parity (PASS)</summary>
+
+```text
+Test 4b: Cross-open Zig DB with Rust/C preserves site_id
+  PASS: Rust/C reads Zig's site_id correctly: C43B2B534A75413C9A212C62203D6F7F
+Test 4c: Cross-open Rust/C DB with Zig preserves site_id
+  PASS: Zig reads Rust/C's site_id correctly: F58E991645D24B868C61EF88871EF980
+```
+
+**Fix:** Added `crsqlite_version|160300` to `crsql_master` during init. Rust/C checks for this version entry before accepting an existing site_id.
+
+Files modified:
+- `zig/src/ffi/init.zig` — added version writing logic
+</details>
+
+<details>
+<summary>Oracle parity test summary</summary>
+
+```text
+Oracle Parity Test Summary
+Results: 16 passed, 2 failed, 0 skipped
+```
+
+Remaining failures (Test 3a/3b) are **merge resolution** divergences — unrelated to TASK-123/124.
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-oracle-parity.sh` — verify Test 2a, 2b, 4b, 4c pass
+
+**Known gaps / unverified claims**
+- 2 remaining oracle parity failures (merge resolution Test 3a/3b) are pre-existing
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (51) — Fix remaining oracle divergences (2 tasks)
 
 **Tasks executed**

@@ -704,10 +704,10 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 
     const table_name = table_names.?[cursor.current_table_idx];
 
-    // Build query: SELECT pk, col_name, col_version, db_version, site_id, seq FROM <table>__crsql_clock
-    // Note: clock table is WITHOUT ROWID, so we synthesize rowid from pk
+    // Build query: SELECT key, col_name, col_version, db_version, site_id, seq FROM <table>__crsql_clock
+    // Note: clock table is WITHOUT ROWID, so we synthesize rowid from key
     // The columns val and cl require joining with base table/pks - fetched separately in changesColumn
-    // Column order: 0=pk, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
+    // Column order: 0=key, 1=col_name, 2=col_version, 3=db_version, 4=site_id, 5=seq
     // Exclude sentinel rows (col_name = '-1') from output - they're metadata only
     var sql_buf: [1024]u8 = undefined;
 
@@ -715,19 +715,19 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
     // Note: We only push down the db_version filter to SQL query.
     // Site_id filter is applied in shouldSkipSiteId since it requires ordinal lookup.
     const sql = switch (cursor.filter_db_version_type) {
-        IDX_DB_VERSION_GT => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version > ?", .{table_name}) catch {
+        IDX_DB_VERSION_GT => std.fmt.bufPrintZ(&sql_buf, "SELECT key, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version > ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
         },
-        IDX_DB_VERSION_GE => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version >= ?", .{table_name}) catch {
+        IDX_DB_VERSION_GE => std.fmt.bufPrintZ(&sql_buf, "SELECT key, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version >= ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
         },
-        IDX_DB_VERSION_LT => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version < ?", .{table_name}) catch {
+        IDX_DB_VERSION_LT => std.fmt.bufPrintZ(&sql_buf, "SELECT key, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version < ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
         },
-        IDX_DB_VERSION_LE => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version <= ?", .{table_name}) catch {
+        IDX_DB_VERSION_LE => std.fmt.bufPrintZ(&sql_buf, "SELECT key, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\" WHERE db_version <= ?", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
         },
-        else => std.fmt.bufPrintZ(&sql_buf, "SELECT pk, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
+        else => std.fmt.bufPrintZ(&sql_buf, "SELECT key, col_name, col_version, db_version, site_id, seq FROM \"{s}__crsql_clock\"", .{table_name}) catch {
             return vtab.SQLITE_ERROR;
         },
     };
@@ -1099,7 +1099,7 @@ fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []cons
 /// (meaning the row exists - odd cl = live).
 fn fetchCausalLength(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64) i64 {
     var sql_buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = '-1'", .{table_name}) catch {
+    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = '-1'", .{table_name}) catch {
         return 1; // Default to 1 (live) on error
     };
 
@@ -1873,9 +1873,9 @@ fn changesUpdate(
                             // If enabled (default), tie-break on site_id (larger site_id wins)
                             const merge_equal = config.getMergeEqualValues(api_db);
                             if (merge_equal == 1) {
-                                // Get local site_id from clock table for this column
-                                var sid_buf: [512]u8 = undefined;
-                                if (std.fmt.bufPrintZ(&sid_buf, "SELECT site_id FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = ?", .{table_slice})) |sid_sql| {
+                            // Get local site_id from clock table for this column
+                            var sid_buf: [512]u8 = undefined;
+                            if (std.fmt.bufPrintZ(&sid_buf, "SELECT site_id FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ?", .{table_slice})) |sid_sql| {
                                     var sid_stmt: ?*api.sqlite3_stmt = null;
                                     if (api.prepare_v2(api_db, sid_sql, -1, &sid_stmt, null) == api.SQLITE_OK) {
                                         defer _ = api.finalize(sid_stmt);
