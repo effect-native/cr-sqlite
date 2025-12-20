@@ -8,6 +8,7 @@
 const std = @import("std");
 const api = @import("api.zig");
 const as_crr = @import("../as_crr.zig");
+const automigrate = @import("../automigrate.zig");
 const changes_vtab = @import("../changes_vtab.zig");
 const finalize = @import("../finalize.zig");
 const fract_index = @import("../fract_index.zig");
@@ -103,6 +104,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_fract_key_between() function
     rc = fract_index.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_automigrate() function
+    rc = automigrate.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

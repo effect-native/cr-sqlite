@@ -3,6 +3,7 @@
 //! This is a port of CR-SQLite from C/Rust to Zig.
 //! See `research/zig-cr/` for design documents.
 
+pub const automigrate = @import("automigrate.zig");
 pub const codec = @import("codec.zig");
 pub const compare_values = @import("compare_values.zig");
 pub const ffi = @import("ffi/root.zig");

@@ -740,6 +740,29 @@ pub fn get_autocommit(db: ?*c.sqlite3) c_int {
 }
 
 // =============================================================================
+// Database Connection (for in-memory databases in automigrate)
+// =============================================================================
+
+/// Wrapper for sqlite3_open
+/// Opens a database connection. Use ":memory:" for an in-memory database.
+pub fn open(filename: [*:0]const u8, ppDb: *?*c.sqlite3) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.open orelse return SQLITE_MISUSE;
+    return func(filename, ppDb);
+}
+
+/// Wrapper for sqlite3_close_v2
+/// Closes a database connection. This is the preferred close function as it
+/// defers resource reclamation until all references are released.
+pub fn close_v2(db: ?*c.sqlite3) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.close_v2 orelse return SQLITE_MISUSE;
+    return func(db);
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
