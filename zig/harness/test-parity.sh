@@ -18,6 +18,7 @@
 #   - test-backfill.sh: crsql_as_crr() backfill on existing data
 #   - test-persistence.sh: On-disk DB persistence across sessions
 #   - test-pk-update.sh: Primary key UPDATE semantics (DELETE+INSERT)
+#   - test-extdata.sh: ExtData lifecycle (schema changes, table tracking)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -716,6 +717,26 @@ else
         echo "  PK UPDATE tests: $PKUPDATE_PASS passed, $PKUPDATE_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + PKUPDATE_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + PKUPDATE_FAIL))
+    fi
+fi
+
+# Run ExtData lifecycle tests (schema changes, table tracking, db_version)
+echo "Running test-extdata.sh..."
+if bash "$SCRIPT_DIR/test-extdata.sh" > "$TMPFILE" 2>&1; then
+    EXTDATA_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || EXTDATA_PASS=0
+    echo "  ExtData tests: $EXTDATA_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + EXTDATA_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  ExtData tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 15))
+    else
+        EXTDATA_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || EXTDATA_FAIL=0
+        EXTDATA_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || EXTDATA_PASS=0
+        echo "  ExtData tests: $EXTDATA_PASS passed, $EXTDATA_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + EXTDATA_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + EXTDATA_FAIL))
     fi
 fi
 

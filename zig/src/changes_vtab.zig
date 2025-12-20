@@ -750,12 +750,21 @@ fn prepareCurrentTableQuery(cursor: *ChangesCursor, db: ?*vtab.sqlite3) c_int {
 }
 
 /// Check if the current row is a sentinel row (col_name = '-1')
-/// Sentinel rows are metadata-only and should be excluded from crsql_changes output
+/// Sentinel rows with EVEN col_version are tombstones (deleted rows) and MUST be included
+/// for sync to work correctly. Only odd col_version sentinels (row-creation markers) are filtered.
+/// Reference: CR-SQLite uses even col_version = deleted, odd = live
 fn isSentinelRow(stmt: ?*api.sqlite3_stmt) bool {
     const col_name_ptr = columnTextFromStmt(stmt, 1);
     if (col_name_ptr) |cn| {
         const col_name_slice = std.mem.span(cn);
-        return std.mem.eql(u8, col_name_slice, "-1");
+        if (std.mem.eql(u8, col_name_slice, "-1")) {
+            // This is a sentinel row - check col_version to determine if it's a tombstone
+            const col_version = columnInt64FromStmt(stmt, 2);
+            // Even col_version = deleted (tombstone) -> include in crsql_changes
+            // Odd col_version = live (row-creation marker) -> exclude from crsql_changes
+            // We return true (skip) only for odd (live) sentinels
+            return @mod(col_version, 2) == 1;
+        }
     }
     return false;
 }

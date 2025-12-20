@@ -2,16 +2,16 @@
 
 ## Status
 - [x] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete
 
 ## Priority
 high
 
 ## Assigned To
-(unassigned)
+(completed)
 
 ## Parent Docs / Cross-links
 - Spec task: `.tasks/triage/TASK-077-spec-as-crr-backfill.md` (triage → move to backlog/done as appropriate)
@@ -47,8 +47,8 @@ When `crsql_as_crr()` is called on a table with existing data:
 - `research/zig-cr/92-gap-backlog.md`
 
 ## Acceptance Criteria
-- [ ] `bash zig/harness/test-backfill.sh` passes all 12 tests
-- [ ] No regression in `make -C zig test-parity`
+- [x] `bash zig/harness/test-backfill.sh` passes all 12 tests
+- [x] No regression in `make -C zig test-parity`
 
 ### Test Cases to Pass (from test-backfill.sh)
 1. Empty table baseline (PASS - already works)
@@ -66,11 +66,11 @@ When `crsql_as_crr()` is called on a table with existing data:
 
 ## Reproducible Command
 ```bash
-# Run backfill tests (currently 1 PASS, 11 FAIL)
+# Run backfill tests (NOW: 12 PASS, 0 FAIL)
 bash zig/harness/test-backfill.sh
 
 # Current output:
-# Backfill Tests Summary: 1 passed, 11 failed
+# Backfill Tests Summary: 12 passed, 0 failed
 ```
 
 ## Progress Log
@@ -82,4 +82,30 @@ bash zig/harness/test-backfill.sh
 - Tests wired into `zig/harness/test-parity.sh`
 - Current status: 1 PASS (empty table), 11 FAIL (backfill not implemented)
 
+### 2025-12-20 (completion)
+- Implemented `backfillExistingRows()` function in `zig/src/as_crr.zig`
+- Algorithm follows Rust reference (`core/rs/core/src/backfill.rs`):
+  1. Use savepoint for atomicity
+  2. Query rows not yet in pks table via `WHERE rowid NOT IN (SELECT pk FROM table__crsql_pks)`
+  3. For each row: insert into pks table and create clock entries for each non-PK column
+  4. Use `INSERT OR IGNORE` for idempotency
+  5. Use `crsql_next_db_version()` and `crsql_increment_and_get_seq()` for proper versioning
+
 ## Completion Notes
+**Date:** 2025-12-20
+
+**Files Changed:**
+- `zig/src/as_crr.zig` - Added `backfillExistingRows()` function (~240 lines)
+
+**What was implemented:**
+- Backfill is called after creating CRR tables and triggers in `crsqlAsCrrFunc()`
+- Queries existing rows that don't have pks entries yet
+- Inserts packed PK blob into `__crsql_pks` table
+- Creates clock entries for each non-PK column with `col_version=1`
+- Uses `crsql_next_db_version()` for proper Lamport clock semantics
+- Uses `INSERT OR IGNORE` to make the operation idempotent
+- Wrapped in savepoint for atomicity with proper rollback on error
+
+**Test Results:**
+- All 12 backfill tests pass
+- No regressions in existing parity tests

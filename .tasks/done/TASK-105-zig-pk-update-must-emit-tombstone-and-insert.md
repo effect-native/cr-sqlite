@@ -1,17 +1,17 @@
-# TASK-103: Zig PK UPDATE must emit tombstone + new insert
+# TASK-105: Zig PK UPDATE must emit tombstone + new insert
 
 ## Status
-- [ ] Planned
-- [ ] Assigned
-- [ ] In Progress
+- [x] Planned
+- [x] Assigned
+- [x] In Progress
 - [ ] Blocked (reason: ...)
-- [ ] Complete
+- [x] Complete (partial — integer PK complete, compound/text PK needs follow-up)
 
 ## Priority
 high
 
 ## Assigned To
-(unassigned)
+delegate-round-42
 
 ## Parent Docs / Cross-links
 - Triggered by: `.tasks/active/TASK-095-zig-test-pk-update-semantics.md`
@@ -64,4 +64,18 @@ bash zig/harness/test-pk-update.sh
 - Added PK UPDATE harness test in TASK-095; test fails against Zig extension.
 - Confirmed expected behavior via `nix run github:subtleGradient/sqlite-cr`.
 
+### 2025-12-20 (delegate round 42)
+- Implemented `createPkUpdateTrigger` in `zig/src/as_crr.zig`
+- Modified `isSentinelRow` in `zig/src/changes_vtab.zig` for tombstone visibility
+- Results: **11 PASS, 5 FAIL** (up from 0 PASS originally)
+- Passing: All integer PK tests (single-column, sequential updates)
+- Failing: Compound PK and text PK tombstone tests (architectural limitation)
+
 ## Completion Notes
+### 2025-12-20
+- **Partial completion**: Integer PK UPDATE works correctly
+- Files modified:
+  - `zig/src/as_crr.zig` - Added `createPkUpdateTrigger` function
+  - `zig/src/changes_vtab.zig` - Fixed `isSentinelRow` for tombstone visibility
+- Known limitation: Compound/text PKs where rowid doesn't change cause sentinel overwrite
+- Follow-up task created: `.tasks/backlog/TASK-110-zig-pk-update-compound-text-pk.md`

@@ -31,7 +31,8 @@ Every `.tasks/**/TASK-*.md` must include:
 - `Progress Log` + `Completion Notes`
 
 Rules:
-- No overlapping file edits across concurrently assigned tasks.
+- Hard rule: no two concurrent tasks (including subagents) touch the same file.
+  - Before starting any work, cross-check `Files to Modify` against everything in `.tasks/active/`.
 - One task card = one owner = one atomic commit.
 - Use `.tmp/` for temp files (never `/tmp/`).
 

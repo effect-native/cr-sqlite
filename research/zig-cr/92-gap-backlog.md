@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (task queue hygiene + links refreshed)
+> Last updated: 2025-12-20 (delegate round 42 — backfill impl, extdata tests, pk-update partial)
 
 ## Status
 
@@ -24,10 +24,15 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ### New Test Tasks (from TASK-073 coverage analysis)
 - [x] **TASK-095** — Zig test for PK UPDATE semantics ✓ `.tasks/done/TASK-095-zig-test-pk-update-semantics.md`
-  - Test exists and is wired into suite; currently fails against Zig (implementation gap)
+  - Test exists and is wired into suite
+  - **TASK-105** partial impl: 11/16 tests pass (integer PK complete, compound/text PK needs follow-up)
+  - [ ] **TASK-110** — Compound/text PK tombstone fix → `.tasks/backlog/TASK-110-zig-pk-update-compound-text-pk.md`
 - [x] **TASK-096** — Zig test for backfill verification ✓ `.tasks/done/TASK-096-zig-test-backfill-verification.md`
-  - Test exists and is wired into suite; currently fails against Zig (implementation gap)
-- [ ] **TASK-097** — Zig ExtData lifecycle parity test → `.tasks/backlog/TASK-097-zig-extdata-lifecycle-test.md`
+  - Test exists and is wired into suite
+  - **TASK-078 complete**: All 12 backfill tests pass ✓
+- [x] **TASK-097** — Zig ExtData lifecycle parity test ✓ `.tasks/done/TASK-097-zig-extdata-lifecycle-test.md`
+  - 15 tests created, all pass
+  - Oracle parity confirmed (no divergences)
 - [x] **TASK-098** — Zig on-disk DB persistence tests ✓ `.tasks/done/TASK-098-zig-ondisk-db-tests.md`
 - [x] **TASK-099** — Zig multi-connection parity test ✓ `.tasks/done/TASK-099-zig-multiconn-test.md`
 
@@ -35,7 +40,8 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [ ] **TASK-075** — Spec `crsql_automigrate` behavior → `.tasks/backlog/TASK-075-spec-automigrate.md`
 - [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md`
 - [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
-- [ ] **TASK-078** — Implement `crsql_as_crr` backfill in Zig → `.tasks/backlog/TASK-078-impl-as-crr-backfill.md`
+- [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
+  - All 12 backfill tests pass
 - [ ] **TASK-079** — Spec `clset` virtual table module → `.tasks/backlog/TASK-079-spec-clset-vtab.md`
 - [ ] **TASK-080** — Implement `clset` module in Zig → `.tasks/backlog/TASK-080-impl-clset-vtab.md`
 - [ ] **TASK-081** — Spec `crsql_unpack_columns` vtab → `.tasks/backlog/TASK-081-spec-unpack-columns-vtab.md`
@@ -78,13 +84,13 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 | Rust Suite | Zig Coverage | Status |
 |------------|--------------|--------|
 | automigrate.rs | MISSING | Blocked (TASK-075/076) |
-| backfill.rs | Partial | TASK-096 (test exists; implementation missing) |
+| backfill.rs | ✓ | TASK-096 + TASK-078 (all 12 tests pass) |
 | pack_columns.rs | MISSING | Blocked (TASK-081/082) |
-| pk_only_tables.rs | Partial | TASK-095 (test exists; implementation missing) |
-| pk_update.rs | MISSING | TASK-095 (test exists; implementation missing) |
+| pk_only_tables.rs | Partial | TASK-095 (test exists) |
+| pk_update.rs | Partial | TASK-105 (11/16 pass; TASK-110 for compound/text PK) |
 | test_db_version.rs | test-db-version-parity.sh | ✓ |
 | test_cl_set_vtab.rs | MISSING | Blocked (TASK-079/080) |
-| tableinfo.rs | MISSING | TASK-097 created |
+| tableinfo.rs | ✓ | TASK-097 (15 tests, all pass) |
 | teardown.rs | test-is-crr.sh | ✓ |
 | fract.rs | test-fract*.sh | ✓ |
 | sync_bit_honored.rs | test-sync-bit-isolation.sh | ✓ (TASK-072) |
@@ -100,7 +106,7 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 | changes-vtab.test.c | test-filters.sh | ✓ |
 | changes-vtab-rowid.test.c | test-rowid-slab.sh | ✓ |
 | crsqlite.test.c | test-e2e-sync.sh, test-alter.sh | ✓ |
-| ext-data.test.c | MISSING | TASK-097 created |
+| ext-data.test.c | ✓ | TASK-097 (test-extdata.sh, 15 tests) |
 
 ### Real-System Gaps (HIGH priority)
 
@@ -121,6 +127,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ## Done (recent)
 
+- **Round 42 (2025-12-20)**: 
+  - TASK-078: Backfill implementation complete (12/12 tests pass)
+  - TASK-097: ExtData lifecycle tests (15/15 tests pass, oracle parity confirmed)
+  - TASK-105: PK UPDATE partial (11/16 tests pass — integer PK complete, compound/text PK needs TASK-110)
 - TASK-073: Coverage map complete, 5 new test tasks created
 - MVP completed (all tests green) — see previous state in `research/zig-cr/92-gap-backlog.md` history
 
