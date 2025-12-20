@@ -90,21 +90,21 @@ INSERT INTO foo VALUES (1, 'from_conn1');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Conn2: Open same file, verify data visible
     count=$(run_sql "$ZIG_EXT" "$DB_ZIG" "SELECT COUNT(*) FROM foo;" | tail -1)
     if [[ "$count" == "1" ]]; then
-        echo "  [Zig] PASS: Insert from conn1 visible on conn2"
+        echo "  PASS: Insert from conn1 visible on conn2"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "  [Zig] FAIL: Expected 1 row, got: $count"
+        echo "  FAIL: Expected 1 row, got: $count"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 fi
 
-# Oracle parity (Rust/C)
+# Oracle parity (Rust/C) - informational, not counted
 if [[ "$HAVE_ORACLE" == "true" ]]; then
     run_sql "$RUST_EXT" "$DB_RUST" "
 CREATE TABLE foo (id INTEGER PRIMARY KEY NOT NULL, value TEXT);
@@ -114,10 +114,9 @@ INSERT INTO foo VALUES (1, 'from_conn1');
 
     rust_count=$(run_sql "$RUST_EXT" "$DB_RUST" "SELECT COUNT(*) FROM foo;" | tail -1)
     if [[ "$rust_count" == "1" ]]; then
-        echo "  [Rust/C] PASS: Insert from conn1 visible on conn2"
-        echo "  PARITY: Both extensions behave identically"
+        echo "  [Oracle] OK: Rust/C also sees 1 row (parity confirmed)"
     else
-        echo "  [Rust/C] Result: $rust_count"
+        echo "  [Oracle] Result: $rust_count"
     fi
 fi
 
@@ -140,7 +139,7 @@ SELECT crsql_as_crr('items');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Interleaved inserts (each is a separate connection)
@@ -151,15 +150,15 @@ else
     
     count=$(run_sql "$ZIG_EXT" "$DB_ZIG" "SELECT COUNT(*) FROM items;" | tail -1)
     if [[ "$count" == "4" ]]; then
-        echo "  [Zig] PASS: All 4 interleaved inserts present"
+        echo "  PASS: All 4 interleaved inserts present"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "  [Zig] FAIL: Expected 4 rows, got: $count"
+        echo "  FAIL: Expected 4 rows, got: $count"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 fi
 
-# Oracle parity
+# Oracle parity - informational, not counted
 if [[ "$HAVE_ORACLE" == "true" ]]; then
     run_sql "$RUST_EXT" "$DB_RUST" "
 CREATE TABLE items (id INTEGER PRIMARY KEY NOT NULL, source TEXT);
@@ -172,10 +171,9 @@ SELECT crsql_as_crr('items');
     
     rust_count=$(run_sql "$RUST_EXT" "$DB_RUST" "SELECT COUNT(*) FROM items;" | tail -1)
     if [[ "$rust_count" == "4" ]]; then
-        echo "  [Rust/C] PASS: All 4 interleaved inserts present"
-        echo "  PARITY: Both extensions behave identically"
+        echo "  [Oracle] OK: Rust/C also has 4 rows (parity confirmed)"
     else
-        echo "  [Rust/C] Result: $rust_count rows"
+        echo "  [Oracle] Result: $rust_count rows"
     fi
 fi
 
@@ -198,7 +196,7 @@ INSERT INTO notes VALUES (1, 'First note');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Add column via crsql_begin_alter/crsql_commit_alter
@@ -209,7 +207,7 @@ SELECT crsql_commit_alter('notes');
 ")
     
     if echo "$alter_output" | grep -q "no such function: crsql_begin_alter"; then
-        echo "  [Zig] SKIP: crsql_begin_alter not implemented"
+        echo "  SKIP: crsql_begin_alter not implemented"
         SKIP_COUNT=$((SKIP_COUNT + 1))
     else
         # Verify new column exists
@@ -219,10 +217,10 @@ SELECT id, title, body FROM notes WHERE id = 2;
 ")
         
         if echo "$insert_output" | grep -q "Second note"; then
-            echo "  [Zig] PASS: Schema change visible across connections"
+            echo "  PASS: Schema change visible across connections"
             PASS_COUNT=$((PASS_COUNT + 1))
         else
-            echo "  [Zig] FAIL: Schema change not visible"
+            echo "  FAIL: Schema change not visible"
             echo "  Output: $insert_output"
             FAIL_COUNT=$((FAIL_COUNT + 1))
         fi
@@ -247,7 +245,7 @@ SELECT crsql_as_crr('data');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Get initial version
@@ -267,14 +265,14 @@ else
     # Conn1: Should see updated version
     ver4=$(run_sql "$ZIG_EXT" "$DB_ZIG" "SELECT crsql_db_version();" | tail -1)
     
-    echo "  [Zig] Versions: v0=$ver0 v1=$ver1 v2=$ver2 v3=$ver3 v4=$ver4"
+    echo "  Versions: v0=$ver0 v1=$ver1 v2=$ver2 v3=$ver3 v4=$ver4"
     
     # Verify monotonic increase
     if [[ "$ver1" -gt "$ver0" && "$ver3" -gt "$ver1" && "$ver4" -ge "$ver3" ]]; then
-        echo "  [Zig] PASS: db_version monotonically increases"
+        echo "  PASS: db_version monotonically increases"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "  [Zig] FAIL: db_version not monotonically increasing"
+        echo "  FAIL: db_version not monotonically increasing"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 fi
@@ -297,7 +295,7 @@ SELECT crsql_as_crr('records');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Multiple connections insert
@@ -311,10 +309,10 @@ else
     
     # Each insert should generate at least one change (for the 'name' column)
     if [[ "$record_count" == "3" && "$change_count" -ge "3" ]]; then
-        echo "  [Zig] PASS: $record_count records, $change_count changes tracked"
+        echo "  PASS: $record_count records, $change_count changes tracked"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "  [Zig] FAIL: Expected 3 records and >=3 changes"
+        echo "  FAIL: Expected 3 records and >=3 changes"
         echo "    Got: $record_count records, $change_count changes"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
@@ -344,7 +342,7 @@ SELECT crsql_as_crr('events');
 ")
 
 if echo "$output" | grep -q "no such function: crsql_as_crr"; then
-    echo "  [Zig] BLOCKED: crsql_as_crr not implemented"
+    echo "  BLOCKED: crsql_as_crr not implemented"
     SKIP_COUNT=$((SKIP_COUNT + 1))
 else
     # Multiple connections insert different data
@@ -357,15 +355,15 @@ else
     row_count=$(run_sql "$ZIG_EXT" "$DB_ZIG" "SELECT COUNT(*) FROM events;" | tail -1)
     
     if [[ "$row_count" == "4" ]]; then
-        echo "  [Zig] PASS: All 4 events present (compound PK works)"
+        echo "  PASS: All 4 events present (compound PK works)"
         PASS_COUNT=$((PASS_COUNT + 1))
     else
-        echo "  [Zig] FAIL: Expected 4 events, got: $row_count"
+        echo "  FAIL: Expected 4 events, got: $row_count"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 fi
 
-# Oracle parity
+# Oracle parity - informational, not counted
 if [[ "$HAVE_ORACLE" == "true" ]]; then
     run_sql "$RUST_EXT" "$DB_RUST" "
 CREATE TABLE events (
@@ -384,21 +382,21 @@ SELECT crsql_as_crr('events');
     rust_count=$(run_sql "$RUST_EXT" "$DB_RUST" "SELECT COUNT(*) FROM events;" | tail -1)
     
     if [[ "$rust_count" == "4" ]]; then
-        echo "  [Rust/C] PASS: All 4 events present"
+        echo "  [Oracle] OK: Rust/C also has 4 events (parity confirmed)"
         
         # Compare final state for parity (filter out error messages)
         zig_state=$(run_sql "$ZIG_EXT" "$DB_ZIG" "SELECT user_id, event_id, event_type FROM events ORDER BY user_id, event_id;" | grep -v "^Error:")
         rust_state=$(run_sql "$RUST_EXT" "$DB_RUST" "SELECT user_id, event_id, event_type FROM events ORDER BY user_id, event_id;" | grep -v "^Error:")
         
         if [[ "$zig_state" == "$rust_state" ]]; then
-            echo "  PARITY: Zig and Rust/C final states identical"
+            echo "  [Oracle] Final states identical"
         else
             echo "  DIVERGENCE: Final states differ"
             echo "    Zig: $zig_state"
             echo "    Rust/C: $rust_state"
         fi
     else
-        echo "  [Rust/C] Result: $rust_count rows"
+        echo "  [Oracle] Result: $rust_count rows"
     fi
 fi
 

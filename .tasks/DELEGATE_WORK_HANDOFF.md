@@ -68,6 +68,101 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (44) — Test harness fixes + clset spec (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-118-fix-automigrate-test-shell-quoting.md`
+- `.tasks/done/TASK-079-spec-clset-vtab.md`
+- `.tasks/done/TASK-108-fix-parity-pass-counting-multiconn.md`
+
+**Commits**
+- `bfae40ff` — delegate round 44: test harness fixes + clset spec
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-automigrate.sh
+bash zig/harness/test-clset-vtab.sh
+bash zig/harness/test-multiconn.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-118: test-automigrate.sh (17/17 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║                           TEST SUMMARY                               ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  17                                                         ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+✓ All tests PASSED
+```
+
+**Fix**: Tests 9 and 10 failed due to shell quoting issues. Fixed by:
+- Test 9: Split SCHEMA into SCHEMA_SETUP (single quotes) and SCHEMA_ARG (doubled quotes for SQL literal)
+- Test 10: Changed from bash single-quoted to double-quoted string with escaped double quotes for SQL identifiers
+</details>
+
+<details>
+<summary>TASK-079: test-clset-vtab.sh (0/1 pass, 9 skipped — RED as expected)</summary>
+
+```text
+clset Virtual Table Tests Summary: 0 passed, 1 failed, 9 skipped
+Some clset tests FAILED
+```
+
+This is **correct behavior** (RED phase of RGRTDD). The clset module is not yet implemented in Zig.
+
+**Tests created**:
+1. CREATE VIRTUAL TABLE foo_schema USING clset(...) succeeds
+2. Creating without _schema suffix fails with error
+3. Physical base table 'foo' exists
+4. Clock table 'foo__crsql_clock' exists
+5. PKs table 'foo__crsql_pks' exists
+6. Base table is a CRR
+7. INSERT creates change records
+8. DROP TABLE removes all tables
+9. CREATE without PRIMARY KEY fails
+10. CREATE IF NOT EXISTS is idempotent
+</details>
+
+<details>
+<summary>TASK-108: test-multiconn.sh (6 pass, fixed counting)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║              MULTI-CONNECTION TEST SUMMARY                           ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  6                                                          ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+```
+
+**Fix**: Changed `[Rust/C] PASS:` to `[Oracle] OK:` so test-parity.sh grep counts only Zig test results (6) not oracle confirmations (was adding +3 extra).
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-automigrate.sh` — verify 17/17 pass
+3. `bash zig/harness/test-clset-vtab.sh` — verify 0/1 pass (RED expected)
+4. `bash zig/harness/test-multiconn.sh` — verify 6/6 pass
+
+**Known gaps / unverified claims**
+- TASK-079 tests are intentionally RED (spec-only, no impl)
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (43) — PK-only sentinel, C suite parity, automigrate (3 tasks)
 
 **Tasks executed**

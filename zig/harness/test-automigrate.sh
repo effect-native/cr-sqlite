@@ -592,19 +592,28 @@ echo "Test 9: Idempotent - running same migration twice is safe"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-SCHEMA="
+# Schema for initial setup (uses single quotes for SQL)
+SCHEMA_SETUP="
 CREATE TABLE IF NOT EXISTS item (id INTEGER PRIMARY KEY NOT NULL, data);
 CREATE TABLE IF NOT EXISTS container (id INTEGER PRIMARY KEY, contained INTEGER);
 CREATE INDEX IF NOT EXISTS container_contained ON container (contained);
 SELECT crsql_as_crr('item');
 "
 
-RESULT=$(run_sql "
-$SCHEMA
+# Schema for automigrate argument (single quotes doubled for SQL string literal)
+SCHEMA_ARG="
+CREATE TABLE IF NOT EXISTS item (id INTEGER PRIMARY KEY NOT NULL, data);
+CREATE TABLE IF NOT EXISTS container (id INTEGER PRIMARY KEY, contained INTEGER);
+CREATE INDEX IF NOT EXISTS container_contained ON container (contained);
+SELECT crsql_as_crr(''item'');
+"
 
-SELECT crsql_automigrate('$SCHEMA', 'SELECT crsql_finalize();');
-SELECT crsql_automigrate('$SCHEMA', 'SELECT crsql_finalize();');
-SELECT crsql_automigrate('$SCHEMA', 'SELECT crsql_finalize();');
+RESULT=$(run_sql "
+$SCHEMA_SETUP
+
+SELECT crsql_automigrate('$SCHEMA_ARG', 'SELECT crsql_finalize();');
+SELECT crsql_automigrate('$SCHEMA_ARG', 'SELECT crsql_finalize();');
+SELECT crsql_automigrate('$SCHEMA_ARG', 'SELECT crsql_finalize();');
 
 -- All three calls return 'migration complete'
 SELECT 'idempotent';
@@ -631,28 +640,30 @@ echo "Test 10: Complex schema - real-world migration scenario"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-COMPLEX_SCHEMA='
-CREATE TABLE IF NOT EXISTS "deck" (
-"id" INTEGER primary key not null,
-"title",
-"created",
-"modified",
-"theme_id"
+# Use double-quoted bash string with doubled single quotes for SQL escaping
+# ''deck'' in bash double-quotes becomes ''deck'' in the output (correct SQL escaping)
+COMPLEX_SCHEMA="
+CREATE TABLE IF NOT EXISTS \"deck\" (
+\"id\" INTEGER primary key not null,
+\"title\",
+\"created\",
+\"modified\",
+\"theme_id\"
 );
 
-CREATE TABLE IF NOT EXISTS "slide" (
-"id" INTEGER primary key not null,
-"deck_id",
-"order",
-"created",
-"modified"
+CREATE TABLE IF NOT EXISTS \"slide\" (
+\"id\" INTEGER primary key not null,
+\"deck_id\",
+\"order\",
+\"created\",
+\"modified\"
 );
 
-CREATE INDEX IF NOT EXISTS "slide_deck_id" ON "slide" ("deck_id", "order");
+CREATE INDEX IF NOT EXISTS \"slide_deck_id\" ON \"slide\" (\"deck_id\", \"order\");
 
 SELECT crsql_as_crr(''deck'');
 SELECT crsql_as_crr(''slide'');
-'
+"
 
 RESULT=$(run_sql "
 SELECT crsql_automigrate('$COMPLEX_SCHEMA', 'SELECT crsql_finalize();');

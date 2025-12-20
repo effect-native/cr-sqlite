@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (TASK-070 complete — ext-data + sandbox coverage added)
+> Last updated: 2025-12-20 (Round 44 — TASK-118, TASK-079, TASK-108 complete)
 
 ## Status
 
@@ -47,11 +47,12 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-075** — Spec `crsql_automigrate` behavior ✓ `.tasks/done/TASK-075-spec-automigrate.md`
   - Test: `zig/harness/test-automigrate.sh` (17 tests, all RED until impl)
 - [x] **TASK-076** — Implement `crsql_automigrate` in Zig ✓ `.tasks/done/TASK-076-impl-automigrate.md`
-  - Status: `zig/harness/test-automigrate.sh` = 15/17 pass (2 test quoting failures)
+  - Status: `zig/harness/test-automigrate.sh` = 17/17 pass ✓ (TASK-118 fixed quoting)
 - [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
 - [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
   - All 12 backfill tests pass
-- [ ] **TASK-079** — Spec `clset` virtual table module → `.tasks/backlog/TASK-079-spec-clset-vtab.md`
+- [x] **TASK-079** — Spec `clset` virtual table module ✓ `.tasks/done/TASK-079-spec-clset-vtab.md`
+  - Test: `zig/harness/test-clset-vtab.sh` (10 tests, all RED until impl)
 - [ ] **TASK-080** — Implement `clset` module in Zig → `.tasks/backlog/TASK-080-impl-clset-vtab.md`
 - [ ] **TASK-081** — Spec `crsql_unpack_columns` vtab → `.tasks/backlog/TASK-081-spec-unpack-columns-vtab.md`
 - [ ] **TASK-082** — Implement `crsql_unpack_columns` vtab in Zig → `.tasks/backlog/TASK-082-impl-unpack-columns-vtab.md`
@@ -92,13 +93,13 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 | Rust Suite | Zig Coverage | Status |
 |------------|--------------|--------|
-| automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 ✓ (impl; 15/17 pass, test quoting follow-up) |
+| automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 ✓ (impl), TASK-118 ✓ (17/17 pass) |
 | backfill.rs | ✓ | TASK-096 + TASK-078 (all 12 tests pass) |
 | pack_columns.rs | MISSING | Blocked (TASK-081/082) |
 | pk_only_tables.rs | Partial | TASK-095 (test exists) |
 | pk_update.rs | Partial | TASK-105 (11/16 pass; TASK-110 for compound/text PK) |
 | test_db_version.rs | test-db-version-parity.sh | ✓ |
-| test_cl_set_vtab.rs | MISSING | Blocked (TASK-079/080) |
+| test_cl_set_vtab.rs | test-clset-vtab.sh | TASK-079 ✓ (spec, RED), TASK-080 (impl pending) |
 | tableinfo.rs | ✓ | TASK-097 (15 tests, all pass) |
 | teardown.rs | test-is-crr.sh | ✓ |
 | fract.rs | test-fract*.sh | ✓ |
@@ -136,6 +137,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ## Done (recent)
 
+- **Round 44 (2025-12-20)**:
+  - TASK-118: Fixed automigrate test shell quoting (17/17 pass)
+  - TASK-079: Spec clset virtual table (10 tests, RED until impl)
+  - TASK-108: Fixed multiconn parity pass counting (was 9, now 6)
 - **Round 42 (2025-12-20)**: 
   - TASK-078: Backfill implementation complete (12/12 tests pass)
   - TASK-097: ExtData lifecycle tests (15/15 tests pass, oracle parity confirmed)
