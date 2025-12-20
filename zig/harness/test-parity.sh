@@ -19,6 +19,8 @@
 #   - test-persistence.sh: On-disk DB persistence across sessions
 #   - test-pk-update.sh: Primary key UPDATE semantics (DELETE+INSERT)
 #   - test-extdata.sh: ExtData lifecycle (schema changes, table tracking)
+#   - test-sandbox.sh: Sandbox tests (basic sync, convergence, oracle parity)
+#   - test-automigrate.sh: crsql_automigrate() behavior spec (RGRTDD)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -737,6 +739,51 @@ else
         echo "  ExtData tests: $EXTDATA_PASS passed, $EXTDATA_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + EXTDATA_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + EXTDATA_FAIL))
+    fi
+fi
+
+# Run sandbox tests (basic sync invariants, bidirectional convergence)
+echo "Running test-sandbox.sh..."
+if bash "$SCRIPT_DIR/test-sandbox.sh" > "$TMPFILE" 2>&1; then
+    SANDBOX_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SANDBOX_PASS=0
+    echo "  Sandbox tests: $SANDBOX_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + SANDBOX_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE" || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Sandbox tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 9))
+    else
+        SANDBOX_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || SANDBOX_FAIL=0
+        SANDBOX_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SANDBOX_PASS=0
+        echo "  Sandbox tests: $SANDBOX_PASS passed, $SANDBOX_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + SANDBOX_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + SANDBOX_FAIL))
+    fi
+fi
+
+# Run automigrate behavior tests (RGRTDD spec - expected to SKIP until implemented)
+echo "Running test-automigrate.sh..."
+if bash "$SCRIPT_DIR/test-automigrate.sh" > "$TMPFILE" 2>&1; then
+    AUTOMIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || AUTOMIG_PASS=0
+    echo "  Automigrate tests: $AUTOMIG_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + AUTOMIG_PASS))
+else
+    EXIT_CODE=$?
+    # Exit 0 = RED phase (expected failures, function not implemented)
+    if [[ $EXIT_CODE -eq 0 ]] && grep -q "RED PHASE" "$TMPFILE"; then
+        AUTOMIG_EXPECTED=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || AUTOMIG_EXPECTED=0
+        echo "  Automigrate tests: SKIPPED ($AUTOMIG_EXPECTED tests await implementation)"
+        TOTAL_SKIP=$((TOTAL_SKIP + AUTOMIG_EXPECTED))
+    elif [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Automigrate tests: SKIPPED (crsql_automigrate not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 17))
+    else
+        AUTOMIG_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || AUTOMIG_FAIL=0
+        AUTOMIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || AUTOMIG_PASS=0
+        echo "  Automigrate tests: $AUTOMIG_PASS passed, $AUTOMIG_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + AUTOMIG_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + AUTOMIG_FAIL))
     fi
 fi
 

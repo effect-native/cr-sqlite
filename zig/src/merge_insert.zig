@@ -131,7 +131,7 @@ pub const TableMergeStmts = struct {
 
         _ = std.fmt.bufPrintZ(&self.sql_drop_non_sentinel, "DELETE FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
-        _ = std.fmt.bufPrintZ(&self.sql_insert_pks, "INSERT INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, ?)", .{table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&self.sql_insert_pks, "INSERT INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, ?) ON CONFLICT(pks) DO UPDATE SET base_rowid = excluded.base_rowid", .{table_name}) catch return MergeError.BufferOverflow;
 
         _ = std.fmt.bufPrintZ(&self.sql_zero_clock_resurrect, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE pk = ? AND col_name != '-1'", .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -344,9 +344,9 @@ pub fn setWinnerClock(
     }
 }
 
-/// Find the pk (rowid) from a packed PK blob.
+/// Find the pk (pks table key) from a packed PK blob.
 /// Queries the __crsql_pks table to find matching row.
-/// For MVP, this does a reverse lookup: find pk where pks blob matches.
+/// Returns the pks table's auto-increment key, NOT the base table rowid.
 pub fn findPkFromBlob(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -371,11 +371,15 @@ pub fn findPkFromBlob(
     return MergeError.NoRows;
 }
 
-/// Delete row from base table by rowid.
-/// Used when merging a remote delete that wins over local state.
-pub fn deleteFromBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
+/// Get the base table rowid from a pks table key.
+/// Returns null if the entry is tombstoned (base_rowid is NULL).
+pub fn getBaseRowidFromPk(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+) MergeError!?i64 {
     var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE pk = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -385,15 +389,67 @@ pub fn deleteFromBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) M
 
     _ = api.bind_int64(stmt, 1, pk);
 
-    const rc = api.step(stmt);
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        // Check if base_rowid is NULL (tombstoned entry)
+        if (api.column_type(stmt, 0) == api.SQLITE_NULL) {
+            return null;
+        }
+        return api.column_int64(stmt, 0);
+    }
+
+    return MergeError.NoRows;
+}
+
+/// Delete row from base table by pks table key.
+/// First looks up base_rowid from pks table, then deletes from base table.
+/// Also marks the pks entry as tombstoned (sets base_rowid to NULL).
+pub fn deleteFromBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!void {
+    // First, get base_rowid from pks table
+    const base_rowid_opt = try getBaseRowidFromPk(db, table_name, pk);
+    const base_rowid = base_rowid_opt orelse return; // Already tombstoned, nothing to delete
+
+    // Delete from base table
+    var buf: [512]u8 = undefined;
+    var sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, base_rowid);
+
+    var rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+
+    // Mark pks entry as tombstoned
+    sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_pks\" SET base_rowid = NULL WHERE pk = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var tombstone_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &tombstone_stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(tombstone_stmt);
+
+    _ = api.bind_int64(tombstone_stmt, 1, pk);
+
+    rc = api.step(tombstone_stmt);
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
 }
 
-/// Check if a row exists in the base table by rowid.
+/// Check if a row exists in the base table by pks table key.
+/// First looks up base_rowid from pks table.
 /// Returns true if the row exists, false otherwise.
 pub fn rowExistsInBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) MergeError!bool {
+    // First, get base_rowid from pks table
+    const base_rowid_opt = try getBaseRowidFromPk(db, table_name, pk);
+    const base_rowid = base_rowid_opt orelse return false; // Tombstoned entry = no row exists
+
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -403,7 +459,7 @@ pub fn rowExistsInBaseTable(db: ?*api.sqlite3, table_name: []const u8, pk: i64) 
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_int64(stmt, 1, base_rowid);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
@@ -589,16 +645,17 @@ pub fn insertIntoBaseTable(
     return pk_int;
 }
 
-/// Insert into __crsql_pks table mapping pk (rowid) to packed pks blob.
+/// Insert into __crsql_pks table mapping base_rowid to packed pks blob.
+/// Uses ON CONFLICT to handle resurrection (update base_rowid if blob exists).
 pub fn insertIntoPksTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
-    pk: i64,
+    base_rowid: i64,
     pks_blob: [*]const u8,
     pks_len: usize,
 ) MergeError!void {
     var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, ?)", .{table_name}) catch return MergeError.BufferOverflow;
+    const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, ?) ON CONFLICT(pks) DO UPDATE SET base_rowid = excluded.base_rowid", .{table_name}) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
@@ -606,7 +663,7 @@ pub fn insertIntoPksTable(
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_int64(stmt, 1, base_rowid);
     _ = api.bind_blob(stmt, 2, pks_blob, @intCast(pks_len), api.getTransientDestructor());
 
     const rc = api.step(stmt);

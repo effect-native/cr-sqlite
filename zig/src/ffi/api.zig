@@ -63,9 +63,17 @@ pub const DestructorFn = ?*const fn (?*anyopaque) callconv(.c) void;
 pub const SQLITE_STATIC: DestructorFn = null;
 
 /// SQLITE_TRANSIENT as a constant - tells SQLite to make a copy of the data.
-/// This is the value ((void(*)(void *))-1) from SQLite's headers.
-/// We use @ptrFromInt to create this special sentinel value.
-pub const SQLITE_TRANSIENT: DestructorFn = @ptrFromInt(@as(usize, @bitCast(@as(isize, -1))));
+///
+/// In SQLite headers this is defined as: `((sqlite3_destructor_type)-1)`.
+///
+/// Zig 0.15 enforces alignment checks for `@ptrFromInt` when the destination is
+/// a function-pointer type. The sentinel value `-1` is not guaranteed to satisfy
+/// function pointer alignment, so constructing it via `@ptrFromInt` can fail to
+/// compile.
+///
+/// Use a bitcast of the all-ones pointer bits instead (same representation, no
+/// alignment check).
+pub const SQLITE_TRANSIENT: DestructorFn = @bitCast(@as(usize, @bitCast(@as(isize, -1))));
 
 /// Platform-specific implementation for getting SQLITE_TRANSIENT.
 /// On native platforms with C interop, we use the C workaround function.

@@ -154,12 +154,21 @@ fn createClockTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
 }
 
-/// Create the pks table for mapping rowids to packed PK blobs.
+/// Create the pks table for mapping auto-increment keys to packed PK blobs.
+/// The pk column is an auto-increment key that is INDEPENDENT of base table rowid.
+/// This allows compound/text PK tables to have separate entries for old and new PKs
+/// when a PK column is updated (old entry for tombstone, new entry for live row).
+///
+/// The base_rowid column stores the current base table rowid for live rows.
+/// For tombstoned entries, base_rowid is NULL (the row no longer exists).
+/// This allows efficient value lookups: pks.pk -> pks.base_rowid -> base_table.rowid
+///
 /// Schema:
 /// ```sql
 /// CREATE TABLE IF NOT EXISTS "{table}__crsql_pks" (
-///   "pk" INTEGER PRIMARY KEY,
-///   "pks" BLOB NOT NULL
+///   "pk" INTEGER PRIMARY KEY,     -- Auto-increment key (clock table references this)
+///   "base_rowid" INTEGER,         -- Base table rowid (NULL for tombstoned entries)
+///   "pks" BLOB NOT NULL UNIQUE    -- Packed PK blob, unique constraint for lookups
 /// );
 /// ```
 fn createPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
@@ -167,7 +176,8 @@ fn createPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const sql = std.fmt.bufPrintZ(&buf,
         \\CREATE TABLE IF NOT EXISTS "{s}__crsql_pks" (
         \\  "pk" INTEGER PRIMARY KEY,
-        \\  "pks" BLOB NOT NULL
+        \\  "base_rowid" INTEGER,
+        \\  "pks" BLOB NOT NULL UNIQUE
         \\);
     , .{table_name}) catch return error.BufferOverflow;
 
@@ -229,7 +239,8 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
 
 /// Create the INSERT trigger that captures new rows.
 /// - Packs PK column values using crsql_pack_columns()
-/// - Creates clock entries for each non-PK column
+/// - Creates pks entry with auto-increment key
+/// - Creates clock entries for each non-PK column using pks key (not base rowid)
 /// - Creates sentinel row ('-1') for row creation tracking
 fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     // Get table column information
@@ -243,12 +254,14 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const writer = fbs.writer();
 
     // Trigger header with sync_bit gating
+    // Use INSERT ... ON CONFLICT to handle resurrection: if blob exists (from tombstone),
+    // update base_rowid to point to the new row, keeping the same pk key
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_itrig"
         \\AFTER INSERT ON "{s}"
         \\WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
-        \\  INSERT OR REPLACE INTO "{s}__crsql_pks" ("pk", "pks")
+        \\  INSERT INTO "{s}__crsql_pks" ("base_rowid", "pks")
         \\  VALUES (NEW.rowid, crsql_pack_columns(
     , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
 
@@ -270,34 +283,70 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         }
     }
 
-    writer.writeAll("));\n") catch return error.BufferOverflow;
+    writer.writeAll(")) ON CONFLICT(pks) DO UPDATE SET base_rowid = NEW.rowid;\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column
+    // Use subquery to get the pks key for this blob (not base table rowid)
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create clock entry
-            // db_version uses crsql_next_db_version() to get next version for this transaction
-            // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
+            // The pk is looked up from pks table by blob, not using base table rowid
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  VALUES
-                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
+                \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+            , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+            // Rewrite pk columns for subquery
+            pk_written = 0;
+            pk_order = 1;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (info.columns[0..info.count]) |pk_col| {
+                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            writer.writeAll(", ") catch return error.BufferOverflow;
+                        }
+                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                        pk_written += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.print(
+                \\)), '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
                 \\
-            , .{ table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
+            , .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
         }
     }
 
     // Sentinel row for row creation tracking
-    // db_version uses crsql_next_db_version() to get next version for this transaction
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
+    // Use subquery to get the pks key for this blob
     writer.print(
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  VALUES
-        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-        \\END;
-    , .{table_name}) catch return error.BufferOverflow;
+        \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Rewrite pk columns for subquery
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |pk_col| {
+            if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\nEND;") catch return error.BufferOverflow;
 
     // Null-terminate the SQL
     const sql_len = fbs.pos;
@@ -388,27 +437,65 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column (only when changed)
+    // Use pks table lookup to get the pk key (not base table rowid)
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             // Non-PK column - create/update clock entry when changed
-            // db_version uses crsql_next_db_version() to get next version for this transaction
-            // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
+            // The pk is looked up from pks table by blob
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  SELECT
-                \\    NEW.rowid,
+                \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+            , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+            // Write PK columns for subquery
+            var pk_written_inner: usize = 0;
+            var pk_order_inner: usize = 1;
+            while (pk_written_inner < info.pk_count) : (pk_order_inner += 1) {
+                for (info.columns[0..info.count]) |pk_col| {
+                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order_inner))) {
+                        if (pk_written_inner > 0) {
+                            writer.writeAll(", ") catch return error.BufferOverflow;
+                        }
+                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                        pk_written_inner += 1;
+                        break;
+                    }
+                }
+            }
+
+            // Continue with col_version lookup using the same pk subquery pattern
+            writer.print(
+                \\)),
                 \\    '{s}',
-                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = NEW.rowid AND col_name = '{s}'), 0) + 1,
+                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE pk = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+            , .{ col.name[0..col.name_len], table_name, table_name }) catch return error.BufferOverflow;
+
+            // Write PK columns again for the nested subquery
+            pk_written_inner = 0;
+            pk_order_inner = 1;
+            while (pk_written_inner < info.pk_count) : (pk_order_inner += 1) {
+                for (info.columns[0..info.count]) |pk_col| {
+                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order_inner))) {
+                        if (pk_written_inner > 0) {
+                            writer.writeAll(", ") catch return error.BufferOverflow;
+                        }
+                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                        pk_written_inner += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.print(
+                \\)) AND col_name = '{s}'), 0) + 1,
                 \\    crsql_next_db_version(),
                 \\    0,
                 \\    crsql_increment_and_get_seq()
                 \\  WHERE OLD."{s}" IS NOT NEW."{s}";
                 \\
             , .{
-                table_name,
-                col.name[0..col.name_len],
-                table_name,
                 col.name[0..col.name_len],
                 col.name[0..col.name_len],
                 col.name[0..col.name_len],
@@ -434,8 +521,13 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
 /// Create the PK UPDATE trigger that handles primary key column changes.
 /// When a PK column is updated, it's semantically equivalent to:
-/// 1. DELETE the old row (create tombstone)
-/// 2. INSERT the new row (create fresh clock entries)
+/// 1. DELETE the old row (create tombstone at OLD pks key)
+/// 2. INSERT the new row (create fresh clock entries at NEW pks key)
+///
+/// Critical design: The pks table has auto-increment keys separate from base table rowid.
+/// When PK changes, a NEW pks entry is created (auto-increment), while the OLD pks entry
+/// is preserved for tombstone lookup. This allows compound/text PK updates to work correctly
+/// even when the base table rowid doesn't change.
 ///
 /// This is sync-critical: without tombstones, replicas would never delete the old PK row.
 fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
@@ -478,17 +570,60 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
     writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
 
-    // Step 1: Mark old PK row as deleted (tombstone)
-    // Increment sentinel col_version: first delete = 2 (even), subsequent += 1
+    // Step 1: Tombstone the OLD PK
+    // Look up the OLD pk key from pks table and mark it as deleted
+    // The OLD pks entry stays in place - it maps OLD pk blob to the clock key
     writer.print(
         \\  -- Step 1: Tombstone the old PK (mark as deleted)
+        \\  -- Look up the pk key for OLD pk blob
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  SELECT
-        \\    OLD.rowid,
+        \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build OLD pk columns for pack_columns
+    var pk_written: usize = 0;
+    var pk_order: usize = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(
+        \\)),
         \\    '-1',
         \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE pk = OLD.rowid AND col_name = '-1'),
+        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock"
+        \\       WHERE pk = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build OLD pk columns again for nested subquery
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(
+        \\)) AND col_name = '-1'),
         \\      2
         \\    ),
         \\    crsql_next_db_version(),
@@ -496,20 +631,63 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\    crsql_increment_and_get_seq();
         \\  -- Delete all non-sentinel clock entries for old PK
         \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE pk = OLD.rowid AND col_name IS NOT '-1';
-        \\
-    , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
+        \\  WHERE pk = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
 
-    // Step 2: Update pks table with new PK blob
+    // Build OLD pk columns again for delete
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")) AND col_name IS NOT '-1';\n") catch return error.BufferOverflow;
+
+    // Step 1b: Mark old pks entry as tombstoned (clear base_rowid)
     writer.print(
-        \\  -- Step 2: Update pks table for new rowid
-        \\  INSERT OR REPLACE INTO "{s}__crsql_pks" ("pk", "pks")
+        \\  -- Step 1b: Mark old pks entry as tombstoned
+        \\  UPDATE "{s}__crsql_pks" SET base_rowid = NULL
+        \\  WHERE pks = crsql_pack_columns(
+    , .{table_name}) catch return error.BufferOverflow;
+
+    // Build OLD pk columns for update
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(");\n") catch return error.BufferOverflow;
+
+    // Step 2: Create NEW pks entry for the NEW pk blob
+    // INSERT with base_rowid = NEW.rowid
+    writer.print(
+        \\  -- Step 2: Create NEW pks entry with base_rowid
+        \\  INSERT INTO "{s}__crsql_pks" ("base_rowid", "pks")
         \\  VALUES (NEW.rowid, crsql_pack_columns(
     , .{table_name}) catch return error.BufferOverflow;
 
-    // Build crsql_pack_columns arguments from PK columns in order
-    var pk_written: usize = 0;
-    var pk_order: usize = 1;
+    // Build NEW pk columns for pack_columns
+    pk_written = 0;
+    pk_order = 1;
     while (pk_written < info.pk_count) : (pk_order += 1) {
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == @as(c_int, @intCast(pk_order))) {
@@ -524,7 +702,7 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
     writer.writeAll("));\n") catch return error.BufferOverflow;
 
-    // Step 3: Create fresh clock entries for all non-PK columns under new rowid
+    // Step 3: Create fresh clock entries for all non-PK columns under NEW pks key
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == 0) {
             writer.print(
@@ -532,9 +710,29 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
                 \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  VALUES
-                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
+                \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+            , .{ col.name[0..col.name_len], table_name, table_name }) catch return error.BufferOverflow;
+
+            // Build NEW pk columns for subquery
+            pk_written = 0;
+            pk_order = 1;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (info.columns[0..info.count]) |pk_col| {
+                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            writer.writeAll(", ") catch return error.BufferOverflow;
+                        }
+                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
+                        pk_written += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.print(
+                \\)), '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
                 \\
-            , .{ col.name[0..col.name_len], table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
+            , .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
         }
     }
 
@@ -544,9 +742,26 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  VALUES
-        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-        \\END;
-    , .{table_name}) catch return error.BufferOverflow;
+        \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build NEW pk columns for subquery
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\nEND;") catch return error.BufferOverflow;
 
     // Null-terminate the SQL
     const sql_len = fbs.pos;
@@ -568,27 +783,71 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 ///    - First delete: col_version = 2 (even = deleted)
 ///    - Subsequent: col_version += 1
 /// 2. Drop all clock entries except the sentinel
+/// Note: Uses pks table lookup to get the pk key (not base table rowid)
 fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+    // Get table column information for pk columns
+    const info = try getTableInfo(db, table_name);
+
     var buf: [SQL_BUF_SIZE]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
     // Trigger header with sync_bit gating
-    // db_version uses crsql_next_db_version() to get next version for this transaction
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
         \\AFTER DELETE ON "{s}"
         \\WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
         \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
+        \\  -- Use pks table lookup to get the pk key
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
         \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  SELECT
-        \\    OLD.rowid,
+        \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build OLD pk columns for pack_columns
+    var pk_written: usize = 0;
+    var pk_order: usize = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(
+        \\)),
         \\    '-1',
         \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE pk = OLD.rowid AND col_name = '-1'),
+        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock"
+        \\       WHERE pk = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build OLD pk columns again for nested subquery
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(
+        \\)) AND col_name = '-1'),
         \\      2
         \\    ),
         \\    crsql_next_db_version(),
@@ -596,9 +855,51 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         \\    crsql_increment_and_get_seq();
         \\  -- Drop all clock entries except the sentinel
         \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE pk = OLD.rowid AND col_name IS NOT '-1';
-        \\END;
-    , .{ table_name, table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
+        \\  WHERE pk = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
+
+    // Build OLD pk columns again for delete
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")) AND col_name IS NOT '-1';\n") catch return error.BufferOverflow;
+
+    // Mark pks entry as tombstoned (clear base_rowid)
+    writer.print(
+        \\  -- Mark pks entry as tombstoned
+        \\  UPDATE "{s}__crsql_pks" SET base_rowid = NULL
+        \\  WHERE pks = crsql_pack_columns(
+    , .{table_name}) catch return error.BufferOverflow;
+
+    // Build OLD pk columns for update
+    pk_written = 0;
+    pk_order = 1;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(");\nEND;") catch return error.BufferOverflow;
 
     // Null-terminate the SQL
     const sql_len = fbs.pos;
@@ -671,7 +972,8 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         }
     }
 
-    select_writer.print(" FROM \"{s}\" WHERE rowid NOT IN (SELECT pk FROM \"{s}__crsql_pks\")", .{ table_name, table_name }) catch {
+    // Find rows not yet in pks table (use base_rowid column, not pk)
+    select_writer.print(" FROM \"{s}\" WHERE rowid NOT IN (SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE base_rowid IS NOT NULL)", .{ table_name, table_name }) catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };
@@ -698,7 +1000,8 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var pks_fbs = std.io.fixedBufferStream(&pks_insert_buf);
     const pks_writer = pks_fbs.writer();
 
-    pks_writer.print("INSERT OR IGNORE INTO \"{s}__crsql_pks\" (pk, pks) VALUES (?, crsql_pack_columns(", .{table_name}) catch {
+    // Insert with base_rowid instead of pk (pk auto-increments)
+    pks_writer.print("INSERT OR IGNORE INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, crsql_pack_columns(", .{table_name}) catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };

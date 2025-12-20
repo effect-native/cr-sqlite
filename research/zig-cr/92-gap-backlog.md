@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (delegate round 42 — backfill impl, extdata tests, pk-update partial)
+> Last updated: 2025-12-20 (TASK-070 complete — ext-data + sandbox coverage added)
 
 ## Status
 
@@ -13,8 +13,14 @@
 Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementation parity coverage and adding real-system tests.
 
 ### Parity/Coverage Tasks (ready to assign)
-- [ ] **TASK-070** — Cover missing C suites: ext-data + sandbox → `.tasks/backlog/TASK-070-zig-parity-extdata-sandbox.md`
+- [x] **TASK-070** — Cover missing C suites: ext-data + sandbox ✓ `.tasks/done/TASK-070-zig-parity-extdata-sandbox.md`
+  - ext-data: 15/15 tests pass (test-extdata.sh)
+  - sandbox: 5/9 tests pass → TASK-117 filed for PK-only sentinel gap
 - [ ] **TASK-071** — Cover remaining C suites: crsqlite + is-crr → `.tasks/backlog/TASK-071-zig-parity-crsqlite-is-crr.md`
+- [ ] **TASK-117** — Fix PK-only table sentinel emission → `.tasks/triage/TASK-117-zig-pk-only-sentinel-emission.md`
+
+### Build/Tooling Blockers
+- [ ] **TASK-111** — Fix Zig 0.15 `SQLITE_TRANSIENT` alignment build error → `.tasks/backlog/TASK-111-zig-build-sqlite-transient-alignment.md`
 - [x] **TASK-072** — Make `crsql_internal_sync_bit` per-connection ✓ `.tasks/done/TASK-072-zig-sync-bit-per-connection.md`
   - Per-connection isolation implemented via ConnectionSyncBitMap
   - Test: `zig/harness/test-sync-bit-isolation.sh`
@@ -37,7 +43,8 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-099** — Zig multi-connection parity test ✓ `.tasks/done/TASK-099-zig-multiconn-test.md`
 
 ### Missing-feature RGRTDD tracks (spec then impl)
-- [ ] **TASK-075** — Spec `crsql_automigrate` behavior → `.tasks/backlog/TASK-075-spec-automigrate.md`
+- [x] **TASK-075** — Spec `crsql_automigrate` behavior ✓ `.tasks/active/TASK-075-spec-automigrate.md`
+  - Test: `zig/harness/test-automigrate.sh` (17 tests, all RED until impl)
 - [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md`
 - [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
 - [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
@@ -83,7 +90,7 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 | Rust Suite | Zig Coverage | Status |
 |------------|--------------|--------|
-| automigrate.rs | MISSING | Blocked (TASK-075/076) |
+| automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 (impl blocked) |
 | backfill.rs | ✓ | TASK-096 + TASK-078 (all 12 tests pass) |
 | pack_columns.rs | MISSING | Blocked (TASK-081/082) |
 | pk_only_tables.rs | Partial | TASK-095 (test exists) |
@@ -102,11 +109,11 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 | rs-fract.test.c | test-fract*.sh | ✓ |
 | is-crr.test.c | test-is-crr.sh | ✓ |
 | rows-impacted.test.c | test-parity.sh | ✓ |
-| sandbox.test.c | test-e2e-sync.sh | ✓ |
+| sandbox.test.c | test-sandbox.sh | ⚠️ 5/9 (TASK-117 for PK-only sentinel) |
 | changes-vtab.test.c | test-filters.sh | ✓ |
 | changes-vtab-rowid.test.c | test-rowid-slab.sh | ✓ |
 | crsqlite.test.c | test-e2e-sync.sh, test-alter.sh | ✓ |
-| ext-data.test.c | ✓ | TASK-097 (test-extdata.sh, 15 tests) |
+| ext-data.test.c | test-extdata.sh | ✓ (15/15 tests, TASK-070) |
 
 ### Real-System Gaps (HIGH priority)
 

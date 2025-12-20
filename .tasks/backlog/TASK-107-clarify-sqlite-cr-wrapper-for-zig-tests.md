@@ -1,4 +1,4 @@
-# TASK-104: Clarify sqlite-cr wrapper usage for Zig harness tests
+# TASK-107: Clarify sqlite-cr wrapper usage for Zig harness tests
 
 ## Status
 - [ ] Planned
@@ -14,7 +14,7 @@ medium
 (unassigned)
 
 ## Parent Docs / Cross-links
-- Triggered by: `.tasks/active/TASK-098-zig-ondisk-db-tests.md`
+- Triggered by: `.tasks/done/TASK-098-zig-ondisk-db-tests.md`
 - Repo guidance: `AGENTS.md` “Zig testing (quick rule)”
 
 ## Description

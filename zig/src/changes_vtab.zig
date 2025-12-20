@@ -1015,8 +1015,44 @@ fn fetchPksBlob(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64, ctx: ?*api.
 }
 
 /// Fetch the actual column value from the base table
-/// col_name is the column name to fetch, rowid is the pk from clock table
-fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []const u8, rowid: i64, ctx: ?*api.sqlite3_context) void {
+/// col_name is the column name to fetch, pk is the pks table key (not base table rowid)
+/// We first look up base_rowid from pks table, then query the base table
+fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []const u8, pk: i64, ctx: ?*api.sqlite3_context) void {
+    // First, get base_rowid from pks table
+    var base_rowid_sql_buf: [256]u8 = undefined;
+    const base_rowid_sql = std.fmt.bufPrintZ(&base_rowid_sql_buf, "SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE pk = ?", .{table_name}) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    var base_rowid_stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(toApiDb(db), base_rowid_sql, -1, &base_rowid_stmt, null) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+    defer _ = finalizeStmt(base_rowid_stmt);
+
+    if (api.bind_int64(base_rowid_stmt, 1, pk) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+
+    if (stepStmt(base_rowid_stmt) != vtab.SQLITE_ROW) {
+        // No pks entry found
+        resultNull(ctx);
+        return;
+    }
+
+    // Check if base_rowid is NULL (tombstoned entry)
+    if (columnTypeFromStmt(base_rowid_stmt, 0) == api.SQLITE_NULL) {
+        // Tombstoned entry - no value to fetch
+        resultNull(ctx);
+        return;
+    }
+
+    const base_rowid = columnInt64FromStmt(base_rowid_stmt, 0);
+
+    // Now fetch the actual column value from base table
     var sql_buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE rowid = ?", .{ col_name, table_name }) catch {
         resultNull(ctx);
@@ -1030,7 +1066,7 @@ fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []cons
     }
     defer _ = finalizeStmt(stmt);
 
-    if (api.bind_int64(stmt, 1, rowid) != vtab.SQLITE_OK) {
+    if (api.bind_int64(stmt, 1, base_rowid) != vtab.SQLITE_OK) {
         resultNull(ctx);
         return;
     }
