@@ -246,7 +246,7 @@ pub fn getLocalColVersion(db: ?*api.sqlite3, table_name: []const u8, pk: i64, co
 }
 
 /// Update base table column value.
-/// Uses UPDATE with rowid lookup.
+/// Takes pk (pks table key), looks up base_rowid, then updates the base table.
 pub fn updateBaseTableColumn(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -254,9 +254,12 @@ pub fn updateBaseTableColumn(
     col_name: []const u8,
     value: ?*api.sqlite3_value,
 ) MergeError!void {
+    // First, get base_rowid from pks table
+    const base_rowid_opt = try getBaseRowidFromPk(db, table_name, pk);
+    const base_rowid = base_rowid_opt orelse return; // Tombstoned entry, nothing to update
+
     var buf: [1024]u8 = undefined;
 
-    // For MVP, assume single integer PK matching rowid
     const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
@@ -292,7 +295,7 @@ pub fn updateBaseTableColumn(
     } else {
         _ = api.bind_null(stmt, 1);
     }
-    _ = api.bind_int64(stmt, 2, pk);
+    _ = api.bind_int64(stmt, 2, base_rowid);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -947,27 +950,56 @@ pub fn findPkFromBlobCached(
     return MergeError.NoRows;
 }
 
-/// Check if a row exists in the base table by rowid using cached statement.
+/// Check if a row exists in the base table by pks table key using cached statement.
+/// First looks up base_rowid from pks table, then checks base table.
 ///
 /// This is the cached variant of `rowExistsInBaseTable` for use with `TableMergeStmts`.
 pub fn rowExistsInBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!bool {
+    // First, get base_rowid from pks table (not cached - uses uncached lookup)
+    const base_rowid_opt = getBaseRowidFromPk(stmts.db, stmts.table_name, pk) catch return false;
+    const base_rowid = base_rowid_opt orelse return false; // Tombstoned entry = no row exists
+
     const stmt = try stmts.getOrPrepare(&stmts.row_exists_base_stmt, @ptrCast(&stmts.sql_row_exists_base));
 
-    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_int64(stmt, 1, base_rowid);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
 
-/// Delete row from base table by rowid using cached statement.
+/// Delete row from base table by pks table key using cached statement.
+/// First looks up base_rowid from pks table, then deletes from base table.
+/// Also marks the pks entry as tombstoned (sets base_rowid to NULL).
 ///
 /// This is the cached variant of `deleteFromBaseTable` for use with `TableMergeStmts`.
 pub fn deleteFromBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+    // First, get base_rowid from pks table (not cached - uses uncached lookup)
+    const base_rowid_opt = getBaseRowidFromPk(stmts.db, stmts.table_name, pk) catch return;
+    const base_rowid = base_rowid_opt orelse return; // Already tombstoned, nothing to delete
+
+    // Delete from base table
     const stmt = try stmts.getOrPrepare(&stmts.delete_base_stmt, @ptrCast(&stmts.sql_delete_base));
 
-    _ = api.bind_int64(stmt, 1, pk);
+    _ = api.bind_int64(stmt, 1, base_rowid);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+
+    // Mark pks entry as tombstoned (not cached - infrequent operation)
+    var buf: [512]u8 = undefined;
+    const tombstone_sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_pks\" SET base_rowid = NULL WHERE pk = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+
+    var tombstone_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(stmts.db, tombstone_sql, -1, &tombstone_stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(tombstone_stmt);
+
+    _ = api.bind_int64(tombstone_stmt, 1, pk);
+
+    const tombstone_rc = api.step(tombstone_stmt);
+    if (tombstone_rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
 }

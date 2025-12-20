@@ -68,6 +68,94 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (49) — Fix merge pk/rowid confusion + ALTER semantics decision (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-119-fix-realistic-sync-test-failures.md`
+- `.tasks/done/TASK-120-fix-realistic-offline-test-failures.md` (consolidated into TASK-119)
+- `.tasks/done/TASK-100-decide-alter-new-column-clock-semantics.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-realistic-sync.sh
+bash zig/harness/test-realistic-offline.sh
+bash zig/harness/test-realistic-collab.sh
+bash zig/harness/test-backfill.sh
+bash zig/harness/test-fract-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-119: test-realistic-sync.sh (all pass)</summary>
+
+```text
+✓ All realistic sync scenarios PASSED
+```
+
+**Root cause:** The cached merge functions in `zig/src/merge_insert.zig` were confusing two different ID concepts:
+- `pk` = auto-increment key in `__crsql_pks` table (used in clock table references)
+- `base_rowid` = actual rowid in the user's base table
+
+Three functions were fixed:
+1. `rowExistsInBaseTableCached()` - now looks up `base_rowid` from pks table first
+2. `deleteFromBaseTableCached()` - now looks up `base_rowid` and marks tombstone
+3. `updateBaseTableColumn()` - now looks up `base_rowid` before UPDATE
+
+</details>
+
+<details>
+<summary>TASK-119: test-realistic-offline.sh (all pass)</summary>
+
+```text
+✓ All offline-first scenarios PASSED
+```
+
+Same root cause as sync test - pk/rowid confusion in cached merge functions.
+</details>
+
+<details>
+<summary>TASK-100: ALTER semantics decision</summary>
+
+**Decision: LAZY MATERIALIZE** — Zig should NOT backfill clock entries on ADD COLUMN
+
+Rationale:
+- Clock entries represent **write events**, not schema changes
+- Schema migration is not a write; the column's initial value exists by virtue of the schema definition
+- Sync payload: O(0) extra records vs O(N) for eager backfill
+- Matches Rust/C oracle behavior exactly
+
+Follow-up: TASK-101 will implement this by removing `backfillNewColumns()` from `crsqlCommitAlterFunc`.
+</details>
+
+**Files created/modified:**
+- `zig/src/merge_insert.zig` — fixed pk vs base_rowid confusion in 3 cached functions
+- `.tasks/done/TASK-119-fix-realistic-sync-test-failures.md` — moved from active, completion notes added
+- `.tasks/done/TASK-120-fix-realistic-offline-test-failures.md` — moved from backlog (consolidated)
+- `.tasks/done/TASK-100-decide-alter-new-column-clock-semantics.md` — moved from backlog, decision documented
+- `research/zig-cr/92-gap-backlog.md` — updated TASK-100 status and decision summary
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-realistic-sync.sh` — verify all pass
+3. `bash zig/harness/test-realistic-offline.sh` — verify all pass
+4. `bash zig/harness/test-realistic-collab.sh` — verify all pass
+5. Review `.tasks/done/TASK-100-*.md` for ALTER semantics decision
+
+**Known gaps / unverified claims**
+- TASK-101 (implement lazy semantics) remains in backlog
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (48) — Merge atomicity verify + WAL concurrency tests + sqlite-cr policy (3 tasks)
 
 **Tasks executed**

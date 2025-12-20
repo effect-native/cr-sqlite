@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 48 — TASK-088, TASK-106, TASK-107 complete)
+> Last updated: 2025-12-20 (Round 49 — TASK-119, TASK-100 complete)
 
 ## Status
 
@@ -98,9 +98,18 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - Test: `zig/harness/test-rows-impacted-parity.sh`
 - [x] **TASK-094** — ALTER TABLE history preservation ✓ `.tasks/done/TASK-094-alter-table-history-preservation.md`
   - Divergence found: ADD COLUMN clock backfill semantics (Zig eager vs Rust lazy)
-  - [ ] **TASK-100** — Decide ADD COLUMN clock semantics → `.tasks/backlog/TASK-100-decide-alter-new-column-clock-semantics.md`
-  - [ ] **TASK-101** — Align Zig behavior with oracle (if chosen) → `.tasks/backlog/TASK-101-impl-alter-add-column-no-backfill.md`
-  - [ ] **TASK-102** — Fix/replace local oracle dylib (ALTER) → `.tasks/backlog/TASK-102-fix-oracle-crsqlite-dylib-alter.md`
+  - [x] **TASK-100** — Decide ADD COLUMN clock semantics ✓ `.tasks/done/TASK-100-decide-alter-new-column-clock-semantics.md`
+    - **Decision: LAZY MATERIALIZE** — Zig should NOT backfill clock entries on ADD COLUMN
+    - Rationale: Clock entries represent writes, not schema changes; matches oracle; O(0) sync payload
+  - [ ] **TASK-101** — Implement lazy semantics in Zig → `.tasks/backlog/TASK-101-impl-alter-add-column-no-backfill.md`
+  - [x] **TASK-102** — Fix/replace local oracle dylib (ALTER) ✓ `.tasks/done/TASK-102-fix-oracle-crsqlite-dylib-alter.md`
+
+### Realistic Sync Tests
+- [x] **TASK-119** — Fix realistic sync test failures (extra rows after merge) ✓ `.tasks/done/TASK-119-fix-realistic-sync-test-failures.md`
+  - Root cause: pk vs base_rowid confusion in cached merge functions
+  - Fixed: `rowExistsInBaseTableCached`, `deleteFromBaseTableCached`, `updateBaseTableColumn`
+  - Tests: `test-realistic-sync.sh`, `test-realistic-offline.sh`, `test-realistic-collab.sh` all pass
+- [x] **TASK-120** — Fix realistic offline test failures (consolidated into TASK-119) ✓ `.tasks/done/TASK-120-fix-realistic-offline-test-failures.md`
 
 ## Coverage Map Summary (TASK-073)
 

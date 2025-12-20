@@ -4,8 +4,8 @@
 - [ ] Planned
 - [ ] Assigned
 - [ ] In Progress
-- [x] Blocked (reason: Consolidated into TASK-119 — same root cause)
-- [ ] Complete
+- [ ] Blocked
+- [x] Complete (fixed by TASK-119)
 
 ## Priority
 high
@@ -38,9 +38,9 @@ The test demonstrates offline-first sync patterns:
 - `zig/src/changes_vtab.zig` (if changes query bug)
 
 ## Acceptance Criteria
-- [ ] `bash zig/harness/test-realistic-offline.sh` passes with 0 failures
-- [ ] All 4 key patterns demonstrated work correctly
-- [ ] Root cause documented in Completion Notes
+- [x] `bash zig/harness/test-realistic-offline.sh` passes with 0 failures
+- [x] All 4 key patterns demonstrated work correctly
+- [x] Root cause documented in Completion Notes
 
 ## Progress Log
 ### 2025-12-20
@@ -48,3 +48,5 @@ The test demonstrates offline-first sync patterns:
 - 2 failures observed, details TBD
 
 ## Completion Notes
+### 2025-12-20
+Fixed by TASK-119. The root cause was the same bug in cached merge functions that affected both realistic sync and realistic offline tests. See TASK-119 for details.
