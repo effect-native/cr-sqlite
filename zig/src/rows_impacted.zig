@@ -54,12 +54,14 @@ fn commitHookCallback(pArg: ?*anyopaque) callconv(.c) c_int {
     return 0; // 0 = allow commit to proceed
 }
 
-/// Rollback hook callback - resets the counter, pending db_version, and seq
+/// Rollback hook callback - resets pending db_version and seq
+/// NOTE: rows_impacted is NOT reset on ROLLBACK (matches Rust/C oracle behavior
+/// where xRollback is NULL in changes-vtab.c:173)
 fn rollbackHookCallback(pArg: ?*anyopaque) callconv(.c) void {
     _ = pArg;
     site_identity.rollbackDbVersion();
     site_identity.resetSeq();
-    resetCounter();
+    // rows_impacted is intentionally NOT reset on ROLLBACK
 }
 
 /// Register the UDF and commit hook
@@ -81,7 +83,7 @@ pub fn register(db: ?*api.sqlite3) c_int {
     // Install commit hook to reset counter and commit db_version
     _ = api.commit_hook(db, &commitHookCallback, null);
 
-    // Install rollback hook to reset counter and pending db_version
+    // Install rollback hook to reset pending db_version and seq (NOT rows_impacted)
     _ = api.rollback_hook(db, &rollbackHookCallback, null);
 
     return api.SQLITE_OK;

@@ -607,6 +607,9 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 }
 
 /// Create the UPDATE trigger that captures column changes.
+/// - Fires on ALL updates (including no-ops) to match Rust/C oracle behavior
+/// - Creates clock entries only for columns that actually changed
+/// - Always advances db_version (even on no-op updates) for sync protocol parity
 fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const info = try getTableInfo(db, table_name);
     if (info.count == 0) {
@@ -630,29 +633,21 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with sync_bit gating + column change check
+    // Trigger header with sync_bit gating
+    // This trigger fires on ALL updates (matching Rust/C oracle)
+    // The column change filtering happens in the INSERT statements below
+    // This ensures db_version advances even on no-op updates for sync protocol parity
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
         \\AFTER UPDATE ON "{s}"
-        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
+        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0
+        \\BEGIN
+        \\
     , .{ table_name, table_name }) catch return error.BufferOverflow;
 
-    // Build WHEN clause: OLD.col IS NOT NEW.col OR ...
-    var first_when = true;
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            if (!first_when) {
-                writer.writeAll(" OR ") catch return error.BufferOverflow;
-            }
-            writer.print("OLD.\"{s}\" IS NOT NEW.\"{s}\"", .{
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-            }) catch return error.BufferOverflow;
-            first_when = false;
-        }
-    }
-
-    writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
+    // CRITICAL: Always advance db_version when trigger fires, even on no-op updates
+    // This matches Rust/C oracle behavior and is required for sync protocol parity
+    writer.writeAll("  SELECT crsql_next_db_version();\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column (only when changed)
     // seq uses crsql_increment_and_get_seq() to get unique seq within transaction

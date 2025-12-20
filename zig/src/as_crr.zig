@@ -435,9 +435,10 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 }
 
 /// Create the UPDATE trigger that captures non-PK column changes.
-/// - Only fires when at least one non-PK column has changed AND no PK column changed
-/// - Creates clock entries for each changed non-PK column
+/// - Fires on ALL updates to non-PK columns (including no-ops) to match Rust/C oracle behavior
+/// - Creates clock entries only for columns that actually changed
 /// - Increments col_version for each changed column
+/// - Always advances db_version (even on no-op updates) for sync protocol parity
 /// Note: PK column changes are handled by the separate PK update trigger
 fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     // Get table column information
@@ -463,33 +464,18 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with sync_bit gating + column change check
-    // This trigger only fires when non-PK columns change AND PK columns stay the same
-    writer.print(
-        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
-        \\AFTER UPDATE ON "{s}"
-        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build WHEN clause for non-PK column changes: OLD.col IS NOT NEW.col OR ...
-    var first_when = true;
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            if (!first_when) {
-                writer.writeAll(" OR ") catch return error.BufferOverflow;
-            }
-            writer.print("OLD.\"{s}\" IS NOT NEW.\"{s}\"", .{
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-            }) catch return error.BufferOverflow;
-            first_when = false;
-        }
-    }
-
-    // Add exclusion for PK column changes: AND all PK columns are unchanged
-    // This prevents this trigger from firing when PK changes (handled by pk_utrig)
+    // Trigger header with sync_bit gating
+    // This trigger fires on ALL updates where PK columns stay the same (matching Rust/C oracle)
+    // The column change filtering happens in the INSERT statements below, not in the WHEN clause
+    // This ensures db_version advances even on no-op updates for sync protocol parity
     if (info.pk_count > 0) {
-        writer.writeAll(") AND (") catch return error.BufferOverflow;
+        // Has PK columns - exclude PK changes (handled by pk_utrig)
+        writer.print(
+            \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
+            \\AFTER UPDATE ON "{s}"
+            \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
+        , .{ table_name, table_name }) catch return error.BufferOverflow;
+
         var first_pk = true;
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index > 0) {
@@ -503,10 +489,21 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
                 first_pk = false;
             }
         }
+        writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
+    } else {
+        // No PK columns - fire on all updates
+        writer.print(
+            \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
+            \\AFTER UPDATE ON "{s}"
+            \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0
+            \\BEGIN
+            \\
+        , .{ table_name, table_name }) catch return error.BufferOverflow;
     }
 
-    // Close the parentheses for conditions
-    writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
+    // CRITICAL: Always advance db_version when trigger fires, even on no-op updates
+    // This matches Rust/C oracle behavior and is required for sync protocol parity
+    writer.writeAll("  SELECT crsql_next_db_version();\n") catch return error.BufferOverflow;
 
     // Generate clock entry for each non-PK column (only when changed)
     // Use pks table lookup to get the pk key (not base table rowid)

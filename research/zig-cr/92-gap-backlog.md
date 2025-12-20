@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 50 — TASK-101 complete)
+> Last updated: 2025-12-20 (Round 51 — TASK-121, TASK-122 complete — zero divergences)
 
 ## Status
 
@@ -89,13 +89,11 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - **BYTE-IDENTICAL**: 12/12 tests pass
   - Test: `zig/harness/test-fract-parity.sh`
 - [x] **TASK-092** — db_version advancement parity ✓ `.tasks/done/TASK-092-db-version-advancement-parity.md`
-  - **1 DIVERGENCE**: No-op UPDATE handling (Rust advances, Zig doesn't)
-  - 12 passed, 1 failed
-  - Test: `zig/harness/test-db-version-parity.sh`
+  - ~~**1 DIVERGENCE**: No-op UPDATE handling~~ → **FIXED by TASK-122**
+  - Test: `zig/harness/test-db-version-parity.sh` = 14/14 pass ✓
 - [x] **TASK-093** — rows_impacted counter timing ✓ `.tasks/done/TASK-093-rows-impacted-counter-timing.md`
-  - **1 DIVERGENCE**: ROLLBACK behavior (Rust/C does NOT reset, Zig incorrectly resets)
-  - 17 passed, 1 failed
-  - Test: `zig/harness/test-rows-impacted-parity.sh`
+  - ~~**1 DIVERGENCE**: ROLLBACK behavior~~ → **FIXED by TASK-121**
+  - Test: `zig/harness/test-rows-impacted-parity.sh` = 18/18 pass ✓
 - [x] **TASK-094** — ALTER TABLE history preservation ✓ `.tasks/done/TASK-094-alter-table-history-preservation.md`
   - Divergence found: ADD COLUMN clock backfill semantics (Zig eager vs Rust lazy)
   - [x] **TASK-100** — Decide ADD COLUMN clock semantics ✓ `.tasks/done/TASK-100-decide-alter-new-column-clock-semantics.md`
@@ -199,3 +197,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 ## Gaps (only what's still open)
 
 - Effect Bun scratchpad (blocked on Tom / TS spec-gate): `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
+
+## Done (recent)
+
+- **Round 51 (2025-12-20)**:
+  - TASK-121: Fix rows_impacted ROLLBACK reset divergence (18/18 pass)
+  - TASK-122: Fix no-op UPDATE db_version divergence (14/14 pass)
+  - **Zero oracle divergences remaining**

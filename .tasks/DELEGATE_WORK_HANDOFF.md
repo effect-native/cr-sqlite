@@ -68,6 +68,77 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (51) — Fix remaining oracle divergences (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-121-fix-rows-impacted-rollback-reset.md`
+- `.tasks/done/TASK-122-fix-noop-update-db-version-divergence.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-rows-impacted-parity.sh
+bash zig/harness/test-db-version-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-121: test-rows-impacted-parity.sh (18/18 pass)</summary>
+
+```text
+rows_impacted Parity Test Summary
+  PASSED:      18
+  FAILED:      0
+  DIVERGENCES: 0
+```
+
+**Fix:** Removed `resetCounter()` call from `rollbackHookCallback` in `zig/src/rows_impacted.zig`.
+Now matches Rust/C oracle where `xRollback` is NULL (does not reset counter).
+</details>
+
+<details>
+<summary>TASK-122: test-db-version-parity.sh (14/14 pass)</summary>
+
+```text
+db_version Parity Test Summary
+  PASSED:     14
+  FAILED:     0
+  DIVERGENCES: 0
+```
+
+**Fix:** Modified UPDATE trigger in `zig/src/as_crr.zig` to:
+1. Remove non-PK column change checks from WHEN clause
+2. Add unconditional `SELECT crsql_next_db_version()` at start of trigger body
+3. Keep per-column WHERE clause to avoid writing unchanged clock entries
+
+Now `db_version` advances on no-op UPDATE, matching Rust/C oracle behavior.
+</details>
+
+**Files modified:**
+- `zig/src/rows_impacted.zig` — removed resetCounter() from rollback hook
+- `zig/src/as_crr.zig` — fixed UPDATE trigger to fire on all updates
+- `zig/src/schema_alter.zig` — same fix for post-ALTER trigger recreation
+- `zig/harness/test-db-version-parity.sh` — updated comments
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-rows-impacted-parity.sh` — verify 18/18 pass
+3. `bash zig/harness/test-db-version-parity.sh` — verify 14/14 pass
+
+**Known gaps / unverified claims**
+- **Zero oracle divergences remaining** — all parity tests pass
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (50) — Implement lazy ALTER ADD COLUMN semantics (1 task)
 
 **Tasks executed**
