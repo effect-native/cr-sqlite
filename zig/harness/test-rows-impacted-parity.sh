@@ -36,25 +36,29 @@ echo "Oracle Parity Test: rows_impacted counter reset timing"
 echo "============================================================================="
 echo ""
 
-# Determine extensions based on platform
+# Determine extension paths based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
     ARCH=$(uname -m)
     if [[ "$ARCH" == "arm64" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.dylib"
-        ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
     else
         RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
-        ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
     fi
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
 else
-    RUST_EXT="$REPO_ROOT/lib/crsqlite.so"
+    ARCH=$(uname -m)
+    if [[ "$ARCH" == "aarch64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
+    else
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
+    fi
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
 fi
 
-# Check for Rust/C extension (oracle)
+# Check for Rust/C oracle
 if [[ ! -f "$RUST_EXT" ]]; then
-    echo "BLOCKED: Rust/C extension not found at $RUST_EXT"
-    echo "Run 'make -C core' or copy the built extension to lib/"
+    echo "BLOCKED: Rust/C oracle not found at $RUST_EXT"
+    echo "Run: ./scripts/update-crsqlite-oracle.sh"
     exit 2
 fi
 
@@ -69,8 +73,11 @@ if [[ ! -f "$ZIG_EXT" ]]; then
     fi
 fi
 
-echo "Rust/C extension (oracle): $RUST_EXT"
-echo "Zig extension (candidate): $ZIG_EXT"
+# NOTE: The sqlite3_close() returns 5 warning is harmless and expected.
+SQLITE="nix run nixpkgs#sqlite --"
+
+echo "Rust/C oracle: $RUST_EXT"
+echo "Zig extension: $ZIG_EXT"
 echo ""
 
 # Temp files for output
@@ -86,12 +93,18 @@ FAIL=0
 DIVERGE=0
 
 # Helper to run SQL and capture rows_impacted checkpoints
+# For Rust/C oracle, use local binary; for Zig, use explicit extension load
 run_test() {
     local ext="$1"
     local sql="$2"
     local out="$3"
-    # Run SQL and capture all output lines containing CHECKPOINT=
-    nix run nixpkgs#sqlite -- :memory: -cmd ".load $ext" "$sql" 2>"$ERRFILE" | grep "CHECKPOINT=" > "$out" || true
+    if [[ "$ext" == "RUST_ORACLE" ]]; then
+        # Rust/C oracle via local binary
+        $SQLITE :memory: -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" | grep "CHECKPOINT=" > "$out" || true
+    else
+        # Zig extension with explicit load
+        $SQLITE :memory: -cmd ".load $ext" "$sql" 2>"$ERRFILE" | grep "CHECKPOINT=" > "$out" || true
+    fi
 }
 
 # Compare results between implementations
@@ -126,7 +139,7 @@ SELECT 'CHECKPOINT=after_single_insert:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
     echo "  SKIP: crsql_rows_impacted() not available in Rust/C extension"
     exit 2
@@ -180,7 +193,7 @@ SELECT 'CHECKPOINT=after_third:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C:"
@@ -227,7 +240,7 @@ COMMIT;
 SELECT 'CHECKPOINT=after_commit:' || crsql_rows_impacted();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C:"
@@ -276,7 +289,7 @@ SELECT 'CHECKPOINT=after_new_insert:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C:"
@@ -323,7 +336,7 @@ ROLLBACK;
 SELECT 'CHECKPOINT=after_rollback:' || crsql_rows_impacted();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C:"
@@ -372,7 +385,7 @@ SELECT 'CHECKPOINT=after_noop_merge:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT")"
@@ -414,7 +427,7 @@ SELECT 'CHECKPOINT=after_losing_merge:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT")"
@@ -456,7 +469,7 @@ SELECT 'CHECKPOINT=after_winning_merge:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT")"
@@ -498,7 +511,7 @@ SELECT 'CHECKPOINT=after_delete:' || crsql_rows_impacted();
 COMMIT;
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT")"

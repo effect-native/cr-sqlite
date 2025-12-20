@@ -26,25 +26,29 @@ echo "Oracle Parity Test: db_version advancement timing"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Determine extensions based on platform
+# Determine extension paths based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
     ARCH=$(uname -m)
     if [[ "$ARCH" == "arm64" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.dylib"
-        ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
     else
         RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
-        ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
     fi
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
 else
-    RUST_EXT="$REPO_ROOT/lib/crsqlite.so"
+    ARCH=$(uname -m)
+    if [[ "$ARCH" == "aarch64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
+    else
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
+    fi
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
 fi
 
-# Check for Rust/C extension (oracle)
+# Check for Rust/C oracle
 if [[ ! -f "$RUST_EXT" ]]; then
-    echo "BLOCKED: Rust/C extension not found at $RUST_EXT"
-    echo "Run 'make -C core' or copy the built extension to lib/"
+    echo "BLOCKED: Rust/C oracle not found at $RUST_EXT"
+    echo "Run: ./scripts/update-crsqlite-oracle.sh"
     exit 2
 fi
 
@@ -59,8 +63,11 @@ if [[ ! -f "$ZIG_EXT" ]]; then
     fi
 fi
 
-echo "Rust/C extension (oracle): $RUST_EXT"
-echo "Zig extension (candidate): $ZIG_EXT"
+# NOTE: The sqlite3_close() returns 5 warning is harmless and expected.
+SQLITE="nix run nixpkgs#sqlite --"
+
+echo "Rust/C oracle: $RUST_EXT"
+echo "Zig extension: $ZIG_EXT"
 echo ""
 
 # Temp files for output
@@ -76,12 +83,18 @@ FAIL=0
 DIVERGE=0
 
 # Helper to run SQL and capture db_version and next_db_version
+# For Rust/C oracle, use local binary; for Zig, use explicit extension load
 run_test() {
     local ext="$1"
     local sql="$2"
     local out="$3"
-    # Run SQL and capture all output lines containing VERSION=
-    nix run nixpkgs#sqlite -- :memory: -cmd ".load $ext" "$sql" 2>"$ERRFILE" | grep "VERSION=" > "$out" || true
+    if [[ "$ext" == "RUST_ORACLE" ]]; then
+        # Rust/C oracle via local binary
+        $SQLITE :memory: -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" | grep "VERSION=" > "$out" || true
+    else
+        # Zig extension with explicit load
+        $SQLITE :memory: -cmd ".load $ext" "$sql" 2>"$ERRFILE" | grep "VERSION=" > "$out" || true
+    fi
 }
 
 # Compare results between implementations
@@ -110,7 +123,7 @@ SELECT 'DB_VERSION=' || crsql_db_version();
 SELECT 'NEXT_DB_VERSION=' || crsql_next_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 if grep -q "no such function" "$ERRFILE" 2>/dev/null; then
     echo "  SKIP: crsql_db_version() not available in Rust/C extension"
     exit 2
@@ -170,7 +183,7 @@ SELECT 'AFTER_INSERT_VERSION=' || crsql_db_version();
 SELECT 'NEXT_DB_VERSION=' || crsql_next_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -199,7 +212,7 @@ UPDATE foo SET b = 'world' WHERE a = 1;
 SELECT 'AFTER_UPDATE_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -234,7 +247,7 @@ COMMIT;
 SELECT 'AFTER_COMMIT_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -263,7 +276,7 @@ DELETE FROM foo WHERE a = 1;
 SELECT 'AFTER_DELETE_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -292,7 +305,7 @@ UPDATE foo SET b = 'hello' WHERE a = 1;
 SELECT 'AFTER_NOOP_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -334,7 +347,7 @@ VALUES ('foo', X'010901', 'b', 'remote', 2, 2, X'0000000000000000000000000000000
 SELECT 'AFTER_MERGE_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"
@@ -387,7 +400,7 @@ VALUES ('foo', X'010901', 'b', 'stale_remote', 1, 1, X'0000000000000000000000000
 SELECT 'AFTER_NOOP_MERGE_VERSION=' || crsql_db_version();
 "
 
-run_test "$RUST_EXT" "$SQL" "$RUST_OUT"
+run_test "RUST_ORACLE" "$SQL" "$RUST_OUT"
 run_test "$ZIG_EXT" "$SQL" "$ZIG_OUT"
 
 echo "  Rust/C: $(cat "$RUST_OUT" | tr '\n' ' ')"

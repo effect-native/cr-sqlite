@@ -16,40 +16,43 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Determine extension paths based on platform
+ZIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ "$(uname)" == "Darwin" ]]; then
     ARCH="$(uname -m)"
     if [[ "$ARCH" == "arm64" ]]; then
         RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
-        ZIG_EXT="$REPO_ROOT/lib/crsqlite-zig-darwin-aarch64.dylib"
     else
         RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
-        ZIG_EXT="$REPO_ROOT/lib/crsqlite-zig-darwin-x86_64.dylib"
     fi
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
 else
     ARCH="$(uname -m)"
     if [[ "$ARCH" == "aarch64" ]]; then
         RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
-        ZIG_EXT="$REPO_ROOT/lib/crsqlite-zig-linux-aarch64.so"
     else
         RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
-        ZIG_EXT="$REPO_ROOT/lib/crsqlite-zig-linux-x86_64.so"
     fi
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
 fi
 
 # Verify extensions exist
 if [[ ! -f "$RUST_EXT" ]]; then
-    echo "ERROR: Rust/C extension not found at $RUST_EXT"
+    echo "ERROR: Rust/C oracle not found at $RUST_EXT"
+    echo "Run: ./scripts/update-crsqlite-oracle.sh"
     exit 1
 fi
 
 if [[ ! -f "$ZIG_EXT" ]]; then
     echo "ERROR: Zig extension not found at $ZIG_EXT"
-    echo "Run 'make -C zig' to build it first"
+    echo "Run 'cd zig && nix run nixpkgs#zig -- build' to build it first"
     exit 1
 fi
 
-echo "Rust/C extension: $RUST_EXT"
-echo "Zig extension:    $ZIG_EXT"
+# NOTE: The sqlite3_close() returns 5 warning is harmless and expected.
+SQLITE="timeout 30s nix run nixpkgs#sqlite --"
+
+echo "Rust/C oracle: $RUST_EXT"
+echo "Zig extension: $ZIG_EXT"
 echo ""
 
 # Create temp directory and files
@@ -65,20 +68,18 @@ trap "rm -f $RUST_DB $ZIG_DB $RUST_OUT $ZIG_OUT $ERRFILE" EXIT
 PASS=0
 FAIL=0
 
-# Helper: Run SQL on Rust extension
-# Note: We must specify the entry point explicitly because the filename
-# doesn't follow SQLite's naming convention (libname.ext -> sqlite3_libname_init)
+# Helper: Run SQL on Rust/C oracle (local binary)
 run_rust() {
     local db="$1"
     local sql="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
+    $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
 }
 
 # Helper: Run SQL on Zig extension
 run_zig() {
     local db="$1"
     local sql="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $ZIG_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
+    $SQLITE "$db" -cmd ".load $ZIG_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
 }
 
 # Helper: Dump clock table sorted for comparison
@@ -86,14 +87,14 @@ run_zig() {
 dump_clock_rust() {
     local db="$1"
     local table="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" \
+    $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" \
         "SELECT key AS pk, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY key, col_name, db_version;" 2>/dev/null || true
 }
 
 dump_clock_zig() {
     local db="$1"
     local table="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $ZIG_EXT sqlite3_crsqlite_init" \
+    $SQLITE "$db" -cmd ".load $ZIG_EXT sqlite3_crsqlite_init" \
         "SELECT pk, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY pk, col_name, db_version;" 2>/dev/null || true
 }
 

@@ -30,26 +30,11 @@ if ! nix run nixpkgs#zig -- build 2>&1; then
     exit 1
 fi
 
-# Determine extension paths based on platform
+# Determine Zig extension path based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
-    # Try multiple locations for Rust/C extension
-    if [[ -f "$REPO_ROOT/lib/crsqlite.dylib" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.dylib"
-    elif [[ -f "$REPO_ROOT/core/dist/crsqlite.dylib" ]]; then
-        RUST_EXT="$REPO_ROOT/core/dist/crsqlite.dylib"
-    else
-        RUST_EXT=""
-    fi
 else
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
-    if [[ -f "$REPO_ROOT/lib/crsqlite.so" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.so"
-    elif [[ -f "$REPO_ROOT/core/dist/crsqlite.so" ]]; then
-        RUST_EXT="$REPO_ROOT/core/dist/crsqlite.so"
-    else
-        RUST_EXT=""
-    fi
 fi
 
 # Check for Zig extension
@@ -58,20 +43,35 @@ if [[ ! -f "$ZIG_EXT" ]]; then
     exit 1
 fi
 
-# Check for oracle extension (Rust/C)
-if [[ -z "$RUST_EXT" ]] || [[ ! -f "$RUST_EXT" ]]; then
-    echo "WARNING: Rust/C oracle extension not found"
-    echo "  Checked: $REPO_ROOT/lib/crsqlite.{dylib,so}"
-    echo "  Checked: $REPO_ROOT/core/dist/crsqlite.{dylib,so}"
-    echo ""
-    echo "SKIP: Oracle parity tests require Rust/C extension"
-    echo "  Build with: make -C core loadable"
-    echo "  Or: npm run bundle-lib"
-    exit 2  # Exit code 2 = skipped
+# Use local oracle binaries (updated via scripts/update-crsqlite-oracle.sh)
+# These are fetched from vlcn-io/cr-sqlite releases, same source as sqlite-cr.
+# NOTE: The sqlite3_close() returns 5 warning is harmless and expected.
+if [[ "$(uname)" == "Darwin" ]]; then
+    ARCH="$(uname -m)"
+    if [[ "$ARCH" == "arm64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
+    else
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
+    fi
+else
+    ARCH="$(uname -m)"
+    if [[ "$ARCH" == "aarch64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
+    else
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
+    fi
 fi
 
-echo "Zig extension:    $ZIG_EXT"
-echo "Rust/C extension: $RUST_EXT"
+if [[ ! -f "$RUST_EXT" ]]; then
+    echo "ERROR: Rust/C oracle not found at $RUST_EXT"
+    echo "Run: ./scripts/update-crsqlite-oracle.sh"
+    exit 1
+fi
+
+SQLITE_ZIG="timeout 30s nix run nixpkgs#sqlite --"
+
+echo "Rust/C oracle: $RUST_EXT"
+echo "Zig extension: $ZIG_EXT"
 echo ""
 
 # Create temp directory
@@ -88,14 +88,14 @@ SKIP=0
 run_zig() {
     local db="$1"
     local sql="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $ZIG_EXT" "$sql" 2>"$ERRFILE" || true
+    $SQLITE_ZIG "$db" -cmd ".load $ZIG_EXT" "$sql" 2>"$ERRFILE" || true
 }
 
-# Helper to run SQL with Rust/C extension
+# Helper to run SQL with Rust/C extension (local oracle)
 run_rust() {
     local db="$1"
     local sql="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT" "$sql" 2>"$ERRFILE" || true
+    $SQLITE_ZIG "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
 }
 
 # Check for blocking errors
