@@ -14,7 +14,7 @@ high
 (unassigned)
 
 ## Parent Docs / Cross-links
-- Spec task: `.tasks/backlog/TASK-083-spec-table-compat.md`
+- Spec task: `.tasks/done/TASK-083-spec-table-compat.md` (completed 2025-12-20)
 - Rust reference: `core/rs/core/src/tableinfo.rs`
 - Zig table info extraction: `zig/src/as_crr.zig`
 - Gap backlog: `research/zig-cr/92-gap-backlog.md`

@@ -24,6 +24,8 @@
 #   - test-is-crr.sh: crsql_is_crr() detection (is-crr.test.c)
 #   - test-crsqlite.sh: Core crsqlite behaviors (crsqlite.test.c)
 #   - test-unpack-columns-vtab.sh: crsql_unpack_columns virtual table (RGRTDD)
+#   - test-table-compat.sh: Table compatibility checks for crsql_as_crr (RGRTDD)
+#   - test-config.sh: crsql_config_get/set API (RGRTDD)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -872,6 +874,55 @@ else
         echo "  Merge atomicity tests: $ATOMICITY_PASS passed, $ATOMICITY_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + ATOMICITY_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + ATOMICITY_FAIL))
+    fi
+fi
+
+# Run table compatibility tests (RGRTDD spec - crsql_as_crr validation)
+echo "Running test-table-compat.sh..."
+if bash "$SCRIPT_DIR/test-table-compat.sh" > "$TMPFILE" 2>&1; then
+    COMPAT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || COMPAT_PASS=0
+    echo "  Table compatibility tests: $COMPAT_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + COMPAT_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Table compatibility tests: BLOCKED (crsql_as_crr not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    elif grep -q "RED PHASE" "$TMPFILE"; then
+        COMPAT_EXPECTED=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || COMPAT_EXPECTED=0
+        echo "  Table compatibility tests: SKIPPED ($COMPAT_EXPECTED tests await validation implementation)"
+        TOTAL_SKIP=$((TOTAL_SKIP + COMPAT_EXPECTED))
+    else
+        COMPAT_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || COMPAT_FAIL=0
+        COMPAT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || COMPAT_PASS=0
+        echo "  Table compatibility tests: $COMPAT_PASS passed, $COMPAT_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + COMPAT_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + COMPAT_FAIL))
+    fi
+fi
+
+# Run config API tests (RGRTDD spec - crsql_config_get/set)
+echo "Running test-config.sh..."
+if bash "$SCRIPT_DIR/test-config.sh" > "$TMPFILE" 2>&1; then
+    CONFIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || CONFIG_PASS=0
+    echo "  Config API tests: $CONFIG_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + CONFIG_PASS))
+else
+    EXIT_CODE=$?
+    # Exit 0 with "RED PHASE" = functions not yet implemented (expected)
+    if grep -q "RED PHASE" "$TMPFILE"; then
+        CONFIG_EXPECTED=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || CONFIG_EXPECTED=0
+        echo "  Config API tests: SKIPPED ($CONFIG_EXPECTED tests await implementation)"
+        TOTAL_SKIP=$((TOTAL_SKIP + CONFIG_EXPECTED))
+    elif [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Config API tests: SKIPPED (config functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        CONFIG_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || CONFIG_FAIL=0
+        CONFIG_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || CONFIG_PASS=0
+        echo "  Config API tests: $CONFIG_PASS passed, $CONFIG_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + CONFIG_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + CONFIG_FAIL))
     fi
 fi
 
