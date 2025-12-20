@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 49 — TASK-119, TASK-100 complete)
+> Last updated: 2025-12-20 (Round 50 — TASK-101 complete)
 
 ## Status
 
@@ -101,7 +101,9 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - [x] **TASK-100** — Decide ADD COLUMN clock semantics ✓ `.tasks/done/TASK-100-decide-alter-new-column-clock-semantics.md`
     - **Decision: LAZY MATERIALIZE** — Zig should NOT backfill clock entries on ADD COLUMN
     - Rationale: Clock entries represent writes, not schema changes; matches oracle; O(0) sync payload
-  - [ ] **TASK-101** — Implement lazy semantics in Zig → `.tasks/backlog/TASK-101-impl-alter-add-column-no-backfill.md`
+  - [x] **TASK-101** — Implement lazy semantics in Zig ✓ `.tasks/done/TASK-101-impl-alter-add-column-no-backfill.md`
+    - Removed `backfillNewColumns()` call from `crsqlCommitAlterFunc`
+    - Test: `zig/harness/test-alter-parity.sh` = 19/19 pass ✓
   - [x] **TASK-102** — Fix/replace local oracle dylib (ALTER) ✓ `.tasks/done/TASK-102-fix-oracle-crsqlite-dylib-alter.md`
 
 ### Realistic Sync Tests

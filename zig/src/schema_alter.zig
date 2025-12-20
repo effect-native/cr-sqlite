@@ -84,9 +84,12 @@ fn crsqlBeginAlterFunc(
 /// 1. Clean up clock entries for removed columns
 /// 2. Re-read table schema via PRAGMA table_info
 /// 3. Recreate triggers with new column list
-/// 4. Backfill clock entries for new columns with col_version=1
-/// 5. Release the savepoint
-/// 6. Return NULL on success, error on failure
+/// 4. Release the savepoint
+/// 5. Return NULL on success, error on failure
+///
+/// NOTE: Zig uses LAZY MATERIALIZE semantics for ADD COLUMN (matches oracle).
+/// Clock entries are NOT created eagerly; they are only created when the
+/// column is explicitly written (UPDATE/INSERT).
 fn crsqlCommitAlterFunc(
     pCtx: ?*api.sqlite3_context,
     argc: c_int,
@@ -147,12 +150,10 @@ fn crsqlCommitAlterFunc(
         return;
     };
 
-    // Step 3: Backfill clock entries for new columns
-    backfillNewColumns(db, table_name_ptr) catch {
-        api.result_error(pCtx, "crsql_commit_alter: failed to backfill new columns", -1);
-        _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
-        return;
-    };
+    // NOTE: Zig uses LAZY MATERIALIZE semantics for ADD COLUMN (matches oracle).
+    // Clock entries are NOT created eagerly on ADD COLUMN.
+    // They are only created when the column is explicitly written (UPDATE/INSERT).
+    // This matches Rust/C oracle behavior.
 
     // Release savepoint on success
     if (api.exec(db, "RELEASE alter_crr", null, null, null) != api.SQLITE_OK) {

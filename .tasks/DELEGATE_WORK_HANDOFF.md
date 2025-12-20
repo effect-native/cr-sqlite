@@ -68,6 +68,105 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (50) — Implement lazy ALTER ADD COLUMN semantics (1 task)
+
+**Tasks executed**
+- `.tasks/done/TASK-101-impl-alter-add-column-no-backfill.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-alter-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-101: test-alter-parity.sh (19/19 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║       ALTER TABLE Parity Test (Zig vs Rust/C Oracle)                  ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+Rust/C: using sqlite-cr (nix run github:subtleGradient/sqlite-cr)
+Zig extension: /Users/tom/Developer/effect-native/cr-sqlite/zig/zig-out/lib/libcrsqlite.dylib
+
+Test 1: ADD COLUMN (nullable)
+  PASS: Pre-alter state - clock states match
+  PASS: Post-ADD COLUMN (nullable) - clock states match
+  PASS: After UPDATE on new column - clock states match
+
+Test 2: ADD COLUMN with DEFAULT
+  PASS: Pre-alter state - clock states match
+  PASS: Post-ADD COLUMN with DEFAULT - clock states match
+
+Test 3: DROP COLUMN
+  PASS: Pre-DROP state - clock states match
+  PASS: Post-DROP COLUMN - clock states match
+  PASS: Dropped column clock entries removed
+
+Test 4: ADD INDEX / DROP INDEX
+  PASS: Pre-INDEX state - clock states match
+  PASS: Post-ADD INDEX - clock states match
+  PASS: Post-DROP INDEX - clock states match
+
+Test 5: ALTER on empty table
+  PASS: Empty table ALTER handled (both have 0 clock entries)
+
+Test 6: ALTER on table with 1000+ rows
+  Rust clock entries: 1000
+  Zig clock entries: 1000
+  PASS: 1000-row ALTER clock count matches
+
+Test 7: Multiple ALTERs in sequence
+  PASS: Sequential ALTERs - dropped column removed from both
+
+Test 8: ADD COLUMN then immediately UPDATE
+  PASS: UPDATE on new column worked in both
+  Clock entries for 'newcol': Rust=1, Zig=1
+  PASS: Both have clock entries for new column after UPDATE
+
+Test 9: Existing clock history preserved
+  PASS: Rust/C preserved existing clock entries
+  PASS: Zig preserved existing clock entries
+
+Test 10: New column backfill behavior
+  Backfill clock entries: Rust=0, Zig=0
+  INFO: Rust does NOT backfill clock entries for new columns
+  PASS: Backfill behavior documented
+
+╔═══════════════════════════════════════════════════════════════════════╗
+║                    ALTER PARITY TEST SUMMARY                          ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  19                                                         ║
+║  FAILED:  0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+All ALTER parity tests PASSED
+```
+
+**Change made**: Removed `backfillNewColumns()` call from `crsqlCommitAlterFunc` in `zig/src/schema_alter.zig`.
+
+Zig now uses **LAZY MATERIALIZE** semantics for ALTER ADD COLUMN, matching the Rust/C oracle behavior exactly.
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-alter-parity.sh` — verify 19/19 pass
+
+**Known gaps / unverified claims**
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (49) — Fix merge pk/rowid confusion + ALTER semantics decision (3 tasks)
 
 **Tasks executed**
