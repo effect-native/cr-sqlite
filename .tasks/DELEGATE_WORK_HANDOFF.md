@@ -68,6 +68,109 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (48) — Merge atomicity verify + WAL concurrency tests + sqlite-cr policy (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-088-impl-merge-atomicity.md`
+- `.tasks/done/TASK-106-zig-wal-concurrency-persistence-test.md`
+- `.tasks/done/TASK-107-clarify-sqlite-cr-wrapper-for-zig-tests.md`
+
+**Commits**
+- `0bbec043` — delegate round 48: merge atomicity verify, WAL concurrency tests, sqlite-cr policy (TASK-088, TASK-106, TASK-107)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, bash, zig (via nix)
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-merge-atomicity.sh
+bash zig/harness/test-wal-concurrency.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-088: test-merge-atomicity.sh (8/8 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Merge Atomicity Tests Summary: 8 passed, 0 failed, 0 skipped
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All merge atomicity tests passed!
+```
+
+**Key finding:** No implementation was needed. SQLite's native statement/transaction semantics already provide the required atomicity guarantees. The Zig changes vtab sets `xBegin`, `xCommit`, `xRollback` to `null`, and SQLite's built-in statement atomicity handles the rest.
+</details>
+
+<details>
+<summary>TASK-106: test-wal-concurrency.sh (10/10 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║              WAL CONCURRENCY TEST SUMMARY                            ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  10                                                         ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+All WAL concurrency tests PASSED
+```
+
+**Test cases created:**
+1. WAL mode setup and basic isolation
+2. Uncommitted changes NOT visible to other connections (snapshot isolation)
+3. Concurrent readers do not block (3 parallel readers)
+4. Writer does not block readers
+5. CRR changes tracked correctly with multiple connections
+6. db_version consistency across multiple connections
+7. site_id consistency across concurrent connections
+
+**Key findings:**
+- SQLite WAL serializes writes (one writer at a time)
+- Readers don't block writers; writers don't block readers
+- `PRAGMA read_uncommitted` only applies to shared-cache mode
+- CR-SQLite `crsql_site_id()`, `crsql_db_version()`, clock tables work correctly under WAL
+</details>
+
+<details>
+<summary>TASK-107: AGENTS.md policy update</summary>
+
+**Policy decision:** The sqlite-cr wrapper can be used, but ONLY for testing the Rust/C oracle (reference implementation), NEVER for testing the Zig extension.
+
+**Audit results:** All 39 test scripts in `zig/harness/test-*.sh` are compliant:
+- 38 scripts use clean `nix run nixpkgs#sqlite` + explicit `.load $ZIG_EXT`
+- 1 script (`test-alter-parity.sh`) uses sqlite-cr correctly — only for Rust/C oracle
+
+**AGENTS.md updated** with detailed Zig testing policy including:
+- Core rule (no double-loading)
+- sqlite-cr wrapper usage guidelines (ALLOWED vs FORBIDDEN)
+- Test script pattern examples
+- Explanation of conflicts from double-loading
+</details>
+
+**Files created/modified:**
+- `zig/harness/test-wal-concurrency.sh` (new, ~200 lines)
+- `zig/harness/test-parity.sh` (wired in WAL concurrency test)
+- `AGENTS.md` (expanded Zig testing policy section)
+- `.tasks/done/TASK-088-impl-merge-atomicity.md` (completion notes)
+- `.tasks/done/TASK-106-zig-wal-concurrency-persistence-test.md` (completion notes)
+- `.tasks/done/TASK-107-clarify-sqlite-cr-wrapper-for-zig-tests.md` (completion notes)
+- `research/zig-cr/92-gap-backlog.md` (status update)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-merge-atomicity.sh` — verify 8/8 pass
+3. `bash zig/harness/test-wal-concurrency.sh` — verify 10/10 pass
+4. Review `AGENTS.md` "Zig testing (detailed policy)" section
+
+**Known gaps / unverified claims**
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (45) — clset impl + merge atomicity spec + unpack_columns spec (3 tasks)
 
 **Tasks executed**

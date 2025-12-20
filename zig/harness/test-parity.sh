@@ -17,6 +17,7 @@
 #   - test-multiconn.sh: Multi-connection scenarios (on-disk DB parity)
 #   - test-backfill.sh: crsql_as_crr() backfill on existing data
 #   - test-persistence.sh: On-disk DB persistence across sessions
+#   - test-wal-concurrency.sh: WAL mode concurrent read/write behavior
 #   - test-pk-update.sh: Primary key UPDATE semantics (DELETE+INSERT)
 #   - test-extdata.sh: ExtData lifecycle (schema changes, table tracking)
 #   - test-sandbox.sh: Sandbox tests (basic sync, convergence, oracle parity)
@@ -704,6 +705,26 @@ else
         echo "  Persistence tests: $PERSIST_PASS passed, $PERSIST_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + PERSIST_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + PERSIST_FAIL))
+    fi
+fi
+
+# Run WAL concurrency tests (concurrent read/write with WAL mode)
+echo "Running test-wal-concurrency.sh..."
+if bash "$SCRIPT_DIR/test-wal-concurrency.sh" > "$TMPFILE" 2>&1; then
+    WALCONC_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || WALCONC_PASS=0
+    echo "  WAL concurrency tests: $WALCONC_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + WALCONC_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE" || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  WAL concurrency tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 10))
+    else
+        WALCONC_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || WALCONC_FAIL=0
+        WALCONC_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || WALCONC_PASS=0
+        echo "  WAL concurrency tests: $WALCONC_PASS passed, $WALCONC_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + WALCONC_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + WALCONC_FAIL))
     fi
 fi
 

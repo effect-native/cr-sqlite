@@ -133,6 +133,44 @@ Procedure:
 
 Note: `.tasks/active/` can be changing while you read it. Take a snapshot and proceed.
 
-## Zig testing (quick rule)
+## Zig testing (detailed policy)
 
+### Core Rule
 Do not run the Zig extension inside a sqlite3 wrapper that preloads another cr-sqlite extension. Load the Zig extension explicitly into a clean sqlite process.
+
+### sqlite-cr Wrapper Usage
+
+The `nix run github:subtleGradient/sqlite-cr` wrapper preloads the Rust/C cr-sqlite extension. Use it carefully:
+
+**ALLOWED:**
+- Use sqlite-cr as the Rust/C **oracle** for parity tests (reference implementation)
+- In the same test script, use clean `nix run nixpkgs#sqlite` + `.load $ZIG_EXT` for Zig
+
+**FORBIDDEN:**
+- Using sqlite-cr to test Zig extension behavior (double-loading causes conflicts)
+- Loading Zig extension into a sqlite-cr process
+
+### Test Script Pattern
+
+```bash
+# Rust/C oracle (option A: explicit .load)
+run_rust() {
+    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT" "$sql"
+}
+
+# Rust/C oracle (option B: sqlite-cr wrapper - for convenience)
+run_rust() {
+    nix run github:subtleGradient/sqlite-cr -- "$db" <<< "$sql"
+}
+
+# Zig extension (ALWAYS clean sqlite + explicit .load)
+run_zig() {
+    nix run nixpkgs#sqlite -- "$db" -cmd ".load $ZIG_EXT" "$sql"
+}
+```
+
+### Why This Matters
+- Two cr-sqlite extensions in one process = undefined behavior
+- Function conflicts (both register `crsql_as_crr`, etc.)
+- Double triggers on CRR tables
+- Invalid test results

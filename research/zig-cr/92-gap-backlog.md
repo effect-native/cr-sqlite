@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 47 — TASK-084, TASK-086, TASK-074 complete)
+> Last updated: 2025-12-20 (Round 48 — TASK-088, TASK-106, TASK-107 complete)
 
 ## Status
 
@@ -74,8 +74,9 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - Supports `merge-equal-values` config with persistence to crsql_master
 - [x] **TASK-087** — Spec merge atomicity for batch apply ✓ `.tasks/done/TASK-087-spec-merge-atomicity.md`
   - Test: `zig/harness/test-merge-atomicity.sh` (8 tests, all pass — Zig has native atomicity)
-- [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
-  - Note: May be obsolete — Zig already passes all atomicity tests via SQLite's native semantics
+- [x] **TASK-088** — Verify merge atomicity ✓ `.tasks/done/TASK-088-impl-merge-atomicity.md`
+  - **No implementation needed** — SQLite's native statement atomicity is sufficient
+  - All 8 tests pass; hypothesis confirmed that Zig needs no explicit savepoint code
 
 ### Oracle-based parity tests (Rust/C as golden master)
 - [x] **TASK-089** — API surface completeness ✓ `.tasks/done/TASK-089-api-surface-completeness.md`
@@ -138,7 +139,13 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 |-----|------|------|
 | All tests use `:memory:` | HIGH | TASK-098 (done) |
 | No multi-connection tests | HIGH | TASK-099 (done) |
+| No WAL concurrency tests | HIGH | TASK-106 ✓ (done) — `test-wal-concurrency.sh` (10/10 pass) |
 | No crash/rollback tests | MEDIUM | Future |
+
+### Policy/Documentation Tasks
+- [x] **TASK-107** — Clarify sqlite-cr wrapper usage ✓ `.tasks/done/TASK-107-clarify-sqlite-cr-wrapper-for-zig-tests.md`
+  - Updated `AGENTS.md` with detailed Zig testing policy
+  - Audited all 39 test scripts; all compliant
 
 ## Context / Evidence
 
@@ -151,6 +158,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ## Done (recent)
 
+- **Round 48 (2025-12-20)**:
+  - TASK-088: Verify merge atomicity — no impl needed, SQLite native semantics sufficient (8/8 pass)
+  - TASK-106: WAL concurrency tests — new `test-wal-concurrency.sh` (10/10 pass)
+  - TASK-107: Clarify sqlite-cr wrapper policy — updated `AGENTS.md`
 - **Round 47 (2025-12-20)**:
   - TASK-084: Implement table compatibility checks (12/12 tests pass)
   - TASK-086: Implement config get/set API (12/12 tests pass)
