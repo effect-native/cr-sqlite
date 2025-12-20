@@ -16,8 +16,8 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-070** — Cover missing C suites: ext-data + sandbox ✓ `.tasks/done/TASK-070-zig-parity-extdata-sandbox.md`
   - ext-data: 15/15 tests pass (test-extdata.sh)
   - sandbox: 5/9 tests pass → TASK-117 filed for PK-only sentinel gap
-- [ ] **TASK-071** — Cover remaining C suites: crsqlite + is-crr → `.tasks/backlog/TASK-071-zig-parity-crsqlite-is-crr.md`
-- [ ] **TASK-117** — Fix PK-only table sentinel emission → `.tasks/backlog/TASK-117-zig-pk-only-sentinel-emission.md`
+- [x] **TASK-071** — Cover remaining C suites: crsqlite + is-crr ✓ `.tasks/done/TASK-071-zig-parity-crsqlite-is-crr.md`
+- [x] **TASK-117** — Fix PK-only table sentinel emission ✓ `.tasks/done/TASK-117-zig-pk-only-sentinel-emission.md`
 
 ### Build/Tooling Blockers
 - [x] **TASK-111** — Fix Zig 0.15 `SQLITE_TRANSIENT` alignment build error ✓ `.tasks/done/TASK-111-zig-build-sqlite-transient-alignment.md`
@@ -46,7 +46,8 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 ### Missing-feature RGRTDD tracks (spec then impl)
 - [x] **TASK-075** — Spec `crsql_automigrate` behavior ✓ `.tasks/done/TASK-075-spec-automigrate.md`
   - Test: `zig/harness/test-automigrate.sh` (17 tests, all RED until impl)
-- [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md` (tests in `zig/harness/test-automigrate.sh`)
+- [x] **TASK-076** — Implement `crsql_automigrate` in Zig ✓ `.tasks/done/TASK-076-impl-automigrate.md`
+  - Status: `zig/harness/test-automigrate.sh` = 15/17 pass (2 test quoting failures)
 - [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
 - [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
   - All 12 backfill tests pass
@@ -91,7 +92,7 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 | Rust Suite | Zig Coverage | Status |
 |------------|--------------|--------|
-| automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 (impl blocked) |
+| automigrate.rs | test-automigrate.sh | TASK-075 ✓ (spec), TASK-076 ✓ (impl; 15/17 pass, test quoting follow-up) |
 | backfill.rs | ✓ | TASK-096 + TASK-078 (all 12 tests pass) |
 | pack_columns.rs | MISSING | Blocked (TASK-081/082) |
 | pk_only_tables.rs | Partial | TASK-095 (test exists) |
@@ -110,7 +111,7 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 | rs-fract.test.c | test-fract*.sh | ✓ |
 | is-crr.test.c | test-is-crr.sh | ✓ |
 | rows-impacted.test.c | test-parity.sh | ✓ |
-| sandbox.test.c | test-sandbox.sh | ⚠️ 5/9 (TASK-117 for PK-only sentinel) |
+| sandbox.test.c | test-sandbox.sh | ✓ (TASK-117 fixed; 9/9) |
 | changes-vtab.test.c | test-filters.sh | ✓ |
 | changes-vtab-rowid.test.c | test-rowid-slab.sh | ✓ |
 | crsqlite.test.c | test-e2e-sync.sh, test-alter.sh | ✓ |
