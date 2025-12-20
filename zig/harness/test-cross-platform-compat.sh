@@ -511,6 +511,688 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Test G: Delete + Resurrection
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test G: Delete + Resurrection"
+echo "=================================================================="
+echo ""
+
+# Create fresh DBs for this test
+DB_ZIG_RES="$TMPDIR/db_zig_res.sqlite"
+DB_RUST_RES="$TMPDIR/db_rust_res.sqlite"
+
+echo "Scenario: Zig INSERTs, DELETEs; sync to Rust/C; Rust/C re-INSERTs (resurrects)"
+
+# Step 1: Zig creates and deletes
+run_zig "$DB_ZIG_RES" "
+    CREATE TABLE res_test (id INTEGER PRIMARY KEY NOT NULL, data TEXT);
+    SELECT crsql_as_crr('res_test');
+    INSERT INTO res_test VALUES (99, 'original');
+    DELETE FROM res_test WHERE id = 99;
+"
+check_blocked "Zig"
+
+# Verify deleted in Zig
+ZIG_DELETED=$(run_zig "$DB_ZIG_RES" "SELECT COUNT(*) FROM res_test WHERE id = 99;")
+if [[ "$ZIG_DELETED" == "0" ]]; then
+    echo "PASS: Row deleted in Zig"
+else
+    echo "FAIL: Row should be deleted in Zig"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Step 2: Export Zig changes (including tombstone)
+ZIG_RES_SITE=$(run_zig "$DB_ZIG_RES" "SELECT quote(crsql_site_id());")
+
+# Create same schema in Rust/C
+run_rust "$DB_RUST_RES" "
+    CREATE TABLE res_test (id INTEGER PRIMARY KEY NOT NULL, data TEXT);
+    SELECT crsql_as_crr('res_test');
+"
+check_blocked "Rust/C"
+
+RUST_RES_SITE=$(run_rust "$DB_RUST_RES" "SELECT quote(crsql_site_id());")
+
+# Export changes from Zig
+nix run nixpkgs#sqlite -- "$DB_ZIG_RES" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_RES_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+# Apply Zig changes to Rust/C
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_RES" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Step 3: Rust/C resurrects the row
+echo "Rust/C re-inserting (resurrection)..."
+run_rust "$DB_RUST_RES" "
+    INSERT INTO res_test VALUES (99, 'resurrected');
+"
+check_blocked "Rust/C"
+
+RUST_RESURRECTED=$(run_rust "$DB_RUST_RES" "SELECT data FROM res_test WHERE id = 99;")
+if [[ "$RUST_RESURRECTED" == "resurrected" ]]; then
+    echo "PASS: Row resurrected in Rust/C"
+else
+    echo "FAIL: Row should be resurrected in Rust/C (got: $RUST_RESURRECTED)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Step 4: Sync resurrection back to Zig
+nix run nixpkgs#sqlite -- "$DB_RUST_RES" -cmd ".load $RUST_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $ZIG_RES_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_zig "$DB_ZIG_RES" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify resurrection synced to Zig
+ZIG_FINAL=$(run_zig "$DB_ZIG_RES" "SELECT data FROM res_test WHERE id = 99;")
+if [[ "$ZIG_FINAL" == "resurrected" ]]; then
+    echo "PASS: Resurrection synced to Zig"
+else
+    echo "FAIL: Resurrection should sync to Zig (got: $ZIG_FINAL)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test H: Primary Key Updates (Tombstone + New Row)
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test H: Primary Key Updates (Tombstone + New Row)"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_PKU="$TMPDIR/db_zig_pku.sqlite"
+DB_RUST_PKU="$TMPDIR/db_rust_pku.sqlite"
+
+echo "Scenario: Zig UPDATEs PK from 1 to 100; sync to Rust/C"
+
+# Zig: INSERT, then UPDATE PK
+run_zig "$DB_ZIG_PKU" "
+    CREATE TABLE pk_upd (id INTEGER PRIMARY KEY NOT NULL, name TEXT);
+    SELECT crsql_as_crr('pk_upd');
+    INSERT INTO pk_upd VALUES (1, 'original');
+    UPDATE pk_upd SET id = 100 WHERE id = 1;
+"
+check_blocked "Zig"
+
+# Verify in Zig: PK=1 gone, PK=100 exists
+ZIG_OLD_PK=$(run_zig "$DB_ZIG_PKU" "SELECT COUNT(*) FROM pk_upd WHERE id = 1;")
+ZIG_NEW_PK=$(run_zig "$DB_ZIG_PKU" "SELECT COUNT(*) FROM pk_upd WHERE id = 100;")
+ZIG_NEW_NAME=$(run_zig "$DB_ZIG_PKU" "SELECT name FROM pk_upd WHERE id = 100;")
+
+if [[ "$ZIG_OLD_PK" == "0" && "$ZIG_NEW_PK" == "1" && "$ZIG_NEW_NAME" == "original" ]]; then
+    echo "PASS: PK update worked in Zig (id=1 -> id=100)"
+else
+    echo "FAIL: PK update broken in Zig (old=$ZIG_OLD_PK, new=$ZIG_NEW_PK, name=$ZIG_NEW_NAME)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Setup Rust/C and sync
+run_rust "$DB_RUST_PKU" "
+    CREATE TABLE pk_upd (id INTEGER PRIMARY KEY NOT NULL, name TEXT);
+    SELECT crsql_as_crr('pk_upd');
+"
+check_blocked "Rust/C"
+
+ZIG_PKU_SITE=$(run_zig "$DB_ZIG_PKU" "SELECT quote(crsql_site_id());")
+RUST_PKU_SITE=$(run_rust "$DB_RUST_PKU" "SELECT quote(crsql_site_id());")
+
+# Export and apply changes
+nix run nixpkgs#sqlite -- "$DB_ZIG_PKU" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_PKU_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_PKU" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify in Rust/C
+RUST_OLD_PK=$(run_rust "$DB_RUST_PKU" "SELECT COUNT(*) FROM pk_upd WHERE id = 1;")
+RUST_NEW_PK=$(run_rust "$DB_RUST_PKU" "SELECT COUNT(*) FROM pk_upd WHERE id = 100;")
+RUST_NEW_NAME=$(run_rust "$DB_RUST_PKU" "SELECT name FROM pk_upd WHERE id = 100;")
+
+if [[ "$RUST_OLD_PK" == "0" && "$RUST_NEW_PK" == "1" && "$RUST_NEW_NAME" == "original" ]]; then
+    echo "PASS: PK update synced to Rust/C correctly"
+else
+    echo "FAIL: PK update sync broken (old=$RUST_OLD_PK, new=$RUST_NEW_PK, name=$RUST_NEW_NAME)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test I: Compound Primary Keys
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test I: Compound Primary Keys"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_CPK="$TMPDIR/db_zig_cpk.sqlite"
+DB_RUST_CPK="$TMPDIR/db_rust_cpk.sqlite"
+
+echo "Scenario: Test (user_id, item_id) compound PK sync"
+
+# Zig: CREATE and INSERT
+run_zig "$DB_ZIG_CPK" "
+    CREATE TABLE user_items (
+        user_id INTEGER NOT NULL, 
+        item_id TEXT NOT NULL, 
+        quantity INTEGER,
+        PRIMARY KEY (user_id, item_id)
+    );
+    SELECT crsql_as_crr('user_items');
+    INSERT INTO user_items VALUES (42, 'widget', 10);
+    INSERT INTO user_items VALUES (42, 'gadget', 5);
+    INSERT INTO user_items VALUES (99, 'widget', 3);
+"
+check_blocked "Zig"
+
+# Setup Rust/C
+run_rust "$DB_RUST_CPK" "
+    CREATE TABLE user_items (
+        user_id INTEGER NOT NULL, 
+        item_id TEXT NOT NULL, 
+        quantity INTEGER,
+        PRIMARY KEY (user_id, item_id)
+    );
+    SELECT crsql_as_crr('user_items');
+"
+check_blocked "Rust/C"
+
+ZIG_CPK_SITE=$(run_zig "$DB_ZIG_CPK" "SELECT quote(crsql_site_id());")
+RUST_CPK_SITE=$(run_rust "$DB_RUST_CPK" "SELECT quote(crsql_site_id());")
+
+# Export and apply
+nix run nixpkgs#sqlite -- "$DB_ZIG_CPK" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_CPK_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_CPK" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify data matches
+ZIG_CPK_DATA=$(run_zig "$DB_ZIG_CPK" "SELECT user_id, item_id, quantity FROM user_items ORDER BY user_id, item_id;")
+RUST_CPK_DATA=$(run_rust "$DB_RUST_CPK" "SELECT user_id, item_id, quantity FROM user_items ORDER BY user_id, item_id;")
+
+if [[ "$ZIG_CPK_DATA" == "$RUST_CPK_DATA" ]]; then
+    echo "PASS: Compound PK data synced correctly"
+    echo "  Data: $ZIG_CPK_DATA"
+else
+    echo "FAIL: Compound PK data mismatch"
+    echo "  Zig:    $ZIG_CPK_DATA"
+    echo "  Rust/C: $RUST_CPK_DATA"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify PK blob encoding matches
+ZIG_CPK_BLOB=$(run_zig "$DB_ZIG_CPK" "SELECT quote(pk) FROM crsql_changes WHERE [table]='user_items' LIMIT 1;")
+RUST_CPK_BLOB=$(run_rust "$DB_RUST_CPK" "SELECT quote(pk) FROM crsql_changes WHERE [table]='user_items' LIMIT 1;")
+
+if [[ "$ZIG_CPK_BLOB" == "$RUST_CPK_BLOB" ]]; then
+    echo "PASS: Compound PK blob encoding identical"
+else
+    echo "FAIL: Compound PK blob encoding differs"
+    echo "  Zig:    $ZIG_CPK_BLOB"
+    echo "  Rust/C: $RUST_CPK_BLOB"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test J: Float Edge Cases
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test J: Float Edge Cases"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_FLT="$TMPDIR/db_zig_flt.sqlite"
+DB_RUST_FLT="$TMPDIR/db_rust_flt.sqlite"
+
+echo "Testing: scientific notation, very small floats, edge values"
+
+# Zig: INSERT various float values
+run_zig "$DB_ZIG_FLT" "
+    CREATE TABLE floats (id INTEGER PRIMARY KEY NOT NULL, val REAL);
+    SELECT crsql_as_crr('floats');
+    INSERT INTO floats VALUES (1, 1.23e10);
+    INSERT INTO floats VALUES (2, 1.23e-10);
+    INSERT INTO floats VALUES (3, 0.0);
+    INSERT INTO floats VALUES (4, -0.0);
+    INSERT INTO floats VALUES (5, 3.141592653589793);
+"
+check_blocked "Zig"
+
+# Setup Rust/C
+run_rust "$DB_RUST_FLT" "
+    CREATE TABLE floats (id INTEGER PRIMARY KEY NOT NULL, val REAL);
+    SELECT crsql_as_crr('floats');
+"
+check_blocked "Rust/C"
+
+ZIG_FLT_SITE=$(run_zig "$DB_ZIG_FLT" "SELECT quote(crsql_site_id());")
+RUST_FLT_SITE=$(run_rust "$DB_RUST_FLT" "SELECT quote(crsql_site_id());")
+
+# Export and apply
+nix run nixpkgs#sqlite -- "$DB_ZIG_FLT" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_FLT_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_FLT" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify floats match
+ZIG_FLT_DATA=$(run_zig "$DB_ZIG_FLT" "SELECT id, val FROM floats ORDER BY id;")
+RUST_FLT_DATA=$(run_rust "$DB_RUST_FLT" "SELECT id, val FROM floats ORDER BY id;")
+
+if [[ "$ZIG_FLT_DATA" == "$RUST_FLT_DATA" ]]; then
+    echo "PASS: Float values synced correctly"
+else
+    echo "FAIL: Float value mismatch"
+    echo "  Zig:    $ZIG_FLT_DATA"
+    echo "  Rust/C: $RUST_FLT_DATA"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Test scientific notation precision
+ZIG_SCI=$(run_zig "$DB_ZIG_FLT" "SELECT val FROM floats WHERE id = 1;")
+RUST_SCI=$(run_rust "$DB_RUST_FLT" "SELECT val FROM floats WHERE id = 1;")
+if [[ "$ZIG_SCI" == "$RUST_SCI" ]]; then
+    echo "PASS: Scientific notation (1.23e10) identical"
+else
+    echo "FAIL: Scientific notation differs (Zig=$ZIG_SCI, Rust=$RUST_SCI)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Test very small floats
+ZIG_SMALL=$(run_zig "$DB_ZIG_FLT" "SELECT val FROM floats WHERE id = 2;")
+RUST_SMALL=$(run_rust "$DB_RUST_FLT" "SELECT val FROM floats WHERE id = 2;")
+if [[ "$ZIG_SMALL" == "$RUST_SMALL" ]]; then
+    echo "PASS: Very small float (1.23e-10) identical"
+else
+    echo "FAIL: Very small float differs (Zig=$ZIG_SMALL, Rust=$RUST_SMALL)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test K: Blob and Empty Blob Handling
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test K: Blob and Empty Blob Handling"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_BLB="$TMPDIR/db_zig_blb.sqlite"
+DB_RUST_BLB="$TMPDIR/db_rust_blb.sqlite"
+
+echo "Testing: empty blobs, medium blobs, NULL vs empty"
+
+# Zig: INSERT blob values
+run_zig "$DB_ZIG_BLB" "
+    CREATE TABLE blobs (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
+    SELECT crsql_as_crr('blobs');
+    INSERT INTO blobs VALUES (1, X'');
+    INSERT INTO blobs VALUES (2, X'DEADBEEF');
+    INSERT INTO blobs VALUES (3, X'000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F');
+    INSERT INTO blobs VALUES (4, NULL);
+"
+check_blocked "Zig"
+
+# Setup Rust/C
+run_rust "$DB_RUST_BLB" "
+    CREATE TABLE blobs (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
+    SELECT crsql_as_crr('blobs');
+"
+check_blocked "Rust/C"
+
+ZIG_BLB_SITE=$(run_zig "$DB_ZIG_BLB" "SELECT quote(crsql_site_id());")
+RUST_BLB_SITE=$(run_rust "$DB_RUST_BLB" "SELECT quote(crsql_site_id());")
+
+# Export and apply
+nix run nixpkgs#sqlite -- "$DB_ZIG_BLB" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_BLB_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_BLB" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify empty blob
+ZIG_EMPTY=$(run_zig "$DB_ZIG_BLB" "SELECT quote(data) FROM blobs WHERE id = 1;")
+RUST_EMPTY=$(run_rust "$DB_RUST_BLB" "SELECT quote(data) FROM blobs WHERE id = 1;")
+if [[ "$ZIG_EMPTY" == "$RUST_EMPTY" ]]; then
+    echo "PASS: Empty blob (X'') synced correctly"
+else
+    echo "FAIL: Empty blob differs (Zig=$ZIG_EMPTY, Rust=$RUST_EMPTY)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify regular blob
+ZIG_REG=$(run_zig "$DB_ZIG_BLB" "SELECT quote(data) FROM blobs WHERE id = 2;")
+RUST_REG=$(run_rust "$DB_RUST_BLB" "SELECT quote(data) FROM blobs WHERE id = 2;")
+if [[ "$ZIG_REG" == "$RUST_REG" ]]; then
+    echo "PASS: Regular blob (DEADBEEF) synced correctly"
+else
+    echo "FAIL: Regular blob differs (Zig=$ZIG_REG, Rust=$RUST_REG)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify larger blob (64 bytes)
+ZIG_LARGE=$(run_zig "$DB_ZIG_BLB" "SELECT quote(data) FROM blobs WHERE id = 3;")
+RUST_LARGE=$(run_rust "$DB_RUST_BLB" "SELECT quote(data) FROM blobs WHERE id = 3;")
+if [[ "$ZIG_LARGE" == "$RUST_LARGE" ]]; then
+    echo "PASS: Larger blob (64 bytes) synced correctly"
+else
+    echo "FAIL: Larger blob differs"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# Verify NULL distinct from empty blob
+ZIG_NULLBLOB=$(run_zig "$DB_ZIG_BLB" "SELECT quote(data) FROM blobs WHERE id = 4;")
+RUST_NULLBLOB=$(run_rust "$DB_RUST_BLB" "SELECT quote(data) FROM blobs WHERE id = 4;")
+if [[ "$ZIG_NULLBLOB" == "NULL" && "$RUST_NULLBLOB" == "NULL" ]]; then
+    echo "PASS: NULL blob distinct from empty blob"
+else
+    echo "FAIL: NULL blob handling differs (Zig=$ZIG_NULLBLOB, Rust=$RUST_NULLBLOB)"
+    FAILURES=$((FAILURES + 1))
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test L: Schema Evolution (ADD COLUMN)
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test L: Schema Evolution (ADD COLUMN)"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_SCH="$TMPDIR/db_zig_sch.sqlite"
+DB_RUST_SCH="$TMPDIR/db_rust_sch.sqlite"
+
+echo "Testing: crsql_begin_alter, ADD COLUMN, crsql_commit_alter"
+
+# Check if alter functions are available
+ALTER_CHECK=$(run_zig "$DB_ZIG_SCH" "
+    CREATE TABLE sch_test (id INTEGER PRIMARY KEY NOT NULL, name TEXT);
+    SELECT crsql_as_crr('sch_test');
+    SELECT crsql_begin_alter('sch_test');
+" 2>&1)
+
+if grep -q "no such function: crsql_begin_alter" "$ERRFILE" 2>/dev/null; then
+    echo "SKIP: crsql_begin_alter() not implemented"
+else
+    # Perform schema evolution
+    run_zig "$DB_ZIG_SCH" "
+        CREATE TABLE sch_test (id INTEGER PRIMARY KEY NOT NULL, name TEXT);
+        SELECT crsql_as_crr('sch_test');
+        INSERT INTO sch_test VALUES (1, 'before');
+        SELECT crsql_begin_alter('sch_test');
+        ALTER TABLE sch_test ADD COLUMN status TEXT DEFAULT 'active';
+        SELECT crsql_commit_alter('sch_test');
+        INSERT INTO sch_test VALUES (2, 'after', 'pending');
+        UPDATE sch_test SET status = 'complete' WHERE id = 1;
+    "
+    check_blocked "Zig"
+
+    # Setup Rust/C with evolved schema
+    run_rust "$DB_RUST_SCH" "
+        CREATE TABLE sch_test (id INTEGER PRIMARY KEY NOT NULL, name TEXT);
+        SELECT crsql_as_crr('sch_test');
+        SELECT crsql_begin_alter('sch_test');
+        ALTER TABLE sch_test ADD COLUMN status TEXT DEFAULT 'active';
+        SELECT crsql_commit_alter('sch_test');
+    "
+    check_blocked "Rust/C"
+
+    ZIG_SCH_SITE=$(run_zig "$DB_ZIG_SCH" "SELECT quote(crsql_site_id());")
+    RUST_SCH_SITE=$(run_rust "$DB_RUST_SCH" "SELECT quote(crsql_site_id());")
+
+    # Export and apply
+    nix run nixpkgs#sqlite -- "$DB_ZIG_SCH" -cmd ".load $ZIG_EXT" "
+        SELECT 'CHANGE:' || 
+            [table] || '|' || 
+            quote(pk) || '|' || 
+            cid || '|' || 
+            quote(val) || '|' || 
+            col_version || '|' || 
+            db_version || '|' || 
+            quote(site_id) || '|' || 
+            cl || '|' || 
+            seq
+        FROM crsql_changes
+        WHERE db_version > 0 AND site_id IS NOT $RUST_SCH_SITE;
+    " > "$CHANGES_FILE" 2>"$ERRFILE"
+
+    while IFS= read -r line; do
+        if [[ "$line" == CHANGE:* ]]; then
+            change="${line#CHANGE:}"
+            IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+            run_rust "$DB_RUST_SCH" "
+                INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+                VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+            "
+        fi
+    done < "$CHANGES_FILE"
+
+    # Verify data matches
+    ZIG_SCH_DATA=$(run_zig "$DB_ZIG_SCH" "SELECT id, name, status FROM sch_test ORDER BY id;")
+    RUST_SCH_DATA=$(run_rust "$DB_RUST_SCH" "SELECT id, name, status FROM sch_test ORDER BY id;")
+
+    if [[ "$ZIG_SCH_DATA" == "$RUST_SCH_DATA" ]]; then
+        echo "PASS: Schema evolution data synced correctly"
+        echo "  Data: $ZIG_SCH_DATA"
+    else
+        echo "FAIL: Schema evolution data mismatch"
+        echo "  Zig:    $ZIG_SCH_DATA"
+        echo "  Rust/C: $RUST_SCH_DATA"
+        FAILURES=$((FAILURES + 1))
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test M: Text Edge Cases (Unicode, Special Characters)
+# ══════════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=================================================================="
+echo "Test M: Text Edge Cases (Unicode, Special Characters)"
+echo "=================================================================="
+echo ""
+
+DB_ZIG_TXT="$TMPDIR/db_zig_txt.sqlite"
+DB_RUST_TXT="$TMPDIR/db_rust_txt.sqlite"
+
+echo "Testing: Unicode, empty strings, special characters"
+
+# Zig: INSERT various text values
+run_zig "$DB_ZIG_TXT" "
+    CREATE TABLE texts (id INTEGER PRIMARY KEY NOT NULL, val TEXT);
+    SELECT crsql_as_crr('texts');
+    INSERT INTO texts VALUES (1, '');
+    INSERT INTO texts VALUES (2, 'hello world');
+    INSERT INTO texts VALUES (3, 'こんにちは');
+    INSERT INTO texts VALUES (4, '🎉🚀💻');
+    INSERT INTO texts VALUES (5, 'line1
+line2');
+    INSERT INTO texts VALUES (6, 'tab	here');
+    INSERT INTO texts VALUES (7, 'quote''s and \"double\"');
+"
+check_blocked "Zig"
+
+# Setup Rust/C
+run_rust "$DB_RUST_TXT" "
+    CREATE TABLE texts (id INTEGER PRIMARY KEY NOT NULL, val TEXT);
+    SELECT crsql_as_crr('texts');
+"
+check_blocked "Rust/C"
+
+ZIG_TXT_SITE=$(run_zig "$DB_ZIG_TXT" "SELECT quote(crsql_site_id());")
+RUST_TXT_SITE=$(run_rust "$DB_RUST_TXT" "SELECT quote(crsql_site_id());")
+
+# Export and apply
+nix run nixpkgs#sqlite -- "$DB_ZIG_TXT" -cmd ".load $ZIG_EXT" "
+    SELECT 'CHANGE:' || 
+        [table] || '|' || 
+        quote(pk) || '|' || 
+        cid || '|' || 
+        quote(val) || '|' || 
+        col_version || '|' || 
+        db_version || '|' || 
+        quote(site_id) || '|' || 
+        cl || '|' || 
+        seq
+    FROM crsql_changes
+    WHERE db_version > 0 AND site_id IS NOT $RUST_TXT_SITE;
+" > "$CHANGES_FILE" 2>"$ERRFILE"
+
+while IFS= read -r line; do
+    if [[ "$line" == CHANGE:* ]]; then
+        change="${line#CHANGE:}"
+        IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        run_rust "$DB_RUST_TXT" "
+            INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+        "
+    fi
+done < "$CHANGES_FILE"
+
+# Verify all text values
+TEXT_PASS=0
+TEXT_FAIL=0
+
+for id in 1 2 3 4 5 6 7; do
+    ZIG_VAL=$(run_zig "$DB_ZIG_TXT" "SELECT quote(val) FROM texts WHERE id = $id;")
+    RUST_VAL=$(run_rust "$DB_RUST_TXT" "SELECT quote(val) FROM texts WHERE id = $id;")
+    if [[ "$ZIG_VAL" == "$RUST_VAL" ]]; then
+        TEXT_PASS=$((TEXT_PASS + 1))
+    else
+        TEXT_FAIL=$((TEXT_FAIL + 1))
+        echo "FAIL: Text id=$id differs (Zig=$ZIG_VAL, Rust=$RUST_VAL)"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+
+if [[ $TEXT_FAIL -eq 0 ]]; then
+    echo "PASS: All $TEXT_PASS text edge cases synced correctly"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Summary
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
@@ -529,6 +1211,13 @@ if [[ $FAILURES -eq 0 ]]; then
     echo "  - db_version Lamport clock works"
     echo "  - NULL values preserved"
     echo "  - Delete tombstones sync correctly"
+    echo "  - Delete + resurrection works"
+    echo "  - Primary key updates work"
+    echo "  - Compound primary keys work"
+    echo "  - Float edge cases handled"
+    echo "  - Blob handling (empty, regular, large)"
+    echo "  - Schema evolution (ADD COLUMN)"
+    echo "  - Text edge cases (Unicode, special chars)"
     exit 0
 else
     echo "$FAILURES test(s) FAILED"

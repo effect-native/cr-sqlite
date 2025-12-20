@@ -11,6 +11,7 @@ const as_crr = @import("../as_crr.zig");
 const automigrate = @import("../automigrate.zig");
 const changes_vtab = @import("../changes_vtab.zig");
 const clset_vtab = @import("../clset_vtab.zig");
+const config = @import("../config.zig");
 const finalize = @import("../finalize.zig");
 const unpack_columns_vtab = @import("../unpack_columns_vtab.zig");
 const fract_index = @import("../fract_index.zig");
@@ -118,6 +119,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_unpack_columns virtual table module
     rc = unpack_columns_vtab.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_config_get() and crsql_config_set() functions
+    rc = config.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

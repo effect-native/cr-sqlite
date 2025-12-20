@@ -30,6 +30,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vtab = @import("sqlite/vtab.zig");
 const api = @import("ffi/api.zig");
+const config = @import("config.zig");
 const rows_impacted = @import("rows_impacted.zig");
 const merge_insert = @import("merge_insert.zig");
 const compare_values = @import("compare_values.zig");
@@ -1867,8 +1868,54 @@ fn changesUpdate(
                         if (cmp > 0) {
                             // Remote value is larger, remote wins
                             remote_wins = true;
+                        } else if (cmp == 0) {
+                            // Values are equal - check merge-equal-values config
+                            // If enabled (default), tie-break on site_id (larger site_id wins)
+                            const merge_equal = config.getMergeEqualValues(api_db);
+                            if (merge_equal == 1) {
+                                // Get local site_id from clock table for this column
+                                var sid_buf: [512]u8 = undefined;
+                                if (std.fmt.bufPrintZ(&sid_buf, "SELECT site_id FROM \"{s}__crsql_clock\" WHERE pk = ? AND col_name = ?", .{table_slice})) |sid_sql| {
+                                    var sid_stmt: ?*api.sqlite3_stmt = null;
+                                    if (api.prepare_v2(api_db, sid_sql, -1, &sid_stmt, null) == api.SQLITE_OK) {
+                                        defer _ = api.finalize(sid_stmt);
+                                        _ = api.bind_int64(sid_stmt, 1, pk_rowid);
+                                        _ = api.bind_text(sid_stmt, 2, cid_slice.ptr, @intCast(cid_slice.len), api.getTransientDestructor());
+
+                                        if (api.step(sid_stmt) == api.SQLITE_ROW) {
+                                            const local_site_id_blob = api.column_blob(sid_stmt, 0);
+                                            const local_site_id_len = api.column_bytes(sid_stmt, 0);
+
+                                            // Compare site_ids (larger wins)
+                                            // Remote site_id is in site_id_blob[0..site_id_len]
+                                            if (site_id_blob != null and local_site_id_blob != null) {
+                                                const local_sid: [*]const u8 = @ptrCast(local_site_id_blob);
+                                                const remote_sid: [*]const u8 = @ptrCast(site_id_blob);
+                                                const local_slice = local_sid[0..@intCast(local_site_id_len)];
+                                                const remote_len: usize = @intCast(site_id_len);
+                                                const remote_slice = remote_sid[0..remote_len];
+
+                                                // Use lexicographic comparison (larger site_id wins)
+                                                const sid_cmp = std.mem.order(u8, remote_slice, local_slice);
+                                                if (sid_cmp == .gt) {
+                                                    // Remote site_id is larger, remote wins
+                                                    remote_wins = true;
+                                                }
+                                            } else if (site_id_blob != null and local_site_id_blob == null) {
+                                                // Remote has site_id, local doesn't - remote wins
+                                                remote_wins = true;
+                                            }
+                                            // If local has site_id but remote doesn't, local wins
+                                        }
+                                        // If no clock entry found, local wins (conservative)
+                                    }
+                                } else |_| {
+                                    // Buffer overflow, local wins (conservative)
+                                }
+                            }
+                            // If merge_equal == 0, values equal means no-op (local wins)
                         }
-                        // If cmp <= 0, local wins (remote_wins stays false)
+                        // If cmp < 0, local wins (remote_wins stays false)
                     } else {
                         // No local row, remote wins
                         remote_wins = true;

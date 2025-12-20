@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const api = @import("ffi/api.zig");
+const table_compat = @import("table_compat.zig");
 
 /// Maximum length for table names (SQLite limit is ~2GB, but we're practical)
 const MAX_TABLE_NAME_LEN = 1024;
@@ -32,6 +33,43 @@ const TableInfo = struct {
     count: usize,
     pk_count: usize,
 };
+
+/// Check if a table exists by querying PRAGMA table_info
+fn tableExists(db: ?*api.sqlite3, table_name: [*:0]const u8) bool {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT count(*) FROM pragma_table_info('{s}')", .{table_name}) catch return false;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return false;
+    }
+    defer _ = api.finalize(stmt);
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0) > 0;
+    }
+    return false;
+}
+
+/// Check if table is already a CRR (clock table exists)
+fn isAlreadyCrr(db: ?*api.sqlite3, table_name: [*:0]const u8) bool {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf,
+        \\SELECT count(*) FROM sqlite_master
+        \\WHERE type = 'table' AND name = '{s}__crsql_clock'
+    , .{table_name}) catch return false;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return false;
+    }
+    defer _ = api.finalize(stmt);
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0) > 0;
+    }
+    return false;
+}
 
 /// Implementation of `crsql_as_crr(table_name)` SQL function.
 /// Creates the clock table, pks table, and triggers for a given table.
@@ -57,6 +95,26 @@ fn crsqlAsCrrFunc(
         api.result_error(pCtx, "crsql_as_crr: failed to get db handle", -1);
         return;
     };
+
+    // Check if table exists (PRAGMA table_info returns no rows for non-existent tables)
+    if (!tableExists(db, table_name_ptr)) {
+        api.result_error(pCtx, "crsql_as_crr: table does not exist", -1);
+        return;
+    }
+
+    // Check if already a CRR (idempotent - clock table exists)
+    if (isAlreadyCrr(db, table_name_ptr)) {
+        // Already a CRR, return success (idempotent)
+        api.result_null(pCtx);
+        return;
+    }
+
+    // Validate table compatibility before creating CRR infrastructure
+    const compat_result = table_compat.checkTableCompatibility(db, table_name_ptr);
+    if (compat_result != .ok) {
+        api.result_error(pCtx, table_compat.getErrorMessage(compat_result), -1);
+        return;
+    }
 
     // Create clock table
     if (createClockTable(db, table_name_ptr)) |_| {

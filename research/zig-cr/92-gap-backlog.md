@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 46 — TASK-082, TASK-083, TASK-085 complete)
+> Last updated: 2025-12-20 (Round 47 — TASK-084, TASK-086, TASK-074 complete)
 
 ## Status
 
@@ -26,7 +26,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - Test: `zig/harness/test-sync-bit-isolation.sh`
 - [x] **TASK-073** — Compare Rust integration suite vs Zig harness ✓ `.tasks/done/TASK-073-compare-rust-zig-tests.md`
   - Coverage map created; spawned follow-up tasks
-- [ ] **TASK-074** — Expand Zig↔Rust/C wire compat tests beyond happy path → `.tasks/backlog/TASK-074-cross-impl-compat-expanded.md`
+- [x] **TASK-074** — Expand Zig↔Rust/C wire compat tests beyond happy path ✓ `.tasks/done/TASK-074-cross-impl-compat-expanded.md`
+  - New: `zig/harness/test-oracle-parity.sh` (18 tests, 15 pass / 3 divergences found)
+  - Expanded `test-cross-platform-compat.sh` with edge cases (deletes, PK updates, floats, blobs, schema evolution)
+  - **3 real divergences identified** (clock table naming, index structure, site_id cross-open)
 
 ### New Test Tasks (from TASK-073 coverage analysis)
 - [x] **TASK-095** — Zig test for PK UPDATE semantics ✓ `.tasks/done/TASK-095-zig-test-pk-update-semantics.md`
@@ -60,11 +63,15 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-082** — Implement `crsql_unpack_columns` vtab in Zig ✓ `.tasks/done/TASK-082-impl-unpack-columns-vtab.md`
   - Test: `zig/harness/test-unpack-columns-vtab.sh` = 12/12 pass ✓
 - [x] **TASK-083** — Spec table compatibility checks for `crsql_as_crr` ✓ `.tasks/done/TASK-083-spec-table-compat.md`
-  - Test: `zig/harness/test-table-compat.sh` (12 tests, 5 pass / 7 RED until impl)
-- [ ] **TASK-084** — Implement table compatibility checks in Zig → `.tasks/backlog/TASK-084-impl-table-compat.md`
+  - Test: `zig/harness/test-table-compat.sh` (12 tests)
+- [x] **TASK-084** — Implement table compatibility checks in Zig ✓ `.tasks/done/TASK-084-impl-table-compat.md`
+  - Test: `zig/harness/test-table-compat.sh` = 12/12 pass ✓
+  - Validates: PK existence, UNIQUE, AUTOINCREMENT, FK, NOT NULL/DEFAULT
 - [x] **TASK-085** — Spec `crsql_config_get/set` + `merge-equal-values` behavior ✓ `.tasks/done/TASK-085-spec-config.md`
-  - Test: `zig/harness/test-config.sh` (12 tests, RED until impl)
-- [ ] **TASK-086** — Implement `crsql_config_get/set` in Zig → `.tasks/backlog/TASK-086-impl-config.md`
+  - Test: `zig/harness/test-config.sh` (12 tests)
+- [x] **TASK-086** — Implement `crsql_config_get/set` in Zig ✓ `.tasks/done/TASK-086-impl-config.md`
+  - Test: `zig/harness/test-config.sh` = 12/12 pass ✓
+  - Supports `merge-equal-values` config with persistence to crsql_master
 - [x] **TASK-087** — Spec merge atomicity for batch apply ✓ `.tasks/done/TASK-087-spec-merge-atomicity.md`
   - Test: `zig/harness/test-merge-atomicity.sh` (8 tests, all pass — Zig has native atomicity)
 - [ ] **TASK-088** — Implement savepoint-backed merge atomicity → `.tasks/backlog/TASK-088-impl-merge-atomicity.md`
@@ -144,6 +151,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 ## Done (recent)
 
+- **Round 47 (2025-12-20)**:
+  - TASK-084: Implement table compatibility checks (12/12 tests pass)
+  - TASK-086: Implement config get/set API (12/12 tests pass)
+  - TASK-074: Expand cross-impl compat tests (15 pass / 3 divergences found)
 - **Round 46 (2025-12-20)**:
   - TASK-082: Implement unpack_columns vtab (12/12 tests pass)
   - TASK-083: Spec table compatibility checks (12 tests, 5 pass / 7 RED)
