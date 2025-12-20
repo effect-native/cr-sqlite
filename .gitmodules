@@ -36,3 +36,4 @@
 [submodule "effect-native"]
 	path = effect-native
 	url = git@github.com:effect-native/effect-native.git
+	branch = cr
