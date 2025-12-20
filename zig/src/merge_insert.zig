@@ -20,6 +20,7 @@
 const std = @import("std");
 const api = @import("ffi/api.zig");
 const codec = @import("codec.zig");
+const site_identity = @import("site_identity.zig");
 
 /// Error set for merge operations
 pub const MergeError = error{
@@ -334,10 +335,14 @@ pub fn setWinnerClock(
     _ = api.bind_int64(stmt, 3, col_version);
     _ = api.bind_int64(stmt, 4, db_version);
 
+    // Convert site_id blob to ordinal for clock table storage
+    // Clock table stores site_id as INTEGER ordinal, not BLOB
     if (site_id_blob) |sid| {
-        _ = api.bind_blob(stmt, 5, sid, @intCast(site_id_len), api.getTransientDestructor());
+        const site_slice = sid[0..site_id_len];
+        const ordinal = site_identity.getOrCreateSiteOrdinal(db, site_slice) orelse 0;
+        _ = api.bind_int64(stmt, 5, ordinal);
     } else {
-        _ = api.bind_int64(stmt, 5, 0); // Local site_id = 0
+        _ = api.bind_int64(stmt, 5, 0); // Local site_id = ordinal 0
     }
 
     _ = api.bind_int64(stmt, 6, seq);
@@ -918,10 +923,14 @@ pub fn setWinnerClockCached(
     _ = api.bind_int64(stmt, 3, col_version);
     _ = api.bind_int64(stmt, 4, db_version);
 
+    // Convert site_id blob to ordinal for clock table storage
+    // Clock table stores site_id as INTEGER ordinal, not BLOB
     if (site_id_blob) |sid| {
-        _ = api.bind_blob(stmt, 5, sid, @intCast(site_id_len), api.getTransientDestructor());
+        const site_slice = sid[0..site_id_len];
+        const ordinal = site_identity.getOrCreateSiteOrdinal(stmts.db, site_slice) orelse 0;
+        _ = api.bind_int64(stmt, 5, ordinal);
     } else {
-        _ = api.bind_int64(stmt, 5, 0); // Local site_id = 0
+        _ = api.bind_int64(stmt, 5, 0); // Local site_id = ordinal 0
     }
 
     _ = api.bind_int64(stmt, 6, seq);

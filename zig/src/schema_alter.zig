@@ -258,18 +258,26 @@ fn recreateClockAndPksTables(db: ?*api.sqlite3, table_name: [*:0]const u8) !void
         return error.SqliteError;
     }
 
-    // Recreate clock table
+    // Recreate clock table (must match as_crr.zig: STRICT mode, "key" column)
     sql = std.fmt.bufPrintZ(&buf,
         \\CREATE TABLE IF NOT EXISTS "{s}__crsql_clock" (
-        \\  "pk" INTEGER NOT NULL,
+        \\  "key" INTEGER NOT NULL,
         \\  "col_name" TEXT NOT NULL,
         \\  "col_version" INTEGER NOT NULL,
         \\  "db_version" INTEGER NOT NULL,
         \\  "site_id" INTEGER NOT NULL DEFAULT 0,
         \\  "seq" INTEGER NOT NULL,
-        \\  PRIMARY KEY ("pk", "col_name")
-        \\) WITHOUT ROWID
+        \\  PRIMARY KEY ("key", "col_name")
+        \\) WITHOUT ROWID, STRICT
     , .{table_name}) catch return error.BufferOverflow;
+    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Create index on db_version (must match as_crr.zig)
+    sql = std.fmt.bufPrintZ(&buf,
+        \\CREATE INDEX IF NOT EXISTS "{s}__crsql_clock_dbv_idx" ON "{s}__crsql_clock" ("db_version")
+    , .{ table_name, table_name }) catch return error.BufferOverflow;
     if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) {
         return error.SqliteError;
     }
@@ -465,12 +473,12 @@ fn backfillColumn(db: ?*api.sqlite3, table_name: [*:0]const u8, col_name: []cons
     // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     const sql = std.fmt.bufPrintZ(&buf,
         \\INSERT OR IGNORE INTO "{s}__crsql_clock"
-        \\  ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\  ("key", "col_name", "col_version", "db_version", "site_id", "seq")
         \\SELECT p."pk", '{s}', 1, crsql_db_version(), 0, crsql_increment_and_get_seq()
         \\FROM "{s}__crsql_pks" p
         \\WHERE NOT EXISTS (
         \\  SELECT 1 FROM "{s}__crsql_clock" c
-        \\  WHERE c."pk" = p."pk" AND c."col_name" = '{s}'
+        \\  WHERE c."key" = p."pk" AND c."col_name" = '{s}'
         \\)
     , .{ table_name, col_name, table_name, table_name, col_name }) catch return error.BufferOverflow;
 
@@ -575,7 +583,7 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         if (col.pk_index == 0) {
             writer.print(
                 \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
                 \\  VALUES
                 \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
                 \\
@@ -587,7 +595,7 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
     writer.print(
         \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
         \\  VALUES
         \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
         \\END;

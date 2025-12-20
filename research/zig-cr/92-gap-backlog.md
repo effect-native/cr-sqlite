@@ -1,25 +1,33 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 52 — TASK-123, TASK-124 complete — clock schema + site_id cross-open fixed)
+> Last updated: 2025-12-20 (Round 53 — TASK-125, TASK-126 complete — schema_alter pk→key + merge resolution fixed)
 
 ## Status
 
 - MVP: ✅ complete (154/154 tests passing)
+- Oracle parity: ✅ **18/18 pass** (all divergences fixed)
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementation parity coverage and adding real-system tests.
+All oracle parity tests pass. Zig implementation is now wire-compatible with Rust/C oracle.
 
 ### Open Gaps (Parity Divergences)
 - [x] **TASK-123** — Fix clock table schema parity (pk vs key, index) ✓ `.tasks/done/TASK-123-fix-clock-table-schema-parity.md`
   - Column renamed `pk` → `key`, added STRICT mode, added `_dbv_idx` index
 - [x] **TASK-124** — Fix site_id preservation on cross-open ✓ `.tasks/done/TASK-124-fix-site-id-cross-open-parity.md`
   - Added `crsqlite_version|160300` to `crsql_master` on init
+- [x] **TASK-125** — Fix schema_alter.zig pk→key column rename ✓ `.tasks/done/TASK-125-fix-schema-alter-pk-to-key-rename.md`
+  - Updated all clock table `"pk"` references to `"key"` in schema_alter.zig
+  - Added STRICT mode and _dbv_idx index to match as_crr.zig
+- [x] **TASK-126** — Fix merge resolution parity with oracle ✓ `.tasks/done/TASK-126-fix-merge-resolution-parity.md`
+  - Fixed site_id blob→ordinal conversion in setWinnerClock/setWinnerClockCached
+  - All merge resolution tests now pass (Test 3a, 3b, ValueWin)
 
 ### Remaining Divergences (from oracle-parity test)
-- [ ] Merge resolution (Test 3a/3b): Remote wins / site_id tiebreaker differs — needs investigation
+- ~~[ ] Merge resolution (Test 3a/3b): Remote wins / site_id tiebreaker differs — needs investigation~~
+- **NONE** — All 18 oracle parity tests pass ✓
 
 ### Parity/Coverage Tasks (ready to assign)
 - [x] **TASK-070** — Cover missing C suites: ext-data + sandbox ✓ `.tasks/done/TASK-070-zig-parity-extdata-sandbox.md`

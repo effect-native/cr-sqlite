@@ -68,6 +68,123 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (53) — Fix schema_alter pk→key + merge resolution (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-125-fix-schema-alter-pk-to-key-rename.md`
+- `.tasks/done/TASK-126-fix-merge-resolution-parity.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-alter.sh
+bash zig/harness/test-noops.sh
+bash zig/harness/test-oracle-parity.sh
+make -C zig test-parity
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-125: test-alter.sh (6/6 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║                           TEST SUMMARY                               ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  6                                                          ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+✓ All implemented tests PASSED
+```
+
+**Fix:** Updated `zig/src/schema_alter.zig`:
+- Changed all clock table `"pk"` references to `"key"`
+- Added STRICT mode to clock table creation
+- Added `_dbv_idx` index on `db_version`
+</details>
+
+<details>
+<summary>TASK-125: test-noops.sh (4/4 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+No-op Tests Summary: 4 passed, 0 failed
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+All noop tests passed!
+```
+</details>
+
+<details>
+<summary>TASK-126: test-oracle-parity.sh (18/18 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Oracle Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Results: 18 passed, 0 failed, 0 skipped
+
+All oracle parity tests PASSED
+
+Wire format and behavioral parity verified:
+  - pack_columns encoding matches
+  - Clock table schema matches
+  - Merge resolution matches
+  - Site ID storage matches
+  - Changes vtab format matches
+  - db_version behavior matches
+```
+
+**Fix:** Updated `zig/src/merge_insert.zig`:
+- Added import for `site_identity` module
+- Fixed `setWinnerClock()` to convert site_id blob → ordinal via `site_identity.getOrCreateSiteOrdinal()`
+- Fixed `setWinnerClockCached()` with same conversion
+
+Root cause: The clock table's `site_id` column is INTEGER (for ordinals), but the merge functions were trying to store 16-byte BLOBs directly. This caused STRICT constraint violations that silently failed all remote merges.
+</details>
+
+<details>
+<summary>Parity suite summary</summary>
+
+```text
+  Filter tests: 12 passed
+  Rowid slab tests: 8 passed
+  Alter tests: 6 passed
+  Noop tests: 4 passed
+  Fract tests: 8 passed
+  rows_impacted tests: 9 passed (including ValueWin)
+```
+
+No regressions detected.
+</details>
+
+**Files modified:**
+- `zig/src/schema_alter.zig` — pk→key rename, STRICT mode, _dbv_idx index
+- `zig/src/merge_insert.zig` — site_id blob→ordinal conversion in setWinnerClock functions
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-alter.sh` — verify 6/6 pass
+3. `bash zig/harness/test-noops.sh` — verify 4/4 pass
+4. `bash zig/harness/test-oracle-parity.sh` — verify 18/18 pass
+5. `make -C zig test-parity` — verify no regressions
+
+**Known gaps / unverified claims**
+- **ZERO oracle divergences remaining** — all 18 parity tests pass
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (52) — Fix clock schema + site_id cross-open parity (2 tasks)
 
 **Tasks executed**
