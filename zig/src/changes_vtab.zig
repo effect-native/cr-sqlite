@@ -1442,7 +1442,8 @@ fn changesUpdate(
     // Set sync_bit to 1 to gate off triggers during merge operations.
     // This prevents infinite loops where merge writes would trigger clock updates.
     // The guard ensures sync_bit is reset to 0 even if we return early due to errors.
-    const guard = sync_bit.SyncBitGuard.init();
+    // Note: sync_bit is per-connection, so this only affects the current connection.
+    const guard = sync_bit.SyncBitGuard.init(toApiDb(vtab_db));
     defer guard.deinit();
 
     // Get table name as slice for helper functions

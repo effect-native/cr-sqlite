@@ -13,6 +13,11 @@
 #   - test-fract.sh: Fractional indexing (crsql_fract_key_between)
 #   - test-trigger-parity.sh: Oracle parity (Zig vs Rust/C clock tables)
 #   - test-db-version-parity.sh: db_version timing parity (oracle test)
+#   - test-rows-impacted-parity.sh: rows_impacted counter reset timing (oracle test)
+#   - test-multiconn.sh: Multi-connection scenarios (on-disk DB parity)
+#   - test-backfill.sh: crsql_as_crr() backfill on existing data
+#   - test-persistence.sh: On-disk DB persistence across sessions
+#   - test-pk-update.sh: Primary key UPDATE semantics (DELETE+INSERT)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -565,6 +570,153 @@ if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
 else
     echo "  db_version parity tests: SKIPPED (Rust/C extension not found)"
     TOTAL_SKIP=$((TOTAL_SKIP + 12))
+fi
+
+# Run rows_impacted parity tests (oracle comparison: Zig vs Rust/C counter reset timing)
+echo "Running test-rows-impacted-parity.sh..."
+if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+    if bash "$SCRIPT_DIR/test-rows-impacted-parity.sh" > "$TMPFILE" 2>&1; then
+        ROWS_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ROWS_PASS=0
+        echo "  rows_impacted parity tests: $ROWS_PASS passed"
+        TOTAL_PASS=$((TOTAL_PASS + ROWS_PASS))
+    else
+        EXIT_CODE=$?
+        if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+            echo "  rows_impacted parity tests: BLOCKED (extensions not available)"
+            TOTAL_SKIP=$((TOTAL_SKIP + 18))
+        else
+            ROWS_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ROWS_FAIL=0
+            ROWS_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ROWS_PASS=0
+            ROWS_DIVERGE=$(grep "DIVERGENCE" "$TMPFILE" | wc -l) || ROWS_DIVERGE=0
+            echo "  rows_impacted parity tests: $ROWS_PASS passed, $ROWS_FAIL failed, $ROWS_DIVERGE divergences"
+            TOTAL_PASS=$((TOTAL_PASS + ROWS_PASS))
+            TOTAL_FAIL=$((TOTAL_FAIL + ROWS_FAIL))
+        fi
+    fi
+else
+    echo "  rows_impacted parity tests: SKIPPED (Rust/C extension not found)"
+    TOTAL_SKIP=$((TOTAL_SKIP + 18))
+fi
+
+# Run ALTER TABLE parity tests (oracle comparison: Zig vs Rust/C clock preservation)
+echo "Running test-alter-parity.sh..."
+if timeout 300s bash "$SCRIPT_DIR/test-alter-parity.sh" > "$TMPFILE" 2>&1; then
+    ALTER_PARITY_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ALTER_PARITY_PASS=0
+    echo "  ALTER parity tests: $ALTER_PARITY_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + ALTER_PARITY_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  ALTER parity tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 19))
+    else
+        ALTER_PARITY_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ALTER_PARITY_FAIL=0
+        ALTER_PARITY_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ALTER_PARITY_PASS=0
+        ALTER_PARITY_DIVERGE=$(grep "diverge" "$TMPFILE" | wc -l) || ALTER_PARITY_DIVERGE=0
+        echo "  ALTER parity tests: $ALTER_PARITY_PASS passed, $ALTER_PARITY_FAIL failed, $ALTER_PARITY_DIVERGE divergences"
+        TOTAL_PASS=$((TOTAL_PASS + ALTER_PARITY_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + ALTER_PARITY_FAIL))
+    fi
+fi
+
+# Run sync_bit isolation tests (per-connection correctness)
+echo "Running test-sync-bit-isolation.sh..."
+if bash "$SCRIPT_DIR/test-sync-bit-isolation.sh" > "$TMPFILE" 2>&1; then
+    SYNCBIT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SYNCBIT_PASS=0
+    echo "  sync_bit isolation tests: $SYNCBIT_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + SYNCBIT_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  sync_bit isolation tests: SKIPPED"
+        TOTAL_SKIP=$((TOTAL_SKIP + 2))
+    else
+        SYNCBIT_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || SYNCBIT_FAIL=0
+        SYNCBIT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SYNCBIT_PASS=0
+        echo "  sync_bit isolation tests: $SYNCBIT_PASS passed, $SYNCBIT_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + SYNCBIT_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + SYNCBIT_FAIL))
+    fi
+fi
+
+# Run backfill tests (crsql_as_crr on existing data)
+echo "Running test-backfill.sh..."
+if bash "$SCRIPT_DIR/test-backfill.sh" > "$TMPFILE" 2>&1; then
+    BACKFILL_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || BACKFILL_PASS=0
+    echo "  Backfill tests: $BACKFILL_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + BACKFILL_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Backfill tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        BACKFILL_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || BACKFILL_FAIL=0
+        BACKFILL_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || BACKFILL_PASS=0
+        echo "  Backfill tests: $BACKFILL_PASS passed, $BACKFILL_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + BACKFILL_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + BACKFILL_FAIL))
+    fi
+fi
+
+# Run multi-connection tests (on-disk database, concurrent access)
+echo "Running test-multiconn.sh..."
+if bash "$SCRIPT_DIR/test-multiconn.sh" > "$TMPFILE" 2>&1; then
+    MULTICONN_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || MULTICONN_PASS=0
+    echo "  Multi-connection tests: $MULTICONN_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + MULTICONN_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Multi-connection tests: BLOCKED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 6))
+    else
+        MULTICONN_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || MULTICONN_FAIL=0
+        MULTICONN_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || MULTICONN_PASS=0
+        echo "  Multi-connection tests: $MULTICONN_PASS passed, $MULTICONN_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + MULTICONN_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + MULTICONN_FAIL))
+    fi
+fi
+
+# Run persistence tests (on-disk DB close/reopen)
+echo "Running test-persistence.sh..."
+if bash "$SCRIPT_DIR/test-persistence.sh" > "$TMPFILE" 2>&1; then
+    PERSIST_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PERSIST_PASS=0
+    echo "  Persistence tests: $PERSIST_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + PERSIST_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Persistence tests: SKIPPED"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        PERSIST_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || PERSIST_FAIL=0
+        PERSIST_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PERSIST_PASS=0
+        echo "  Persistence tests: $PERSIST_PASS passed, $PERSIST_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + PERSIST_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + PERSIST_FAIL))
+    fi
+fi
+
+# Run PK UPDATE semantics tests (DELETE+INSERT on PK change)
+echo "Running test-pk-update.sh..."
+if bash "$SCRIPT_DIR/test-pk-update.sh" > "$TMPFILE" 2>&1; then
+    PKUPDATE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PKUPDATE_PASS=0
+    echo "  PK UPDATE tests: $PKUPDATE_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + PKUPDATE_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  PK UPDATE tests: BLOCKED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 15))
+    else
+        PKUPDATE_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || PKUPDATE_FAIL=0
+        PKUPDATE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PKUPDATE_PASS=0
+        echo "  PK UPDATE tests: $PKUPDATE_PASS passed, $PKUPDATE_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + PKUPDATE_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + PKUPDATE_FAIL))
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

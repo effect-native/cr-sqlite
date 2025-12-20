@@ -6,7 +6,7 @@
 #   make test-quick - Run individual test scripts
 #   make help       - Show all available targets
 
-.PHONY: all test test-parity test-rowid test-merge test-filters test-e2e test-alter test-compat clean help
+.PHONY: all test test-parity test-rowid test-merge test-filters test-e2e test-alter test-compat test-sync-bit clean help
 
 all: test
 
@@ -36,8 +36,11 @@ test-alter:
 test-compat:
 	@bash test-cross-platform-compat.sh
 
+test-sync-bit:
+	@bash test-sync-bit-isolation.sh
+
 # Run all individual tests (alternative to test-parity)
-test-quick: test-rowid test-merge test-filters test-e2e test-alter
+test-quick: test-rowid test-merge test-filters test-e2e test-alter test-sync-bit
 
 clean:
 	@echo "Nothing to clean"
@@ -56,6 +59,7 @@ help:
 	@echo "  test-e2e      - End-to-end sync (crsqlite.test.c:teste2e)"
 	@echo "  test-alter    - Schema alter (crsql_begin_alter/commit_alter)"
 	@echo "  test-compat   - Cross-platform Zig <-> Rust/C wire format compatibility"
+	@echo "  test-sync-bit - Per-connection sync_bit isolation (correctness test)"
 	@echo ""
 	@echo "Other:"
 	@echo "  test-quick    - Run all individual tests (no summary)"

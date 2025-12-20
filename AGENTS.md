@@ -5,7 +5,8 @@ Short operating manual for AI agents working in this repo.
 ## Pointers
 
 - Wishes inbox: `.wishes/`
-- Task queue: `.tasks/{backlog,active,done}/`
+- Triage inbox (unowned follow-ups): `.tasks/triage/`
+- Task queue: `.tasks/{triage,backlog,active,done}/`
 - Gap backlog (canonical map: update→delegate): `research/zig-cr/92-gap-backlog.md`
 - Delegate handoff log (canonical claims: delegate→update): `.tasks/DELEGATE_WORK_HANDOFF.md`
 - Zig implementation: `zig/`
@@ -34,6 +35,20 @@ Rules:
 - One task card = one owner = one atomic commit.
 - Use `.tmp/` for temp files (never `/tmp/`).
 
+## Triage follow-ups (inbox)
+
+When any agent (including subagents during “Delegate work”) discovers follow-up work, it must be captured as a **draft task card** in `.tasks/triage/`.
+
+Rules:
+- Follow-ups start in triage. Do not begin them automatically.
+- One follow-up = one new `TASK-*.md` file in `.tasks/triage/`.
+- Include minimal but real scope: `Files to Modify`, `Acceptance Criteria`, and links to the triggering task/spec/PR.
+- Prefer a crisp title that describes the gap, not the fix.
+
+Intent:
+- Keep an explicit inbox for newly discovered work.
+- Make follow-ups impossible to “forget” between delegate rounds.
+
 ## Wishes
 
 Workflow:
@@ -59,6 +74,7 @@ Do this, in order:
    - If evidence is missing (no commands, no output, no repro steps), assume the claim is unproven.
 1. Snapshot the inbox + queue:
    - `.wishes/*.md`
+   - `.tasks/triage/` (triage inbox)
    - `.tasks/{active,backlog,done}/`
 2. Reconcile implementation vs intent:
    - Zig: compare `zig/` to `research/zig-cr/*` (esp. `90-feature-matrix.md`, `93-phased-execution-proposal.md`).
@@ -66,6 +82,9 @@ Do this, in order:
    - For Effect SQL integration, consult `.refs/effect/packages/sql/` and `.refs/effect/packages/sql-sqlite-bun/`.
 3. Ensure every gap has exactly one owning task card:
    - Create/adjust `.tasks/backlog/TASK-*.md` as needed.
+   - Consume `.tasks/triage/` until inbox zero:
+     - If a triage item is valid/real, move it into `.tasks/backlog/` (or `.tasks/active/` if you are immediately executing it).
+     - If a triage item is obsolete/duplicate, move it to `.tasks/done/` with a short explanation.
 4. Make links impossible to miss:
    - `research/zig-cr/92-gap-backlog.md` unchecked items link to their task cards.
    - Task cards link back to their parent docs/specs.
