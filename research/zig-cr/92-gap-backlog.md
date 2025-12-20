@@ -11,6 +11,10 @@
 
 ## Now (next parallel assignments)
 
+### Hypothesis Invalidation (Next Priority)
+- [ ] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing `.tasks/backlog/TASK-127-experimental-parity-invalidation.md`
+- [ ] **TASK-128** — Expand parity suite with findings from TASK-127 `.tasks/backlog/TASK-128-expand-parity-suite.md`
+
 All oracle parity tests pass. Zig implementation is now wire-compatible with Rust/C oracle.
 
 ### Open Gaps (Parity Divergences)
