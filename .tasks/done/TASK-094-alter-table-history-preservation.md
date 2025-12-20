@@ -3,7 +3,7 @@
 ## Status
 - [ ] Planned
 - [ ] Assigned
-- [x] In Progress
+- [ ] In Progress
 - [ ] Blocked (reason: ...)
 - [ ] Complete
 

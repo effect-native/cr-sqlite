@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-18 (TASK-073: coverage map complete, 5 new test tasks created)
+> Last updated: 2025-12-20 (task queue hygiene + links refreshed)
 
 ## Status
 
@@ -18,21 +18,23 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-072** — Make `crsql_internal_sync_bit` per-connection ✓ `.tasks/done/TASK-072-zig-sync-bit-per-connection.md`
   - Per-connection isolation implemented via ConnectionSyncBitMap
   - Test: `zig/harness/test-sync-bit-isolation.sh`
-- [x] **TASK-073** — Compare Rust integration suite vs Zig harness ✓ `.tasks/active/TASK-073-compare-rust-zig-tests.md`
-  - Created coverage map, identified 9 gaps, spawned 5 new tasks
+- [x] **TASK-073** — Compare Rust integration suite vs Zig harness ✓ `.tasks/done/TASK-073-compare-rust-zig-tests.md`
+  - Coverage map created; spawned follow-up tasks
 - [ ] **TASK-074** — Expand Zig↔Rust/C wire compat tests beyond happy path → `.tasks/backlog/TASK-074-cross-impl-compat-expanded.md`
 
 ### New Test Tasks (from TASK-073 coverage analysis)
-- [ ] **TASK-095** — Zig test for PK UPDATE semantics → `.tasks/backlog/TASK-095-zig-test-pk-update-semantics.md`
-- [ ] **TASK-096** — Zig test for backfill verification → `.tasks/triage/TASK-096-zig-test-backfill-verification.md` (draft card added 2025-12-20)
+- [x] **TASK-095** — Zig test for PK UPDATE semantics ✓ `.tasks/done/TASK-095-zig-test-pk-update-semantics.md`
+  - Test exists and is wired into suite; currently fails against Zig (implementation gap)
+- [x] **TASK-096** — Zig test for backfill verification ✓ `.tasks/done/TASK-096-zig-test-backfill-verification.md`
+  - Test exists and is wired into suite; currently fails against Zig (implementation gap)
 - [ ] **TASK-097** — Zig ExtData lifecycle parity test → `.tasks/backlog/TASK-097-zig-extdata-lifecycle-test.md`
-- [ ] **TASK-098** — Zig on-disk DB persistence tests → `.tasks/backlog/TASK-098-zig-ondisk-db-tests.md` ⚠️ HIGH
-- [ ] **TASK-099** — Zig multi-connection parity test → `.tasks/triage/TASK-099-zig-multiconn-test.md` ⚠️ HIGH (draft card added 2025-12-20)
+- [x] **TASK-098** — Zig on-disk DB persistence tests ✓ `.tasks/done/TASK-098-zig-ondisk-db-tests.md`
+- [x] **TASK-099** — Zig multi-connection parity test ✓ `.tasks/done/TASK-099-zig-multiconn-test.md`
 
 ### Missing-feature RGRTDD tracks (spec then impl)
 - [ ] **TASK-075** — Spec `crsql_automigrate` behavior → `.tasks/backlog/TASK-075-spec-automigrate.md`
 - [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md`
-- [ ] **TASK-077** — Spec `crsql_as_crr` backfill behavior → `.tasks/backlog/TASK-077-spec-as-crr-backfill.md`
+- [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
 - [ ] **TASK-078** — Implement `crsql_as_crr` backfill in Zig → `.tasks/backlog/TASK-078-impl-as-crr-backfill.md`
 - [ ] **TASK-079** — Spec `clset` virtual table module → `.tasks/backlog/TASK-079-spec-clset-vtab.md`
 - [ ] **TASK-080** — Implement `clset` module in Zig → `.tasks/backlog/TASK-080-impl-clset-vtab.md`
@@ -63,10 +65,11 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - **1 DIVERGENCE**: ROLLBACK behavior (Rust/C does NOT reset, Zig incorrectly resets)
   - 17 passed, 1 failed
   - Test: `zig/harness/test-rows-impacted-parity.sh`
-- [ ] **TASK-094** — ALTER TABLE history preservation → `.tasks/active/TASK-094-alter-table-history-preservation.md` (divergences found 2025-12-20)
-  - [ ] **TASK-100** — Decide ADD COLUMN clock semantics → `.tasks/triage/TASK-100-decide-alter-new-column-clock-semantics.md`
-  - [ ] **TASK-101** — Align Zig behavior with oracle (if chosen) → `.tasks/triage/TASK-101-impl-alter-add-column-no-backfill.md`
-  - [ ] **TASK-102** — Fix/replace local oracle dylib (ALTER) → `.tasks/triage/TASK-102-fix-oracle-crsqlite-dylib-alter.md`
+- [x] **TASK-094** — ALTER TABLE history preservation ✓ `.tasks/done/TASK-094-alter-table-history-preservation.md`
+  - Divergence found: ADD COLUMN clock backfill semantics (Zig eager vs Rust lazy)
+  - [ ] **TASK-100** — Decide ADD COLUMN clock semantics → `.tasks/backlog/TASK-100-decide-alter-new-column-clock-semantics.md`
+  - [ ] **TASK-101** — Align Zig behavior with oracle (if chosen) → `.tasks/backlog/TASK-101-impl-alter-add-column-no-backfill.md`
+  - [ ] **TASK-102** — Fix/replace local oracle dylib (ALTER) → `.tasks/backlog/TASK-102-fix-oracle-crsqlite-dylib-alter.md`
 
 ## Coverage Map Summary (TASK-073)
 
@@ -75,10 +78,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 | Rust Suite | Zig Coverage | Status |
 |------------|--------------|--------|
 | automigrate.rs | MISSING | Blocked (TASK-075/076) |
-| backfill.rs | Partial | TASK-096 created |
+| backfill.rs | Partial | TASK-096 (test exists; implementation missing) |
 | pack_columns.rs | MISSING | Blocked (TASK-081/082) |
-| pk_only_tables.rs | Partial | TASK-095 created |
-| pk_update.rs | MISSING | TASK-095 created |
+| pk_only_tables.rs | Partial | TASK-095 (test exists; implementation missing) |
+| pk_update.rs | MISSING | TASK-095 (test exists; implementation missing) |
 | test_db_version.rs | test-db-version-parity.sh | ✓ |
 | test_cl_set_vtab.rs | MISSING | Blocked (TASK-079/080) |
 | tableinfo.rs | MISSING | TASK-097 created |
@@ -103,8 +106,8 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 
 | Gap | Risk | Task |
 |-----|------|------|
-| All tests use `:memory:` | HIGH | TASK-098 |
-| No multi-connection tests | HIGH | TASK-099 |
+| All tests use `:memory:` | HIGH | TASK-098 (done) |
+| No multi-connection tests | HIGH | TASK-099 (done) |
 | No crash/rollback tests | MEDIUM | Future |
 
 ## Context / Evidence

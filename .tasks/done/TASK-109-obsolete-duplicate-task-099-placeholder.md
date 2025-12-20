@@ -1,4 +1,4 @@
-# TASK-099: Zig multi-connection parity test (missing task card)
+# TASK-109: Obsolete placeholder for TASK-099
 
 ## Status
 - [ ] Planned
@@ -19,14 +19,12 @@ high
 - Related task: `.tasks/active/TASK-098-zig-ondisk-db-tests.md`
 
 ## Description
-`research/zig-cr/92-gap-backlog.md` references TASK-099, but the task card file did not exist.
+Obsolete placeholder.
 
-This task adds a multi-connection test against an on-disk database, validating correct behavior when multiple sqlite connections access the same DB file.
+This file previously existed only because `research/zig-cr/92-gap-backlog.md` referenced TASK-099 but a task card was missing at that time.
 
-Key risk areas:
-- per-connection state isolation (e.g., sync bit handling)
-- WAL/shared-cache interactions
-- triggers and clock table updates across connections
+Canonical card:
+- `.tasks/done/TASK-099-zig-multiconn-test.md`
 
 ## Files to Modify
 - `zig/harness/test-multiconn.sh` (new)
@@ -45,3 +43,8 @@ Key risk areas:
 - Task card created because it was missing but referenced by the gap backlog.
 
 ## Completion Notes
+
+Obsolete placeholder task card.
+
+- Reason: a canonical TASK-099 exists with completion notes at `.tasks/done/TASK-099-zig-multiconn-test.md`.
+- This card is kept only to preserve the historical note that the backlog link was once broken.

@@ -40,3 +40,9 @@ This is confusing for the task queue and any automation/grep-based workflows.
 - Created as a triage follow-up after observing duplicate TASK-099 task cards.
 
 ## Completion Notes
+
+**Completed: 2025-12-20**
+
+- Canonical multi-connection task lives at `.tasks/done/TASK-099-zig-multiconn-test.md`.
+- Placeholder duplicate moved to `.tasks/done/TASK-109-obsolete-duplicate-task-099-placeholder.md`.
+- `research/zig-cr/92-gap-backlog.md` now points at the canonical card.
