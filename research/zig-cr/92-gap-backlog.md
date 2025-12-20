@@ -12,6 +12,10 @@
 
 Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementation parity coverage and adding real-system tests.
 
+### Open Gaps (Parity Divergences)
+- [ ] **TASK-123** — Fix clock table schema parity (pk vs key, index) `.tasks/backlog/TASK-123-fix-clock-table-schema-parity.md`
+- [ ] **TASK-124** — Fix site_id preservation on cross-open `.tasks/backlog/TASK-124-fix-site-id-cross-open-parity.md`
+
 ### Parity/Coverage Tasks (ready to assign)
 - [x] **TASK-070** — Cover missing C suites: ext-data + sandbox ✓ `.tasks/done/TASK-070-zig-parity-extdata-sandbox.md`
   - ext-data: 15/15 tests pass (test-extdata.sh)
@@ -203,4 +207,4 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - **Round 51 (2025-12-20)**:
   - TASK-121: Fix rows_impacted ROLLBACK reset divergence (18/18 pass)
   - TASK-122: Fix no-op UPDATE db_version divergence (14/14 pass)
-  - **Zero oracle divergences remaining**
+  - **Remaining divergences**: TASK-123 (clock schema), TASK-124 (site_id cross-open)

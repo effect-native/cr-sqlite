@@ -316,9 +316,10 @@ pub fn setWinnerClock(
     seq: i64,
 ) MergeError!void {
     var buf: [1024]u8 = undefined;
+    // Note: Clock table uses "key" column, not "pk" - must match as_crr.zig schema
     const sql = std.fmt.bufPrintZ(&buf,
         \\INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\  ("pk", "col_name", "col_version", "db_version", "site_id", "seq")
+        \\  ("key", "col_name", "col_version", "db_version", "site_id", "seq")
         \\VALUES (?, ?, ?, ?, ?, ?)
     , .{table_name}) catch return MergeError.BufferOverflow;
 
