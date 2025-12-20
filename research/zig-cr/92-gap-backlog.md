@@ -17,10 +17,10 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
   - ext-data: 15/15 tests pass (test-extdata.sh)
   - sandbox: 5/9 tests pass → TASK-117 filed for PK-only sentinel gap
 - [ ] **TASK-071** — Cover remaining C suites: crsqlite + is-crr → `.tasks/backlog/TASK-071-zig-parity-crsqlite-is-crr.md`
-- [ ] **TASK-117** — Fix PK-only table sentinel emission → `.tasks/triage/TASK-117-zig-pk-only-sentinel-emission.md`
+- [ ] **TASK-117** — Fix PK-only table sentinel emission → `.tasks/backlog/TASK-117-zig-pk-only-sentinel-emission.md`
 
 ### Build/Tooling Blockers
-- [ ] **TASK-111** — Fix Zig 0.15 `SQLITE_TRANSIENT` alignment build error → `.tasks/backlog/TASK-111-zig-build-sqlite-transient-alignment.md`
+- [x] **TASK-111** — Fix Zig 0.15 `SQLITE_TRANSIENT` alignment build error ✓ `.tasks/done/TASK-111-zig-build-sqlite-transient-alignment.md`
 - [x] **TASK-072** — Make `crsql_internal_sync_bit` per-connection ✓ `.tasks/done/TASK-072-zig-sync-bit-per-connection.md`
   - Per-connection isolation implemented via ConnectionSyncBitMap
   - Test: `zig/harness/test-sync-bit-isolation.sh`
@@ -32,20 +32,21 @@ Goal: invalidate the hypothesis that "Zig is done" by expanding cross-implementa
 - [x] **TASK-095** — Zig test for PK UPDATE semantics ✓ `.tasks/done/TASK-095-zig-test-pk-update-semantics.md`
   - Test exists and is wired into suite
   - **TASK-105** partial impl: 11/16 tests pass (integer PK complete, compound/text PK needs follow-up)
-  - [ ] **TASK-110** — Compound/text PK tombstone fix → `.tasks/backlog/TASK-110-zig-pk-update-compound-text-pk.md`
+  - [x] **TASK-110** — Compound/text PK tombstone fix ✓ `.tasks/done/TASK-110-zig-pk-update-compound-text-pk.md`
 - [x] **TASK-096** — Zig test for backfill verification ✓ `.tasks/done/TASK-096-zig-test-backfill-verification.md`
   - Test exists and is wired into suite
   - **TASK-078 complete**: All 12 backfill tests pass ✓
 - [x] **TASK-097** — Zig ExtData lifecycle parity test ✓ `.tasks/done/TASK-097-zig-extdata-lifecycle-test.md`
+  - Test: `zig/harness/test-extdata.sh`
   - 15 tests created, all pass
   - Oracle parity confirmed (no divergences)
 - [x] **TASK-098** — Zig on-disk DB persistence tests ✓ `.tasks/done/TASK-098-zig-ondisk-db-tests.md`
 - [x] **TASK-099** — Zig multi-connection parity test ✓ `.tasks/done/TASK-099-zig-multiconn-test.md`
 
 ### Missing-feature RGRTDD tracks (spec then impl)
-- [x] **TASK-075** — Spec `crsql_automigrate` behavior ✓ `.tasks/active/TASK-075-spec-automigrate.md`
+- [x] **TASK-075** — Spec `crsql_automigrate` behavior ✓ `.tasks/done/TASK-075-spec-automigrate.md`
   - Test: `zig/harness/test-automigrate.sh` (17 tests, all RED until impl)
-- [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md`
+- [ ] **TASK-076** — Implement `crsql_automigrate` in Zig → `.tasks/backlog/TASK-076-impl-automigrate.md` (tests in `zig/harness/test-automigrate.sh`)
 - [x] **TASK-077** — Spec `crsql_as_crr` backfill behavior ✓ `.tasks/done/TASK-077-spec-as-crr-backfill.md`
 - [x] **TASK-078** — Implement `crsql_as_crr` backfill in Zig ✓ `.tasks/done/TASK-078-impl-as-crr-backfill.md`
   - All 12 backfill tests pass
