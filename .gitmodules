@@ -2,31 +2,12 @@
   path = core/rs/sqlite-rs-embedded
 	url = https://github.com/vlcn-io/sqlite-rs-embedded.git
 
-[submodule ".refs/bun"]
-	path = .refs/bun
-	url = https://github.com/oven-sh/bun.git
-
-[submodule ".refs/ghostty"]
-	path = .refs/ghostty
-	url = https://github.com/ghostty-org/ghostty.git
-[submodule ".refs/tigerbeetle"]
-	path = .refs/tigerbeetle
-	url = git@github.com:tigerbeetle/tigerbeetle.git
 [submodule ".refs/zig-sqlite"]
 	path = .refs/zig-sqlite
 	url = git@github.com:vrischmann/zig-sqlite.git
 [submodule ".refs/sqlite"]
 	path = .refs/sqlite
 	url = git@github.com:mackyle/sqlite.git
-[submodule ".refs/solid_queue"]
-	path = .refs/solid_queue
-	url = git@github.com:rails/solid_queue.git
-[submodule ".refs/solid_cache"]
-	path = .refs/solid_cache
-	url = git@github.com:rails/solid_cache.git
-[submodule ".refs/solid_cable"]
-	path = .refs/solid_cable
-	url = git@github.com:rails/solid_cable.git
 [submodule ".refs/effect"]
 	path = .refs/effect
 	url = git@github.com:Effect-TS/effect.git
