@@ -79,18 +79,30 @@ SKIP=0
 
 ERRFILE="$TMPDIR/error.txt"
 
-# Helper to run SQL with Zig extension
-run_zig() {
+# Helper to run SQL with Zig extension (setup then query separately)
+run_zig_setup() {
     local db="$1"
     local sql="$2"
-    $SQLITE "$db" -cmd ".load $ZIG_EXT" "$sql" 2>"$ERRFILE" || true
+    $SQLITE "$db" -cmd ".load $ZIG_EXT" "$sql" >/dev/null 2>"$ERRFILE" || true
 }
 
-# Helper to run SQL with Rust/C extension
-run_rust() {
+run_zig_query() {
     local db="$1"
     local sql="$2"
-    $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
+    $SQLITE "$db" -cmd ".load $ZIG_EXT" "$sql" 2>>"$ERRFILE" || true
+}
+
+# Helper to run SQL with Rust/C extension (setup then query separately)
+run_rust_setup() {
+    local db="$1"
+    local sql="$2"
+    $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" >/dev/null 2>"$ERRFILE" || true
+}
+
+run_rust_query() {
+    local db="$1"
+    local sql="$2"
+    $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>>"$ERRFILE" || true
 }
 
 # Check for blocking errors
@@ -117,16 +129,19 @@ echo ""
 DB_ZIG_1="$TMPDIR/test1_zig.db"
 DB_RUST_1="$TMPDIR/test1_rust.db"
 
-# Run same SQL on both implementations
-SQL_1="
+# Run setup (output suppressed)
+SETUP_1="
 CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
-SELECT crsql_as_crr('t') WHERE 0;
+SELECT crsql_as_crr('t');
 INSERT INTO t VALUES (1, X'');
-SELECT quote(val) FROM crsql_changes WHERE [table]='t' AND cid='data';
 "
 
-ZIG_RESULT_1=$(run_zig "$DB_ZIG_1" "$SQL_1")
-RUST_RESULT_1=$(run_rust "$DB_RUST_1" "$SQL_1")
+QUERY_1="SELECT quote(val) FROM crsql_changes WHERE [table]='t' AND cid='data';"
+
+run_zig_setup "$DB_ZIG_1" "$SETUP_1"
+run_rust_setup "$DB_RUST_1" "$SETUP_1"
+ZIG_RESULT_1=$(run_zig_query "$DB_ZIG_1" "$QUERY_1")
+RUST_RESULT_1=$(run_rust_query "$DB_RUST_1" "$QUERY_1")
 
 if is_blocked; then
     echo "  SKIP: Required functions not implemented"
@@ -157,16 +172,19 @@ echo ""
 DB_ZIG_2="$TMPDIR/test2_zig.db"
 DB_RUST_2="$TMPDIR/test2_rust.db"
 
-SQL_2="
+SETUP_2="
 CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
-SELECT crsql_as_crr('t') WHERE 0;
+SELECT crsql_as_crr('t');
 INSERT INTO t VALUES (2, X'1234');
 UPDATE t SET data = X'' WHERE id = 2;
-SELECT quote(val) FROM crsql_changes WHERE [table]='t' AND cid='data' ORDER BY db_version DESC LIMIT 1;
 "
 
-ZIG_RESULT_2=$(run_zig "$DB_ZIG_2" "$SQL_2")
-RUST_RESULT_2=$(run_rust "$DB_RUST_2" "$SQL_2")
+QUERY_2="SELECT quote(val) FROM crsql_changes WHERE [table]='t' AND cid='data' ORDER BY db_version DESC LIMIT 1;"
+
+run_zig_setup "$DB_ZIG_2" "$SETUP_2"
+run_rust_setup "$DB_RUST_2" "$SETUP_2"
+ZIG_RESULT_2=$(run_zig_query "$DB_ZIG_2" "$QUERY_2")
+RUST_RESULT_2=$(run_rust_query "$DB_RUST_2" "$QUERY_2")
 
 if is_blocked; then
     echo "  SKIP: Required functions not implemented"
@@ -197,15 +215,18 @@ echo ""
 DB_ZIG_3="$TMPDIR/test3_zig.db"
 DB_RUST_3="$TMPDIR/test3_rust.db"
 
-SQL_3="
+SETUP_3="
 CREATE TABLE t2 (id INTEGER PRIMARY KEY NOT NULL, txt TEXT, blb BLOB);
-SELECT crsql_as_crr('t2') WHERE 0;
+SELECT crsql_as_crr('t2');
 INSERT INTO t2 VALUES (1, '', X'');
-SELECT cid, quote(val) FROM crsql_changes WHERE [table]='t2' AND cid IN ('txt', 'blb') ORDER BY cid;
 "
 
-ZIG_RESULT_3=$(run_zig "$DB_ZIG_3" "$SQL_3")
-RUST_RESULT_3=$(run_rust "$DB_RUST_3" "$SQL_3")
+QUERY_3="SELECT cid, quote(val) FROM crsql_changes WHERE [table]='t2' AND cid IN ('txt', 'blb') ORDER BY cid;"
+
+run_zig_setup "$DB_ZIG_3" "$SETUP_3"
+run_rust_setup "$DB_RUST_3" "$SETUP_3"
+ZIG_RESULT_3=$(run_zig_query "$DB_ZIG_3" "$QUERY_3")
+RUST_RESULT_3=$(run_rust_query "$DB_RUST_3" "$QUERY_3")
 
 if is_blocked; then
     echo "  SKIP: Required functions not implemented"
@@ -239,18 +260,19 @@ echo ""
 DB_ZIG_4="$TMPDIR/test4_zig.db"
 DB_RUST_4="$TMPDIR/test4_rust.db"
 
-SQL_4="
+SETUP_4="
 CREATE TABLE t2 (id INTEGER PRIMARY KEY NOT NULL, txt TEXT, blb BLOB);
 SELECT crsql_as_crr('t2');
 INSERT INTO t2 VALUES (2, NULL, NULL);
 INSERT INTO t2 VALUES (3, '', X'');
-SELECT pk, cid, quote(val) FROM crsql_changes 
-WHERE [table]='t2' AND cid IN ('txt', 'blb') 
-ORDER BY pk, cid;
 "
 
-ZIG_RESULT_4=$(run_zig "$DB_ZIG_4" "$SQL_4")
-RUST_RESULT_4=$(run_rust "$DB_RUST_4" "$SQL_4")
+QUERY_4="SELECT hex(pk), cid, quote(val) FROM crsql_changes WHERE [table]='t2' AND cid IN ('txt', 'blb') ORDER BY pk, cid;"
+
+run_zig_setup "$DB_ZIG_4" "$SETUP_4"
+run_rust_setup "$DB_RUST_4" "$SETUP_4"
+ZIG_RESULT_4=$(run_zig_query "$DB_ZIG_4" "$QUERY_4")
+RUST_RESULT_4=$(run_rust_query "$DB_RUST_4" "$QUERY_4")
 
 if is_blocked; then
     echo "  SKIP: Required functions not implemented"
@@ -285,19 +307,19 @@ DB_ZIG_5="$TMPDIR/test5_zig.db"
 DB_RUST_5="$TMPDIR/test5_rust.db"
 
 # Create table in both DBs
-SQL_SETUP_5="
+SETUP_5="
 CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
 SELECT crsql_as_crr('t');
 "
 
-run_zig "$DB_ZIG_5" "$SQL_SETUP_5"
-run_rust "$DB_RUST_5" "$SQL_SETUP_5"
+run_zig_setup "$DB_ZIG_5" "$SETUP_5"
+run_rust_setup "$DB_RUST_5" "$SETUP_5"
 
 # Insert empty blob in Zig
-run_zig "$DB_ZIG_5" "INSERT INTO t VALUES (1, X'');"
+run_zig_setup "$DB_ZIG_5" "INSERT INTO t VALUES (1, X'');"
 
 # Extract the change record from Zig
-ZIG_CHANGE=$(run_zig "$DB_ZIG_5" "
+ZIG_CHANGE=$(run_zig_query "$DB_ZIG_5" "
 SELECT [table], hex(pk), cid, quote(val), col_version, db_version, hex(site_id), cl, seq 
 FROM crsql_changes WHERE [table]='t' AND cid='data';
 ")
@@ -319,13 +341,13 @@ else
     SEQ=$(echo "$ZIG_CHANGE" | cut -d'|' -f9)
     
     # Apply to Oracle
-    run_rust "$DB_RUST_5" "
+    run_rust_setup "$DB_RUST_5" "
     INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
     VALUES ('$TABLE', X'$HEX_PK', '$CID', $QUOTED_VAL, $COL_VER, $DB_VER, X'$HEX_SITE', $CL, $SEQ);
     "
     
     # Check what Oracle received
-    RUST_FINAL=$(run_rust "$DB_RUST_5" "SELECT quote(data) FROM t WHERE id=1;")
+    RUST_FINAL=$(run_rust_query "$DB_RUST_5" "SELECT quote(data) FROM t WHERE id=1;")
     
     if [[ "$RUST_FINAL" == "X''" ]]; then
         echo "  PASS: Empty blob synced correctly to Oracle"
@@ -359,17 +381,18 @@ echo ""
 DB_ZIG_6="$TMPDIR/test6_zig.db"
 DB_RUST_6="$TMPDIR/test6_rust.db"
 
-SQL_6="
+SETUP_6="
 CREATE TABLE t3 (id INTEGER PRIMARY KEY NOT NULL, v1 BLOB, v2 TEXT, v3 BLOB);
 SELECT crsql_as_crr('t3');
 INSERT INTO t3 VALUES (1, X'', '', NULL);
-SELECT cid, typeof(val), quote(val) FROM crsql_changes 
-WHERE [table]='t3' AND cid IN ('v1', 'v2', 'v3') 
-ORDER BY cid;
 "
 
-ZIG_RESULT_6=$(run_zig "$DB_ZIG_6" "$SQL_6")
-RUST_RESULT_6=$(run_rust "$DB_RUST_6" "$SQL_6")
+QUERY_6="SELECT cid, typeof(val), quote(val) FROM crsql_changes WHERE [table]='t3' AND cid IN ('v1', 'v2', 'v3') ORDER BY cid;"
+
+run_zig_setup "$DB_ZIG_6" "$SETUP_6"
+run_rust_setup "$DB_RUST_6" "$SETUP_6"
+ZIG_RESULT_6=$(run_zig_query "$DB_ZIG_6" "$QUERY_6")
+RUST_RESULT_6=$(run_rust_query "$DB_RUST_6" "$QUERY_6")
 
 if is_blocked; then
     echo "  SKIP: Required functions not implemented"
