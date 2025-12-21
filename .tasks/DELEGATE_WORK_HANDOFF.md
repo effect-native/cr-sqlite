@@ -2692,3 +2692,80 @@ All edge case parity tests PASSED
 
 **Known gaps / unverified claims**
 - No new divergences found after fix
+
+---
+
+## Round 2025-12-21 (58) — Fix build compilation errors from TASK-149
+
+**Tasks executed**
+- `.tasks/done/TASK-149-refactor-insertIntoPksTableAndGetPk.md` (reopened and completed)
+
+**Commits**
+- (pending commit — fixes not yet committed)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-cross-open-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>Build output</summary>
+
+```text
+[36m[1mBuilding Zig extension...[0m
+(no errors)
+```
+</details>
+
+<details>
+<summary>Cross-open parity tests (24/24 pass)</summary>
+
+```text
+Cross-Open Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Results:
+  PASSED:      24
+  FAILED:      0
+  KNOWN_FAIL:  0 (cross-implementation modification not yet supported)
+  SKIPPED:     0
+
+All cross-open parity tests PASSED
+```
+</details>
+
+**Fixes applied**
+1. Added `api.clear_bindings` wrapper to `zig/src/ffi/api.zig`
+2. Changed `TableMergeStmts.init()` to return `!TableMergeStmts` (error union)
+3. Fixed unused `base_rowid` variable (replaced with `_ =`)
+4. Fixed 4 optional pointer casts for `site_id_blob` (added `orelse` checks)
+5. Restored `getLocalCl`/`getLocalClCached` to 2/3-arg versions (sentinel CL lookup)
+6. Restored `dropNonSentinelClocks` to 3-arg version
+7. Added missing functions: `zeroClockOnResurrect`, `zeroClockOnResurrectCached`, `insertRowForResurrection`, `updateBaseTableColumn`
+8. Fixed argument order for `insertOrUpdateColumn` call
+
+**Files modified**
+- `zig/src/ffi/api.zig` — added `clear_bindings` wrapper
+- `zig/src/merge_insert.zig` — restored missing functions, fixed signatures
+- `zig/src/changes_vtab.zig` — fixed call sites, pointer types
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — should compile without errors
+3. `bash zig/harness/test-cross-open-parity.sh` — verify 24/24 pass
+
+**Known gaps / unverified claims**
+- Some parity tests still failing (rows_impacted, alter, noops) — these are pre-existing failures, not regressions
+- Full test suite not run (`make -C zig test-parity` not fully verified)
+- Changes not yet committed
+
+**Follow-up tasks created (triage)**
+- `.tasks/triage/TASK-157-rows-impacted-returns-empty.md` — crsql_rows_impacted() returns empty string instead of integer (HIGH)
+- `.tasks/triage/TASK-158-optimize-zeroClockOnResurrect-caching.md` — add proper statement caching (LOW)

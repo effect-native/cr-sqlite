@@ -656,6 +656,15 @@ pub fn bind_double(pStmt: ?*c.sqlite3_stmt, i: c_int, val: f64) c_int {
     return func(pStmt, i, val);
 }
 
+/// Wrapper for sqlite3_clear_bindings
+/// Clears all parameter bindings on a prepared statement.
+pub fn clear_bindings(pStmt: ?*c.sqlite3_stmt) c_int {
+    const api = sqlite_c.sqlite3_api;
+    if (api == null) return SQLITE_MISUSE;
+    const func = api.*.clear_bindings orelse return SQLITE_MISUSE;
+    return func(pStmt);
+}
+
 // =============================================================================
 // Hooks
 // =============================================================================

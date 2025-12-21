@@ -4,12 +4,8 @@
 Adapt `insertIntoPksTableAndGetPk` and related pks table insert functions to work with the new Rust/C-compatible schema where PK column values are stored directly instead of as a packed blob.
 
 ## Status
-- State: **REOPENED** — marked done prematurely, left build broken
+- State: **DONE** — build fixed, cross-open tests pass
 - Priority: high (blocks sync operations)
-
-## ⚠️ Build Broken
-This task was marked "done" but left 4 compilation errors. The build does not compile.
-See TASK-147 progress log for details.
 
 ## Context
 The sync INSERT path currently fails because `insertIntoPksTableAndGetPk()` tries to insert into the old schema:
@@ -92,8 +88,25 @@ Completed all acceptance criteria:
 
 5. Marked TableMergeStmts.sql_insert_pks and related cached functions as DEPRECATED
 
-Commit: 59f198b7 - "refactor(merge_insert): adapt insertIntoPksTableAndGetPk for Rust/C pks schema (TASK-149)"
+**Build Fix Session (2025-12-21):**
+Original commit 59f198b7 left build broken with 4 compilation errors:
+1. `api.clear_bindings` missing — added to api.zig
+2. `TableMergeStmts.init()` return type mismatch — changed to return error union `!TableMergeStmts`
+3. Unused `base_rowid` variable — replaced with `_ =`
+4. Optional pointer not unwrapped — added `orelse` checks
+
+Additional fixes during session:
+- Fixed `getLocalCl`/`getLocalClCached` signatures (restored 2-arg version for sentinel CL lookup)
+- Fixed `dropNonSentinelClocks` signature (restored 3-arg version)
+- Added missing functions: `zeroClockOnResurrect`, `zeroClockOnResurrectCached`, `insertRowForResurrection`, `updateBaseTableColumn`
+- Fixed argument order for `insertOrUpdateColumn` call
+- Fixed 4 optional pointer casts for `site_id_blob`
+
+Test results after fix:
+- `zig/harness/test-cross-open-parity.sh`: 24/24 PASSED
+- Build: ✅ compiles successfully
 
 Files modified:
-- /Users/tom/Developer/effect-native/cr-sqlite/zig/src/merge_insert.zig
-- /Users/tom/Developer/effect-native/cr-sqlite/zig/src/changes_vtab.zig
+- `zig/src/ffi/api.zig` — added `clear_bindings` wrapper
+- `zig/src/merge_insert.zig` — restored missing functions, fixed signatures
+- `zig/src/changes_vtab.zig` — fixed call sites, pointer types

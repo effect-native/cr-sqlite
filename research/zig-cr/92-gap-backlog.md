@@ -1,36 +1,24 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-21 (Update tasks — build broken, TASK-147 in progress)
+> Last updated: 2025-12-21 (Build fixed, TASK-149 completed, cross-open tests pass)
 
 ## Status
 
-- **BUILD: ❌ BROKEN** — 4 compilation errors from in-progress TASK-147/TASK-149 work
-- MVP: ⚠️ blocked (cannot verify — build broken)
-- Oracle parity: ⚠️ blocked (cannot verify — build broken)
+- **BUILD: ✅ PASSING** — compiles successfully
+- MVP: ⚠️ needs verification (some parity tests still failing)
+- Oracle parity: ⚠️ needs verification
+- Cross-open parity: ✅ **24/24 PASSING** — `.tasks/done/TASK-149-refactor-insertIntoPksTableAndGetPk.md`
 - Cross-open modification compatibility: ❌ **in progress** — `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
 - Cross-platform compat tests: ❌ **2 failures discovered** — `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
-## ⚠️ CRITICAL: Build Broken
-
-The codebase does not compile. `make -C zig test-parity` fails with 4 errors:
-
-1. `src/changes_vtab.zig:1707` — unused local constant `base_rowid`
-2. `src/changes_vtab.zig:1539` — `TableMergeStmts.init()` returns struct, not error union (bad `catch`)
-3. `src/changes_vtab.zig:1721` — `?[*]const u8` passed where `[*]const u8` expected (missing unwrap)
-4. `src/merge_insert.zig:89` — `api.clear_bindings` doesn't exist (no such function)
-
-**Root cause**: TASK-149 was marked "done" but left incomplete code. Must fix compilation errors before any testing.
-
 ## Now (next parallel assignments)
 
-**BLOCKED** — Cannot assign work until build is fixed.
-
-Priority order after build fix:
-1. Fix compilation errors (unassigned — needs new task or reopen TASK-149)
-2. Continue TASK-147 decomposition (TASK-150, 151, 152 in triage)
-3. Run parity tests to verify state
+Priority order:
+1. Continue TASK-147 decomposition (TASK-150, 151, 152 in triage)
+2. Run full parity tests to assess state
+3. Fix remaining parity test failures
 
 ## Triage Inbox Status
 

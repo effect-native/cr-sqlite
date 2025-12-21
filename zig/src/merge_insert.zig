@@ -57,7 +57,7 @@ pub const TableMergeStmts = struct {
     drop_non_sentinel_stmt: ?*api.sqlite3_stmt = null,
     insert_pks_stmt: ?*api.sqlite3_stmt = null, // DEPRECATED - not used with new schema
 
-    pub fn init(db: ?*api.sqlite3, table_name: []const u8) TableMergeStmts {
+    pub fn init(db: ?*api.sqlite3, table_name: []const u8) !TableMergeStmts {
         return TableMergeStmts{
             .db = db,
             .table_name = table_name,
@@ -103,18 +103,18 @@ pub const TableMergeStmts = struct {
 };
 
 /// Get the local causal length for a (pk, col, db_version) triple from the clock table.
-/// Returns 0 if no entry exists (first write to this column).
+/// Get the local causal length (cl) for a row from the sentinel clock entry.
+/// Returns 0 if no entry exists (no local state for this row).
 pub fn getLocalCl(
     db: ?*api.sqlite3,
     table_name: []const u8,
     pk: i64,
-    col_name: []const u8,
-    db_version: i64,
 ) MergeError!i64 {
     var buf: [512]u8 = undefined;
+    // Get sentinel col_version (which stores the row's CL)
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "SELECT cl FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = ? AND db_version = ? AND site_id IS NULL",
+        "SELECT col_version FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = '-1'",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -125,28 +125,42 @@ pub fn getLocalCl(
     defer _ = api.finalize(stmt);
 
     _ = api.bind_int64(stmt, 1, pk);
-    _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
-    _ = api.bind_int64(stmt, 3, db_version);
 
     if (api.step(stmt) == api.SQLITE_ROW) {
         return api.column_int64(stmt, 0);
     }
 
-    return 0; // No entry = causal length 0
+    // No sentinel - check if row exists at all
+    var exists_buf: [512]u8 = undefined;
+    const exists_sql = std.fmt.bufPrintZ(&exists_buf, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+
+    var exists_stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, exists_sql, -1, &exists_stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(exists_stmt);
+
+    _ = api.bind_int64(exists_stmt, 1, pk);
+
+    if (api.step(exists_stmt) == api.SQLITE_ROW) {
+        return 1; // Row exists but no explicit CL, default to 1 (created)
+    }
+
+    return 0; // No local row
 }
 
 /// Cached variant of getLocalCl using TableMergeStmts.
 pub fn getLocalClCached(
     stmts: *TableMergeStmts,
     pk: i64,
-    col_name: []const u8,
-    db_version: i64,
 ) MergeError!i64 {
+    // Format SQL on first use
+    if (stmts.local_cl_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_local_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = '-1'", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.local_cl_stmt, @ptrCast(&stmts.sql_local_cl));
 
     _ = api.bind_int64(stmt, 1, pk);
-    _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
-    _ = api.bind_int64(stmt, 3, db_version);
 
     if (api.step(stmt) == api.SQLITE_ROW) {
         return api.column_int64(stmt, 0);
@@ -500,17 +514,17 @@ pub fn deleteFromBaseTable(
     }
 }
 
-/// Drop all clock entries for a (pk, col) pair except the sentinel (-1, site_id=NULL) entry.
+/// Drop all clock entries for a row except the sentinel (col_name = '-1') entry.
+/// Used when deleting a row to clean up per-column clock entries.
 pub fn dropNonSentinelClocks(
     db: ?*api.sqlite3,
     table_name: []const u8,
     pk: i64,
-    col_name: []const u8,
 ) MergeError!void {
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "DELETE FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = ? AND (col_version != -1 OR site_id IS NOT NULL)",
+        "DELETE FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name != '-1'",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -521,7 +535,175 @@ pub fn dropNonSentinelClocks(
     defer _ = api.finalize(stmt);
 
     _ = api.bind_int64(stmt, 1, pk);
-    _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Reset col_version to 0 for all non-sentinel clock entries for a row.
+/// Used during resurrection to mark all columns as needing re-sync.
+pub fn zeroClockOnResurrect(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+) MergeError!void {
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(
+        &buf,
+        "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE __crsql_key = ? AND col_name != '-1'",
+        .{table_name},
+    ) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Cached variant of zeroClockOnResurrect using TableMergeStmts.
+pub fn zeroClockOnResurrectCached(
+    stmts: *TableMergeStmts,
+    pk: i64,
+) MergeError!void {
+    // Format SQL on first use - need to add sql buffer and stmt handle for this
+    // For now, fall back to uncached version
+    return zeroClockOnResurrect(stmts.db, stmts.table_name, pk);
+}
+
+/// Insert a row for resurrection (resurrecting a deleted row with new data).
+/// Creates a new row with the given PK and column value.
+pub fn insertRowForResurrection(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+    col_name: []const u8,
+    value: ?*api.sqlite3_value,
+) MergeError!void {
+    // Get the PK column name from the table schema
+    const pk_col_name = try getPkColumnName(db, table_name);
+
+    var buf: [1024]u8 = undefined;
+    var stmt: ?*api.sqlite3_stmt = null;
+
+    if (pk_col_name) |pk_col| {
+        // Table has a declared PK column - insert using that column name
+        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+        const pk_col_slice = pk_col[0..pk_col_len];
+
+        // Build: INSERT INTO "{table}" ("{pk_col}", "{col}") VALUES (?, ?)
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\", \"{s}\") VALUES (?, ?)", .{ table_name, pk_col_slice, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // No declared PK column - use rowid directly
+        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    }
+    defer _ = api.finalize(stmt);
+
+    // Bind the pk value
+    _ = api.bind_int64(stmt, 1, pk);
+
+    // Bind column value based on type
+    if (value) |v| {
+        const val_type = api.value_type(v);
+        switch (val_type) {
+            api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
+            api.SQLITE_FLOAT => {
+                _ = api.bind_double(stmt, 2, api.value_double(v));
+            },
+            api.SQLITE_TEXT => {
+                const text = api.value_text(v);
+                const len = api.value_bytes(v);
+                if (text) |t| {
+                    _ = api.bind_text(stmt, 2, t, len, api.getTransientDestructor());
+                } else {
+                    _ = api.bind_null(stmt, 2);
+                }
+            },
+            api.SQLITE_BLOB => {
+                const blob = api.value_blob(v);
+                const len = api.value_bytes(v);
+                _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
+            },
+            else => _ = api.bind_null(stmt, 2),
+        }
+    } else {
+        _ = api.bind_null(stmt, 2);
+    }
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
+}
+
+/// Update a column value in the base table for an existing row.
+/// Uses the pks table key (pk) to find the actual base table rowid.
+pub fn updateBaseTableColumn(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    pk: i64,
+    col_name: []const u8,
+    value: ?*api.sqlite3_value,
+) MergeError!void {
+    // First, get base_rowid from pks table
+    const base_rowid_opt = try getBaseRowidFromPk(db, table_name, pk);
+    const base_rowid = base_rowid_opt orelse return; // Tombstoned entry, nothing to update
+
+    var buf: [1024]u8 = undefined;
+
+    const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    // Bind value based on type
+    if (value) |v| {
+        const val_type = api.value_type(v);
+        switch (val_type) {
+            api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 1, api.value_int64(v)),
+            api.SQLITE_FLOAT => {
+                _ = api.bind_double(stmt, 1, api.value_double(v));
+            },
+            api.SQLITE_TEXT => {
+                const text = api.value_text(v);
+                const len = api.value_bytes(v);
+                if (text) |t| {
+                    _ = api.bind_text(stmt, 1, t, len, api.getTransientDestructor());
+                } else {
+                    _ = api.bind_null(stmt, 1);
+                }
+            },
+            api.SQLITE_BLOB => {
+                const blob = api.value_blob(v);
+                const len = api.value_bytes(v);
+                _ = api.bind_blob(stmt, 1, blob, len, api.getTransientDestructor());
+            },
+            else => _ = api.bind_null(stmt, 1),
+        }
+    } else {
+        _ = api.bind_null(stmt, 1);
+    }
+    _ = api.bind_int64(stmt, 2, base_rowid);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
