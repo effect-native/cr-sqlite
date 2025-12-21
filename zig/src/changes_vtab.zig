@@ -1710,7 +1710,7 @@ fn changesUpdate(
                 };
 
                 // Insert into __crsql_pks table and get the pk (auto-increment key)
-                const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, base_rowid, pk_ptr, @intCast(pk_len)) catch {
+                const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, pk_ptr, @intCast(pk_len)) catch {
                     log.debug("changesUpdate: insertIntoPksTableAndGetPk for PK-only failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
@@ -1741,14 +1741,14 @@ fn changesUpdate(
             const insert_value = toApiValue(argv[5]);
 
             // Step 1a: Insert into base table (returns the base table rowid)
-            const base_rowid = merge_insert.insertIntoBaseTable(api_db, table_slice, cid_slice, insert_value, pk_ptr, @intCast(pk_len)) catch {
-                log.debug("changesUpdate: insertIntoBaseTable failed", .{});
+            merge_insert.insertOrUpdateColumn(api_db, table_slice, cid_slice, insert_value, pk_ptr, @intCast(pk_len)) catch {
+                log.debug("changesUpdate: insertOrUpdateColumn failed", .{});
                 return vtab.SQLITE_ERROR;
             };
 
             // Step 1b: Insert into __crsql_pks table and get the pk (auto-increment key)
             // The pk is what we use for clock table entries, NOT the base table rowid
-            const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, base_rowid, pk_ptr, @intCast(pk_len)) catch {
+            const pks_pk = merge_insert.insertIntoPksTableAndGetPk(api_db, table_slice, pk_ptr, @intCast(pk_len)) catch {
                 log.debug("changesUpdate: insertIntoPksTableAndGetPk failed", .{});
                 return vtab.SQLITE_ERROR;
             };

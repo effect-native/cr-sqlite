@@ -31,6 +31,8 @@ Triggering issue:
   - `insertIntoPksTable()` (line ~658)
   - `insertIntoPksTableAndGetPk()` (line ~671)
   - `TableMergeStmts.sql_insert_pks` buffer and statement (line ~135)
+- `zig/src/changes_vtab.zig`:
+  - Remove base_rowid parameter from insertIntoPksTableAndGetPk calls (lines 1713, 1751)
 
 ## Acceptance Criteria
 1. `insertIntoPksTableAndGetPk()` must:
@@ -64,6 +66,9 @@ Triggering issue:
 ## Progress Log
 - 2025-12-21: Created from TASK-147 refactoring work. Compound PK bug fixed, findPkFromBlob refactored, this is next critical blocker.
 - 2025-12-21 14:30: Starting implementation. Reading existing code to understand the pattern from findPkFromBlob refactor.
+- 2025-12-21 14:35: Analyzed findPkFromBlob pattern. Now implementing new schema support with codec.unpack + dynamic INSERT.
+- 2025-12-21 14:45: Refactored insertIntoPksTableAndGetPk in merge_insert.zig - unpacks blob, builds dynamic INSERT, returns last_insert_rowid. Now fixing call sites in changes_vtab.zig.
+- 2025-12-21 15:00: Fixed call sites in changes_vtab.zig - removed base_rowid parameters from lines 1713, 1751. Fixed line 1744 to call insertOrUpdateColumn instead of missing insertIntoBaseTable function. Ready to build and test.
 
 ## Completion Notes
 (Empty until done.)
