@@ -4,7 +4,7 @@
 Adapt `insertIntoPksTableAndGetPk` and related pks table insert functions to work with the new Rust/C-compatible schema where PK column values are stored directly instead of as a packed blob.
 
 ## Status
-- State: triage
+- State: active
 - Priority: high (blocks sync operations)
 
 ## Context
@@ -63,6 +63,7 @@ Triggering issue:
 
 ## Progress Log
 - 2025-12-21: Created from TASK-147 refactoring work. Compound PK bug fixed, findPkFromBlob refactored, this is next critical blocker.
+- 2025-12-21 14:30: Starting implementation. Reading existing code to understand the pattern from findPkFromBlob refactor.
 
 ## Completion Notes
 (Empty until done.)

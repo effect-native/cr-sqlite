@@ -65,6 +65,14 @@ Unify on the Rust/C trigger schema and semantics:
 - 2025-12-21: Task created from hard requirement: cross-open modification must work both directions.
 - 2025-12-21: First attempt by subagent failed — changed pks table schema AND trigger SQL but left backfill using old schema, causing "failed to backfill existing rows" error. Changes stashed and reverted.
 - 2025-12-21: **Remains in active** — needs more careful incremental approach.
+- 2025-12-21: **Phase 1 progress** (schema migration):
+  - ✅ Fixed compound PK bug in getOrCreatePkKey (commit 255e316e) - dangling pointer fix
+  - ✅ Refactored findPkFromBlob for new schema (commit 3b9a984d) - unpacks pk_blob, queries individual PK columns
+  - ✅ Made getTableInfo public in as_crr.zig for reuse
+  - ✅ Cross-open tests: 24/24 PASSING (direct table modifications work)
+  - ❌ Sync operations: FAILING (need merge_insert.zig refactoring)
+  - Created 7 triage tasks (TASK-149 through TASK-155) for remaining work
+- 2025-12-21: **Next**: Delegate TASK-149 (refactor insertIntoPksTableAndGetPk) to unblock sync INSERT path
 
 ## Implementation Notes (from failed attempt)
 The first approach tried to:
