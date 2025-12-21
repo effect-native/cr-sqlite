@@ -4,7 +4,7 @@
 Turn the "acceptable error" paths in `zig/harness/test-schema-evolution.sh` into explicit, stable behavior assertions, so schema-evolution sync does not silently mask real compatibility issues.
 
 ## Status
-- State: triage
+- State: active
 - Priority: medium
 
 ## Problem Statement

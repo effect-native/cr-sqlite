@@ -6,7 +6,7 @@ Change the Zig implementation to match the Rust/C implementation such that a dat
 This is a hard requirement.
 
 ## Status
-- State: triage
+- State: active
 - Priority: highest
 
 ## Problem Statement

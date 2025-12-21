@@ -6,7 +6,7 @@ Ensure the cross-platform compatibility harness is a reliable invalidation tool 
 Currently `zig/harness/test-cross-platform-compat.sh` can SKIP entirely when it cannot find the Rust/C extension.
 
 ## Status
-- State: triage
+- State: active
 - Priority: medium
 
 ## Problem Statement

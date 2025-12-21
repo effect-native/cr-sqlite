@@ -6,7 +6,7 @@ Enable a database created by one CR-SQLite implementation (Zig vs Rust/C) to be 
 This gap is currently explicitly marked as "known limitation" in `zig/harness/test-cross-open-parity.sh` (XO-003, XO-004, XO-006).
 
 ## Status
-- State: triage
+- State: done (superseded by TASK-147)
 - Priority: high
 
 ## Problem Statement
@@ -59,4 +59,4 @@ When an implementation opens a DB created by the other and attempts INSERT/UPDAT
 - 2025-12-21: Created task from known-fail cross-open modification tests.
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-21: Superseded by TASK-147 which has a more specific implementation plan (unify on Rust/C trigger schema).
