@@ -22,14 +22,14 @@ Each type must produce byte-identical output:
 | WF-004 | `crsql_pack_columns(NULL)` | `0105` | TESTED |
 | WF-005 | `crsql_pack_columns(3.14159)` | `0102400921F9F01B866E` | TESTED |
 | WF-006 | `crsql_pack_columns(42, 'hello', X'BEEF')` | `03092A0B0568656C6C6F0C02BEEF` | TESTED |
-| WF-007 | `crsql_pack_columns('')` (empty string) | TBD | NEEDS TEST |
+| WF-007 | `crsql_pack_columns('')` (empty string) | `0103` | TESTED (TASK-132) |
 | WF-008 | `crsql_pack_columns(X'')` (empty blob) | TBD | TESTED (TASK-127-129) |
-| WF-009 | `crsql_pack_columns(0)` | TBD | NEEDS TEST |
-| WF-010 | `crsql_pack_columns(-1)` | TBD | NEEDS TEST |
-| WF-011 | `crsql_pack_columns(9223372036854775807)` (MAX_INT64) | TBD | NEEDS TEST |
-| WF-012 | `crsql_pack_columns(-9223372036854775808)` (MIN_INT64) | TBD | NEEDS TEST |
-| WF-013 | `crsql_pack_columns(1.7976931348623157e+308)` (MAX_FLOAT) | TBD | NEEDS TEST |
-| WF-014 | Unicode text: `crsql_pack_columns('🎉')` | TBD | NEEDS TEST |
+| WF-009 | `crsql_pack_columns(0)` | `0101` | TESTED (TASK-132) |
+| WF-010 | `crsql_pack_columns(-1)` | `0141FFFFFFFFFFFFFFFF` | TESTED (TASK-132) |
+| WF-011 | `crsql_pack_columns(9223372036854775807)` (MAX_INT64) | `01417FFFFFFFFFFFFFFF` | TESTED (TASK-132) |
+| WF-012 | `crsql_pack_columns(-9223372036854775808)` (MIN_INT64) | `01418000000000000000` | TESTED (TASK-132) |
+| WF-013 | `crsql_pack_columns(1.7976931348623157e+308)` (MAX_FLOAT) | `01027FEFFFFFFFFFFFFF` | TESTED (TASK-132) |
+| WF-014 | Unicode text: `crsql_pack_columns('🎉')` | `010B04F09F8E89` | TESTED (TASK-132) |
 | WF-015 | Very long blob (1MB) | TBD | NEEDS TEST |
 
 ### 1.2 PK Blob Format in crsql_changes
@@ -287,7 +287,7 @@ Each type must produce byte-identical output:
 
 | Category | Total | Tested | Needs Test | Blocked |
 |----------|-------|--------|------------|---------|
-| Wire Format | 27 | 6 | 21 | 0 |
+| Wire Format | 27 | 13 | 14 | 0 |
 | Clock Table Schema | 7 | 7 | 0 | 0 |
 | db_version Timing | 13 | 11 | 2 | 0 |
 | rows_impacted | 10 | 8 | 2 | 0 |
@@ -299,12 +299,12 @@ Each type must produce byte-identical output:
 | Edge Cases | 16 | 2 | 14 | 0 |
 | Cross-Open | 6 | 3 | 3 | 0 |
 | Stress | 4 | 1 | 3 | 0 |
-| **TOTAL** | **157** | **68** | **70** | **19** |
+| **TOTAL** | **157** | **75** | **63** | **19** |
 
-**Coverage:** 68/157 = 43% directly tested, 19 blocked by test script bugs
+**Coverage:** 75/157 = 48% directly tested, 19 blocked by test script bugs
 
 **Next Steps:**
 1. Fix test script bugs to unblock 19 experiments
-2. Add wire format edge case tests
+2. ~~Add wire format edge case tests~~ (DONE - TASK-132)
 3. Add merge resolution value comparison tests
 4. Add edge case boundary value tests

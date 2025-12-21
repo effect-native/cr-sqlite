@@ -68,6 +68,141 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (55) — Wire format, PK blob, merge value, and CL parity tests (4 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-132-wire-format-edge-case-parity.md`
+- `.tasks/done/TASK-133-pk-blob-format-edge-case-parity.md`
+- `.tasks/done/TASK-134-merge-value-comparison-parity.md`
+- `.tasks/done/TASK-135-delete-resurrection-parity.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-wire-format-edge-cases.sh
+bash zig/harness/test-pk-blob-parity.sh
+bash zig/harness/test-merge-value-parity.sh
+bash zig/harness/test-cl-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-132: Wire format edge cases (7/7 pass)</summary>
+
+```text
+Wire Format Edge Case Parity Test Summary
+
+  PASS:    7
+  FAIL:    0
+  SKIP:    0
+
+All wire format edge case parity tests PASSED
+
+Verified parity for:
+  - WF-007: Empty string
+  - WF-009: Zero
+  - WF-010: Negative one
+  - WF-011: MAX_INT64
+  - WF-012: MIN_INT64
+  - WF-013: MAX_FLOAT
+  - WF-014: Unicode/emoji
+```
+</details>
+
+<details>
+<summary>TASK-133: PK blob format (9/9 pass)</summary>
+
+```text
+PK Blob Format Parity Test Summary
+
+  PASS:    9
+  FAIL:    0
+  SKIP:    0
+
+All PK blob format parity tests PASSED
+
+Verified:
+  - WF-021: Single text PK
+  - WF-022: Single blob PK
+  - WF-023: Compound PK (int, int)
+  - WF-024: Compound PK (int, text)
+  - WF-025: Compound PK (int, text, blob)
+  - WF-026: Unicode text PK
+  - WF-027: Empty string PK
+  - WF-028: Empty blob PK
+```
+</details>
+
+<details>
+<summary>TASK-134: Merge value comparison (7/7 pass)</summary>
+
+```text
+Merge Value Comparison Parity Test Summary
+
+  PASS:    7
+  FAIL:    0
+  SKIP:    0
+
+All merge value comparison parity tests PASSED
+
+Value comparison parity verified:
+  - MR-020: String lexicographic comparison
+  - MR-021: Integer comparison
+  - MR-022: NULL vs value handling
+  - MR-023: Value vs NULL handling
+  - MR-024: Float comparison
+  - MR-025: Blob bytewise comparison
+  - MR-026: Cross-type comparison
+```
+</details>
+
+<details>
+<summary>TASK-135: CL parity (17/17 pass)</summary>
+
+```text
+Causal Length (CL) Parity Test Summary
+
+Results: 17 passed, 0 failed, 0 skipped
+
+All CL parity tests PASSED
+
+Verified:
+  - CL values identical through insert/delete lifecycle
+  - MR-042: Higher CL delete wins over lower CL live
+  - MR-043: Higher CL resurrection wins over lower CL delete
+  - MR-041: Full lifecycle resurrection works identically
+  - Lower CL changes are correctly rejected
+  - crsql_changes reports identical cl values
+```
+</details>
+
+**Files created:**
+- `zig/harness/test-wire-format-edge-cases.sh` (new, ~400 lines)
+- `zig/harness/test-pk-blob-parity.sh` (new, ~600 lines)
+- `zig/harness/test-merge-value-parity.sh` (new, ~750 lines)
+- `zig/harness/test-cl-parity.sh` (new, ~680 lines)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-wire-format-edge-cases.sh` — verify 7/7 pass
+3. `bash zig/harness/test-pk-blob-parity.sh` — verify 9/9 pass
+4. `bash zig/harness/test-merge-value-parity.sh` — verify 7/7 pass
+5. `bash zig/harness/test-cl-parity.sh` — verify 17/17 pass
+
+**Known gaps / unverified claims**
+- No coverage captured
+- CI integration not verified this round (local runs only)
+- Tests created NEW files, so no conflicts with existing test suite
+
+---
+
 ## Round 2025-12-20 (54) — Fuzz parity + edge case tests + empty blob fix (3 tasks)
 
 **Tasks executed**

@@ -28,6 +28,8 @@
 #   - test-table-compat.sh: Table compatibility checks for crsql_as_crr (RGRTDD)
 #   - test-config.sh: crsql_config_get/set API (RGRTDD)
 #   - test-edge-cases.sh: Edge case parity (empty blob, NULL distinction - TASK-127/128)
+#   - test-wire-format-edge-cases.sh: Wire format edge cases (TASK-132)
+#   - test-pk-blob-parity.sh: PK blob format edge cases (text/blob/compound PKs - TASK-133)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -945,6 +947,46 @@ else
         echo "  Config API tests: $CONFIG_PASS passed, $CONFIG_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + CONFIG_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + CONFIG_FAIL))
+    fi
+fi
+
+# Run wire format edge case parity tests (TASK-132)
+echo "Running test-wire-format-edge-cases.sh..."
+if bash "$SCRIPT_DIR/test-wire-format-edge-cases.sh" > "$TMPFILE" 2>&1; then
+    WIREFMT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || WIREFMT_PASS=0
+    echo "  Wire format edge case tests: $WIREFMT_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + WIREFMT_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Wire format edge case tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 7))
+    else
+        WIREFMT_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || WIREFMT_FAIL=0
+        WIREFMT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || WIREFMT_PASS=0
+        echo "  Wire format edge case tests: $WIREFMT_PASS passed, $WIREFMT_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + WIREFMT_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + WIREFMT_FAIL))
+    fi
+fi
+
+# Run PK blob format parity tests (TASK-133)
+echo "Running test-pk-blob-parity.sh..."
+if bash "$SCRIPT_DIR/test-pk-blob-parity.sh" > "$TMPFILE" 2>&1; then
+    PKBLOB_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PKBLOB_PASS=0
+    echo "  PK blob format parity tests: $PKBLOB_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + PKBLOB_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  PK blob format parity tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 9))
+    else
+        PKBLOB_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || PKBLOB_FAIL=0
+        PKBLOB_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PKBLOB_PASS=0
+        echo "  PK blob format parity tests: $PKBLOB_PASS passed, $PKBLOB_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + PKBLOB_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + PKBLOB_FAIL))
     fi
 fi
 
