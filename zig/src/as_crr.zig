@@ -223,34 +223,82 @@ fn createClockTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     }
 }
 
-/// Create the pks table for mapping auto-increment keys to packed PK blobs.
-/// The pk column is an auto-increment key that is INDEPENDENT of base table rowid.
-/// This allows compound/text PK tables to have separate entries for old and new PKs
-/// when a PK column is updated (old entry for tombstone, new entry for live row).
-///
-/// The base_rowid column stores the current base table rowid for live rows.
-/// For tombstoned entries, base_rowid is NULL (the row no longer exists).
-/// This allows efficient value lookups: pks.pk -> pks.base_rowid -> base_table.rowid
-///
-/// Schema:
-/// ```sql
-/// CREATE TABLE IF NOT EXISTS "{table}__crsql_pks" (
-///   "pk" INTEGER PRIMARY KEY,     -- Auto-increment key (clock table references this)
-///   "base_rowid" INTEGER,         -- Base table rowid (NULL for tombstoned entries)
-///   "pks" BLOB NOT NULL UNIQUE    -- Packed PK blob, unique constraint for lookups
-/// );
-/// ```
+/// Create the pks table for mapping auto-increment keys to PK column values.
+/// Schema matches Rust/C implementation:
+/// - Key: `__crsql_key INTEGER PRIMARY KEY`
+/// - One column per PK column from the base table
+/// - Unique index `{table}__crsql_pks_pks` on the PK columns
 fn createPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf,
-        \\CREATE TABLE IF NOT EXISTS "{s}__crsql_pks" (
-        \\  "pk" INTEGER PRIMARY KEY,
-        \\  "base_rowid" INTEGER,
-        \\  "pks" BLOB NOT NULL UNIQUE
-        \\);
-    , .{table_name}) catch return error.BufferOverflow;
+    const info = try getTableInfo(db, table_name);
 
-    const rc = api.exec(db, sql, null, null, null);
+    var buf: [SQL_BUF_SIZE]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+
+    writer.print(
+        "CREATE TABLE IF NOT EXISTS \"{s}__crsql_pks\" (__crsql_key INTEGER PRIMARY KEY",
+        .{table_name},
+    ) catch return error.BufferOverflow;
+
+    // Add PK columns in order
+    var pk_order: usize = 1;
+    var pk_written: usize = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                writer.print(", \"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(")") catch return error.BufferOverflow;
+
+    var sql_len = fbs.pos;
+    if (sql_len >= SQL_BUF_SIZE) return error.BufferOverflow;
+    buf[sql_len] = 0;
+
+    const sql: [*:0]const u8 = @ptrCast(&buf);
+    var rc = api.exec(db, sql, null, null, null);
+    if (rc != api.SQLITE_OK) {
+        return error.SqliteError;
+    }
+
+    // Create unique index on PK columns
+    // CREATE UNIQUE INDEX IF NOT EXISTS "{table}__crsql_pks_pks" ON "{table}__crsql_pks" (pk_cols...)
+    var idx_buf: [SQL_BUF_SIZE]u8 = undefined;
+    var idx_fbs = std.io.fixedBufferStream(&idx_buf);
+    const idx_writer = idx_fbs.writer();
+
+    idx_writer.print(
+        "CREATE UNIQUE INDEX IF NOT EXISTS \"{s}__crsql_pks_pks\" ON \"{s}__crsql_pks\" (",
+        .{ table_name, table_name },
+    ) catch return error.BufferOverflow;
+
+    pk_order = 1;
+    pk_written = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    idx_writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                idx_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    idx_writer.writeAll(")") catch return error.BufferOverflow;
+
+    sql_len = idx_fbs.pos;
+    if (sql_len >= SQL_BUF_SIZE) return error.BufferOverflow;
+    idx_buf[sql_len] = 0;
+
+    const idx_sql: [*:0]const u8 = @ptrCast(&idx_buf);
+    rc = api.exec(db, idx_sql, null, null, null);
     if (rc != api.SQLITE_OK) {
         return error.SqliteError;
     }
@@ -1025,24 +1073,30 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         return error.SqliteError;
     }
 
-    // Build the SELECT query to find rows not yet backfilled
-    // Query: SELECT rowid, pk_cols... FROM table WHERE rowid NOT IN (SELECT pk FROM table__crsql_pks)
+    // Build the SELECT query to find PK tuples in base table not yet in __crsql_pks
+    // Rust/C algorithm: SELECT pk_cols FROM base EXCEPT SELECT pk_cols FROM pks
     var select_buf: [SQL_BUF_SIZE]u8 = undefined;
     var select_fbs = std.io.fixedBufferStream(&select_buf);
     const select_writer = select_fbs.writer();
 
-    select_writer.print("SELECT rowid", .{}) catch {
+    // SELECT pk1, pk2, ... FROM base
+    select_writer.writeAll("SELECT ") catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };
 
-    // Add PK columns in order for crsql_pack_columns
     var pk_order: usize = 1;
     var pk_written: usize = 0;
     while (pk_written < info.pk_count) : (pk_order += 1) {
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                select_writer.print(", \"{s}\"", .{col.name[0..col.name_len]}) catch {
+                if (pk_written > 0) {
+                    select_writer.writeAll(", ") catch {
+                        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+                        return error.BufferOverflow;
+                    };
+                }
+                select_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch {
                     _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
                     return error.BufferOverflow;
                 };
@@ -1052,8 +1106,39 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         }
     }
 
-    // Find rows not yet in pks table (use base_rowid column, not pk)
-    select_writer.print(" FROM \"{s}\" WHERE rowid NOT IN (SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE base_rowid IS NOT NULL)", .{ table_name, table_name }) catch {
+    select_writer.print(" FROM \"{s}\" AS t1 ", .{table_name}) catch {
+        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+        return error.BufferOverflow;
+    };
+
+    // EXCEPT SELECT pk1, pk2, ... FROM pks
+    select_writer.writeAll("EXCEPT SELECT ") catch {
+        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+        return error.BufferOverflow;
+    };
+
+    pk_order = 1;
+    pk_written = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    select_writer.writeAll(", ") catch {
+                        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+                        return error.BufferOverflow;
+                    };
+                }
+                select_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch {
+                    _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+                    return error.BufferOverflow;
+                };
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    select_writer.print(" FROM \"{s}__crsql_pks\" AS t2", .{table_name}) catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };
@@ -1076,17 +1161,44 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     defer _ = api.finalize(select_stmt);
 
     // Build INSERT statement for pks table
+    // Rust/C schema: INSERT INTO "{table}__crsql_pks" (pk_cols...) VALUES (?, ?, ...) RETURNING __crsql_key
     var pks_insert_buf: [SQL_BUF_SIZE]u8 = undefined;
     var pks_fbs = std.io.fixedBufferStream(&pks_insert_buf);
     const pks_writer = pks_fbs.writer();
 
-    // Insert with base_rowid instead of pk (pk auto-increments)
-    pks_writer.print("INSERT OR IGNORE INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, crsql_pack_columns(", .{table_name}) catch {
+    pks_writer.print("INSERT INTO \"{s}__crsql_pks\" (", .{table_name}) catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };
 
-    // Add placeholders for each PK column value
+    // Column list
+    var pk_order_insert: usize = 1;
+    var pk_written_insert: usize = 0;
+    while (pk_written_insert < info.pk_count) : (pk_order_insert += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order_insert))) {
+                if (pk_written_insert > 0) {
+                    pks_writer.writeAll(", ") catch {
+                        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+                        return error.BufferOverflow;
+                    };
+                }
+                pks_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch {
+                    _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+                    return error.BufferOverflow;
+                };
+                pk_written_insert += 1;
+                break;
+            }
+        }
+    }
+
+    pks_writer.writeAll(") VALUES (") catch {
+        _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+        return error.BufferOverflow;
+    };
+
+    // Placeholders
     for (0..info.pk_count) |i| {
         if (i > 0) {
             pks_writer.writeAll(", ") catch {
@@ -1100,7 +1212,7 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
         };
     }
 
-    pks_writer.writeAll("))") catch {
+    pks_writer.writeAll(") RETURNING __crsql_key") catch {
         _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
         return error.BufferOverflow;
     };
@@ -1145,18 +1257,8 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
     // Iterate over rows that need backfilling
     while (api.step(select_stmt) == api.SQLITE_ROW) {
-        // Column 0 is rowid
-        const rowid = api.column_int64(select_stmt, 0);
-
-        // Insert into pks table
-        // Bind rowid as first param
-        if (api.bind_int64(pks_stmt, 1, rowid) != api.SQLITE_OK) {
-            _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
-            return error.SqliteError;
-        }
-
-        // Bind PK column values (columns 1..pk_count from select)
-        for (1..info.pk_count + 1) |i| {
+        // Bind PK column values (columns 0..pk_count from select)
+        for (0..info.pk_count) |i| {
             const col_idx: c_int = @intCast(i);
             const bind_idx: c_int = @intCast(i + 1);
             const value = api.column_value(select_stmt, col_idx);
@@ -1193,19 +1295,23 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
             }
         }
 
-        _ = api.step(pks_stmt);
+        // Insert pks entry and capture assigned __crsql_key
+        const step_rc = api.step(pks_stmt);
+        if (step_rc != api.SQLITE_ROW) {
+            _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
+            return error.SqliteError;
+        }
+        const key = api.column_int64(pks_stmt, 0);
         _ = api.reset(pks_stmt);
 
         // Insert clock entries for each non-PK column
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == 0) {
-                // Non-PK column - create clock entry
-                if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+                if (api.bind_int64(clock_stmt, 1, key) != api.SQLITE_OK) {
                     _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
                     return error.SqliteError;
                 }
 
-                // Bind column name
                 const col_name_slice = col.name[0..col.name_len];
                 if (api.bind_text(clock_stmt, 2, @ptrCast(col_name_slice.ptr), @intCast(col.name_len), api.getTransientDestructor()) != api.SQLITE_OK) {
                     _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
@@ -1219,7 +1325,7 @@ fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
         // If there are no non-PK columns, insert sentinel row
         if (non_pk_count == 0) {
-            if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+            if (api.bind_int64(clock_stmt, 1, key) != api.SQLITE_OK) {
                 _ = api.exec(db, "ROLLBACK TO backfill", null, null, null);
                 return error.SqliteError;
             }
