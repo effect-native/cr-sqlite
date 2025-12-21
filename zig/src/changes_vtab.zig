@@ -1085,7 +1085,23 @@ fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []cons
                 }
             },
             api.SQLITE_BLOB => {
-                resultBlob(ctx, columnBlobFromStmt(stmt, 0), columnBytesFromStmt(stmt, 0), api.getTransientDestructor());
+                // For blobs, sqlite3_column_blob returns NULL for zero-length blobs,
+                // but sqlite3_column_type still returns SQLITE_BLOB and sqlite3_column_bytes returns 0.
+                // We must handle this case to distinguish empty blob X'' from actual NULL.
+                //
+                // SQLite's sqlite3_result_blob interprets NULL pointer as zeroblob,
+                // but passing NULL with n=0 can result in NULL output instead of empty blob.
+                // To ensure we get X'' (empty blob), we pass a non-NULL pointer with n=0.
+                const blob_len = columnBytesFromStmt(stmt, 0);
+                const blob_ptr = columnBlobFromStmt(stmt, 0);
+                if (blob_ptr != null) {
+                    resultBlob(ctx, blob_ptr, blob_len, api.getTransientDestructor());
+                } else {
+                    // Empty blob case: col_type is SQLITE_BLOB but pointer is NULL
+                    // Use a static non-NULL pointer with length 0 to produce X''
+                    const empty_blob = [_]u8{};
+                    resultBlob(ctx, &empty_blob, 0, api.SQLITE_STATIC);
+                }
             },
             else => resultNull(ctx),
         }

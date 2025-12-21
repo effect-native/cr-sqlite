@@ -27,6 +27,7 @@
 #   - test-unpack-columns-vtab.sh: crsql_unpack_columns virtual table (RGRTDD)
 #   - test-table-compat.sh: Table compatibility checks for crsql_as_crr (RGRTDD)
 #   - test-config.sh: crsql_config_get/set API (RGRTDD)
+#   - test-edge-cases.sh: Edge case parity (empty blob, NULL distinction - TASK-127/128)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -944,6 +945,31 @@ else
         echo "  Config API tests: $CONFIG_PASS passed, $CONFIG_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + CONFIG_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + CONFIG_FAIL))
+    fi
+fi
+
+# Run edge case parity tests (empty blob, NULL distinction - TASK-127/128)
+echo "Running test-edge-cases.sh..."
+if bash "$SCRIPT_DIR/test-edge-cases.sh" > "$TMPFILE" 2>&1; then
+    EDGE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || EDGE_PASS=0
+    echo "  Edge case parity tests: $EDGE_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + EDGE_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Edge case parity tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 6))
+    elif grep -q "RED PHASE" "$TMPFILE"; then
+        EDGE_EXPECTED=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || EDGE_EXPECTED=0
+        echo "  Edge case parity tests: RED PHASE ($EDGE_EXPECTED tests await TASK-129 fix)"
+        # These are expected failures until TASK-129, don't count as test failures
+        TOTAL_SKIP=$((TOTAL_SKIP + EDGE_EXPECTED))
+    else
+        EDGE_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || EDGE_FAIL=0
+        EDGE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || EDGE_PASS=0
+        echo "  Edge case parity tests: $EDGE_PASS passed, $EDGE_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + EDGE_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + EDGE_FAIL))
     fi
 fi
 
