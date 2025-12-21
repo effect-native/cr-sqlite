@@ -9,7 +9,7 @@
 #   make clean        - Clean build artifacts
 #   make help         - Show this help
 
-.PHONY: all test test-unit test-parity test-browser build clean help \
+.PHONY: all test test-unit test-parity test-parity-parallel test-parity-all test-slow test-browser build clean help \
         _test-unit _test-parity _test-browser dist \
         universal build-arm64 build-x64 size-report
 
@@ -69,6 +69,38 @@ test-parity:
 	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
 	@echo ""
 	@cd harness && bash test-parity.sh
+
+# Shell parity tests (parallel execution for faster CI)
+# Uses run-all-tests.sh to run all test-*.sh scripts concurrently
+# Default: uses nproc jobs. Override with PARALLEL_JOBS env var.
+# Note: Excludes slow tests by default (fuzz, stress, large-data).
+test-parity-parallel: build
+	@echo ""
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "$(CYAN)$(BOLD)  Shell Parity Tests (Parallel - Fast)$(RESET)"
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo ""
+	@cd harness && bash run-all-tests.sh --fast
+
+# Shell parity tests including slow tests (fuzz, stress, large-data)
+# Use this for thorough CI runs or release validation.
+test-parity-all: build
+	@echo ""
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "$(CYAN)$(BOLD)  Shell Parity Tests (Parallel - All)$(RESET)"
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo ""
+	@cd harness && bash run-all-tests.sh --all
+
+# Only slow tests (fuzz, stress, large-data)
+# Use for extended testing or CI nightly builds.
+test-slow: build
+	@echo ""
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo "$(CYAN)$(BOLD)  Slow Tests Only (Fuzz, Stress, Large-Data)$(RESET)"
+	@echo "$(CYAN)$(BOLD)════════════════════════════════════════════════════════════════$(RESET)"
+	@echo ""
+	@cd harness && bash run-all-tests.sh --slow
 
 # Browser tests (Playwright + sql.js)
 test-browser:
@@ -277,10 +309,13 @@ help:
 	@echo "$(BOLD)Zig CR-SQLite Makefile$(RESET)"
 	@echo ""
 	@echo "$(BOLD)Test Targets:$(RESET)"
-	@echo "  $(CYAN)make test$(RESET)         - Run all tests concurrently (unit + parity + browser)"
-	@echo "  $(CYAN)make test-unit$(RESET)    - Run Zig unit tests only"
-	@echo "  $(CYAN)make test-parity$(RESET)  - Run shell parity tests only"
-	@echo "  $(CYAN)make test-browser$(RESET) - Run Playwright browser tests only"
+	@echo "  $(CYAN)make test$(RESET)                - Run all tests concurrently (unit + parity + browser)"
+	@echo "  $(CYAN)make test-unit$(RESET)           - Run Zig unit tests only"
+	@echo "  $(CYAN)make test-parity$(RESET)         - Run shell parity tests only (sequential)"
+	@echo "  $(CYAN)make test-parity-parallel$(RESET) - Run shell parity tests (parallel, excludes slow)"
+	@echo "  $(CYAN)make test-parity-all$(RESET)     - Run ALL shell parity tests (including slow)"
+	@echo "  $(CYAN)make test-slow$(RESET)           - Run only slow tests (fuzz, stress, large-data)"
+	@echo "  $(CYAN)make test-browser$(RESET)        - Run Playwright browser tests only"
 	@echo ""
 	@echo "$(BOLD)Build Targets:$(RESET)"
 	@echo "  $(CYAN)make build$(RESET)        - Build the Zig extension"
