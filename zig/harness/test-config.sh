@@ -37,37 +37,55 @@ fi
 
 # Determine extension path based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
-    EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
 else
-    EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
+    ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
 fi
 
-if [[ ! -f "$EXT" ]]; then
-    echo "FAIL: Extension not found at $EXT"
+if [[ ! -f "$ZIG_EXT" ]]; then
+    echo "FAIL: Extension not found at $ZIG_EXT"
     exit 1
 fi
 
-echo "Extension: $EXT"
+echo "Zig Extension: $ZIG_EXT"
 echo ""
 
-TMPFILE=$(mktemp)
-ERRFILE=$(mktemp)
-trap "rm -f $TMPFILE $ERRFILE" EXIT
+# Temp directory for test databases
+TMP_DIR="$ROOT_DIR/.tmp/test-config"
+mkdir -p "$TMP_DIR"
+ERRFILE=$(mktemp "$TMP_DIR/err.XXXXXX")
+trap "rm -f $ERRFILE" EXIT
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
 TOTAL_SKIP=0
 
-# Helper to run SQL and get result (returns last line of output)
+# ═══════════════════════════════════════════════════════════════════════════
+# Helper Functions
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Run SQL with Zig extension (clean sqlite + explicit .load)
+run_zig() {
+    local db="$1"; shift
+    nix run nixpkgs#sqlite --quiet -- "$db" -cmd ".load $ZIG_EXT" "$@" 2>"$ERRFILE" || true
+}
+
+# Run SQL with Rust/C oracle (sqlite-cr wrapper)
+run_rust() {
+    local db="$1"; shift
+    nix run github:subtleGradient/sqlite-cr --quiet -- "$db" <<< "$@" 2>"$ERRFILE" || true
+}
+
+# Helper to get last line of output
 run_sql() {
     local sql="$1"
-    nix run nixpkgs#sqlite -- :memory: -cmd ".load $EXT" "$sql" 2>"$ERRFILE" | tail -1 || true
+    nix run nixpkgs#sqlite --quiet -- :memory: -cmd ".load $ZIG_EXT" "$sql" 2>"$ERRFILE" | tail -1 || true
 }
 
 # Helper to run SQL and get full output
 run_sql_full() {
     local sql="$1"
-    nix run nixpkgs#sqlite -- :memory: -cmd ".load $EXT" "$sql" 2>"$ERRFILE" || true
+    nix run nixpkgs#sqlite --quiet -- :memory: -cmd ".load $ZIG_EXT" "$sql" 2>"$ERRFILE" || true
 }
 
 # Helper to check if error file contains specific error
@@ -465,6 +483,164 @@ else
         echo "  FAIL: Expected 0 or empty, got: '$RESULT'"
         TOTAL_FAIL=$((TOTAL_FAIL + 1))
     fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test CF-007: Config isolation - behavior on new connection (PARITY TEST)
+# This is the critical isolation test from TASK-138
+# 
+# DISCOVERY: The Rust/C oracle PERSISTS config to the database via crsql_config table.
+# This means config is NOT purely per-connection - it's stored in the database.
+# A new connection to the SAME database will see the persisted config.
+# A new connection to a FRESH database will see the default (1).
+#
+# The test now verifies parity between Zig and Rust/C implementations.
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test CF-007a: Config persists in database across connections (Zig)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Use a persistent database file to test across connections
+DB_FILE="$TMP_DIR/cf007-zig.db"
+rm -f "$DB_FILE"
+
+# Connection 1: Set non-default value (0) in first invocation
+ZIG_CONN1=$(nix run nixpkgs#sqlite --quiet -- "$DB_FILE" -cmd ".load $ZIG_EXT" "
+SELECT crsql_config_set('merge-equal-values', 0);
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+# Connection 2: Check value in NEW invocation to SAME database
+# Per oracle behavior, this should see the PERSISTED value (0)
+ZIG_CONN2=$(nix run nixpkgs#sqlite --quiet -- "$DB_FILE" -cmd ".load $ZIG_EXT" "
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+echo "  Zig Connection 1 (after set to 0): $ZIG_CONN1"
+echo "  Zig Connection 2 (same db):        $ZIG_CONN2"
+
+if [[ "$CONFIG_GET_AVAILABLE" == "false" ]] || [[ "$CONFIG_SET_AVAILABLE" == "false" ]]; then
+    echo "  FAIL: Config functions not implemented (expected for RED phase)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$ZIG_CONN1" == "0" && "$ZIG_CONN2" == "0" ]]; then
+    echo "  PASS: Config correctly persisted to database (value 0 preserved)"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Unexpected values - Conn1: '$ZIG_CONN1', Conn2: '$ZIG_CONN2'"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test CF-007b: Fresh database has default config value
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test CF-007b: Fresh database has default config (Zig)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# New fresh database - should have default value
+DB_FILE_FRESH="$TMP_DIR/cf007-zig-fresh.db"
+rm -f "$DB_FILE_FRESH"
+
+ZIG_FRESH=$(nix run nixpkgs#sqlite --quiet -- "$DB_FILE_FRESH" -cmd ".load $ZIG_EXT" "
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+echo "  Zig fresh database default: $ZIG_FRESH"
+
+if [[ "$CONFIG_GET_AVAILABLE" == "false" ]]; then
+    echo "  FAIL: crsql_config_get not implemented (expected for RED phase)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$ZIG_FRESH" == "1" ]]; then
+    echo "  PASS: Fresh database has default value (1)"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Expected default 1, got: '$ZIG_FRESH'"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test CF-007 Parity: Compare Zig vs Rust/C oracle behavior
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test CF-007c Parity: Verify both implementations have same config persistence"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Test with Rust/C oracle - same database persistence test
+DB_FILE_RUST="$TMP_DIR/cf007-rust.db"
+rm -f "$DB_FILE_RUST"
+
+# Rust Connection 1: Set non-default value
+RUST_CONN1=$(nix run github:subtleGradient/sqlite-cr --quiet -- "$DB_FILE_RUST" <<< "
+SELECT crsql_config_set('merge-equal-values', 0);
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+# Rust Connection 2: Check value in NEW invocation to SAME database
+RUST_CONN2=$(nix run github:subtleGradient/sqlite-cr --quiet -- "$DB_FILE_RUST" <<< "
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+echo "  Rust/C Connection 1 (after set to 0): $RUST_CONN1"
+echo "  Rust/C Connection 2 (same db):        $RUST_CONN2"
+
+# Check Rust/C oracle behavior
+if [[ "$RUST_CONN1" == "0" && "$RUST_CONN2" == "0" ]]; then
+    echo "  Rust/C oracle: Config correctly persists to database"
+elif [[ "$RUST_CONN1" == "0" && "$RUST_CONN2" == "1" ]]; then
+    echo "  Rust/C oracle: Config resets on new connection (per-connection only)"
+else
+    echo "  Rust/C oracle: Config behavior - Conn1: '$RUST_CONN1', Conn2: '$RUST_CONN2'"
+fi
+
+# Test fresh database with Rust/C
+DB_FILE_RUST_FRESH="$TMP_DIR/cf007-rust-fresh.db"
+rm -f "$DB_FILE_RUST_FRESH"
+
+RUST_FRESH=$(nix run github:subtleGradient/sqlite-cr --quiet -- "$DB_FILE_RUST_FRESH" <<< "
+SELECT crsql_config_get('merge-equal-values');
+" 2>/dev/null | tail -1)
+
+echo "  Rust/C fresh database default: $RUST_FRESH"
+
+# Compare parity for persistence behavior
+echo ""
+echo "  Parity comparison (persistence to same database):"
+echo "    Zig   - Connection 2 (same db): $ZIG_CONN2"
+echo "    Rust  - Connection 2 (same db): $RUST_CONN2"
+
+if [[ "$CONFIG_GET_AVAILABLE" == "false" ]] || [[ "$CONFIG_SET_AVAILABLE" == "false" ]]; then
+    echo "  FAIL: Zig config functions not implemented (expected for RED phase)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+elif [[ "$ZIG_CONN2" == "$RUST_CONN2" ]]; then
+    echo "  PASS: Both implementations have same persistence behavior"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Parity divergence in persistence - Zig: '$ZIG_CONN2', Rust: '$RUST_CONN2'"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+fi
+
+# Compare parity for fresh database default
+# NOTE: The Rust/C reference implementation in core/src/ext-data.c:72 sets
+#       pExtData->mergeEqualValues = 0 as the default.
+#       If Zig has a different default, that's a parity issue to fix.
+echo ""
+echo "  Parity comparison (fresh database default):"
+echo "    Zig   - Fresh db default: $ZIG_FRESH"
+echo "    Rust  - Fresh db default: $RUST_FRESH"
+echo "    (Reference: core/src/ext-data.c:72 sets default = 0)"
+
+if [[ "$CONFIG_GET_AVAILABLE" == "false" ]]; then
+    echo "  (Skipped - Zig config not available)"
+elif [[ "$ZIG_FRESH" == "$RUST_FRESH" ]]; then
+    echo "  PASS: Both implementations have same default value"
+    TOTAL_PASS=$((TOTAL_PASS + 1))
+else
+    echo "  FAIL: Parity divergence in default - Zig: '$ZIG_FRESH', Rust: '$RUST_FRESH'"
+    echo "        ACTION NEEDED: Fix Zig default to match Rust/C oracle (should be $RUST_FRESH)"
+    TOTAL_FAIL=$((TOTAL_FAIL + 1))
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════

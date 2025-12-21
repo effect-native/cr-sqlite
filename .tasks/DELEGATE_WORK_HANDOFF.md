@@ -68,6 +68,150 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (56) — Cross-open, boundary values, config isolation, and stress tests (4 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-136-cross-open-modification-parity.md`
+- `.tasks/done/TASK-137-boundary-value-edge-cases.md`
+- `.tasks/done/TASK-138-config-isolation-test.md`
+- `.tasks/done/TASK-139-stress-performance-tests.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-cross-open-parity.sh
+bash zig/harness/test-boundary-values.sh
+bash zig/harness/test-config.sh
+bash zig/harness/test-stress.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-136: Cross-open parity (17 pass, 3 known-fail)</summary>
+
+```text
+Cross-Open Parity Test Summary
+
+Results:
+  PASSED:      17
+  FAILED:      0
+  KNOWN_FAIL:  3 (cross-implementation modification not yet supported)
+  SKIPPED:     0
+
+Working:
+  - XO-001: Zig creates -> Rust reads
+  - XO-002: Rust creates -> Zig reads
+  - site_id preserved across implementations
+  - db_version readable across implementations
+
+Known limitations (trigger schema incompatibility):
+  - XO-003: Zig creates -> Rust modifies (fails - trigger functions differ)
+  - XO-004: Rust creates -> Zig modifies (fails - trigger functions differ)
+  - XO-006: Alternating modification (fails)
+```
+</details>
+
+<details>
+<summary>TASK-137: Boundary value edge cases (7 pass, 1 fail)</summary>
+
+```text
+Boundary Value Edge Case Test Summary
+
+  PASS:    7
+  FAIL:    1
+  SKIP:    0
+
+Passing:
+  - EC-010: MAX_INT64 (9223372036854775807)
+  - EC-011: MIN_INT64 (-9223372036854775808)
+  - EC-012: MAX_FLOAT (1.79769313486232e+308)
+  - EC-013: 1MB text
+  - EC-014: 1MB blob
+  - EC-020: Emoji (🎉🚀🌈🦄💯)
+  - Bidirectional: Zig -> Rust MAX_INT64
+
+Failing:
+  - EC-021: NULL bytes in text - Zig truncates at first NUL byte
+    (Rust: 'hello\0world' = 11 bytes, Zig: 'hello' = 5 bytes)
+```
+</details>
+
+<details>
+<summary>TASK-138: Config isolation (15 pass, 1 fail)</summary>
+
+```text
+Config Isolation Test Summary
+
+  PASSED:  15
+  FAILED:  1
+
+Failing:
+  - Default value parity: Zig defaults merge-equal-values to 1, Rust defaults to 0
+    (Reference: core/src/ext-data.c:72 sets default = 0)
+
+Key findings:
+  - Config IS persisted to database (crsql_config table), not per-connection
+  - Both implementations have same persistence behavior (PASS)
+  - Default value differs (FAIL - Zig should match Rust default of 0)
+```
+</details>
+
+<details>
+<summary>TASK-139: Stress tests (12 pass)</summary>
+
+```text
+STRESS TEST SUMMARY
+
+Mode:    CI (reduced iterations)
+PASSED:  12
+FAILED:  0
+
+ST-002: Large batch inserts (10k rows) - memory bounded
+  - Time: 0.19s
+  - All rows and changes recorded correctly
+
+ST-003: Concurrent row operations (100 rows x 3 ops) - no deadlock
+  - Time: 0.10s
+  - All data integrity checks passed
+
+ST-004: Rapid INSERT/DELETE cycles (20 cycles) - clock consistent
+  - Time: 0.14s
+  - Final causal length and db_version correct
+```
+</details>
+
+**Files created:**
+- `zig/harness/test-cross-open-parity.sh` (new, ~26KB)
+- `zig/harness/test-boundary-values.sh` (new, ~29KB)
+- `zig/harness/test-config.sh` (expanded, ~39KB)
+- `zig/harness/test-stress.sh` (new, ~20KB)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-cross-open-parity.sh` — verify 17 pass, 3 known-fail
+3. `bash zig/harness/test-boundary-values.sh` — verify 7 pass, 1 fail
+4. `bash zig/harness/test-config.sh` — verify 15 pass, 1 fail
+5. `bash zig/harness/test-stress.sh` — verify 12 pass
+
+**Known gaps / unverified claims**
+- Cross-open modification (XO-003, XO-004, XO-006) blocked by trigger schema incompatibility
+- NULL byte handling (EC-021) is a real bug in Zig implementation
+- Config default (merge-equal-values) is a real parity bug in Zig implementation
+- CI integration not verified this round (local runs only)
+
+**Follow-up tasks needed (to be created in triage):**
+1. Fix Zig NULL byte truncation in text sync
+2. Fix Zig merge-equal-values default to match Rust (0, not 1)
+
+---
+
 ## Round 2025-12-20 (55) — Wire format, PK blob, merge value, and CL parity tests (4 tasks)
 
 **Tasks executed**
