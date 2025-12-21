@@ -29,26 +29,21 @@ fi
 # Determine extension paths based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
-    # Try multiple locations for Rust/C extension
-    if [[ -f "$REPO_ROOT/lib/crsqlite.dylib" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.dylib"
-    elif [[ -f "$REPO_ROOT/core/dist/crsqlite.dylib" ]]; then
-        RUST_EXT="$REPO_ROOT/core/dist/crsqlite.dylib"
+    # Use local oracle binaries (updated via scripts/update-crsqlite-oracle.sh)
+    ARCH="$(uname -m)"
+    if [[ "$ARCH" == "arm64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
     else
-        echo "SKIP: Rust/C extension not found (need lib/crsqlite.dylib or core/dist/crsqlite.dylib)"
-        echo "Run 'make -C core loadable' or 'npm run bundle-lib' to build it"
-        exit 2
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
     fi
 else
     ZIG_EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
-    if [[ -f "$REPO_ROOT/lib/crsqlite.so" ]]; then
-        RUST_EXT="$REPO_ROOT/lib/crsqlite.so"
-    elif [[ -f "$REPO_ROOT/core/dist/crsqlite.so" ]]; then
-        RUST_EXT="$REPO_ROOT/core/dist/crsqlite.so"
+    # Use local oracle binaries (updated via scripts/update-crsqlite-oracle.sh)
+    ARCH="$(uname -m)"
+    if [[ "$ARCH" == "aarch64" ]]; then
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
     else
-        echo "SKIP: Rust/C extension not found (need lib/crsqlite.so or core/dist/crsqlite.so)"
-        echo "Run 'make -C core loadable' or 'npm run bundle-lib' to build it"
-        exit 2
+        RUST_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
     fi
 fi
 
@@ -59,8 +54,9 @@ if [[ ! -f "$ZIG_EXT" ]]; then
 fi
 
 if [[ ! -f "$RUST_EXT" ]]; then
-    echo "SKIP: Rust/C extension not found at $RUST_EXT"
-    exit 2
+    echo "FAIL: Rust/C oracle not found at $RUST_EXT"
+    echo "Run: ./scripts/update-crsqlite-oracle.sh"
+    exit 1
 fi
 
 echo "Zig extension:    $ZIG_EXT"
@@ -89,7 +85,7 @@ run_zig() {
 run_rust() {
     local db="$1"
     local sql="$2"
-    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT" "$sql" 2>"$ERRFILE" || true
+    nix run nixpkgs#sqlite -- "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "$sql" 2>"$ERRFILE" || true
 }
 
 # Check for blocking errors (functions not implemented)
@@ -284,7 +280,7 @@ echo "Updated apple value in Rust/C: $RUST_APPLE"
 echo ""
 echo "Step 2: Exporting changes from Rust/C database..."
 
-nix run nixpkgs#sqlite -- "$DB_RUST" -cmd ".load $RUST_EXT" "
+nix run nixpkgs#sqlite -- "$DB_RUST" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "
     SELECT 'CHANGE:' || 
         [table] || '|' || 
         quote(pk) || '|' || 
@@ -469,7 +465,7 @@ run_rust "$DB_RUST" "DELETE FROM items WHERE id = 5;"
 check_blocked "Rust/C"
 
 # Export delete change
-nix run nixpkgs#sqlite -- "$DB_RUST" -cmd ".load $RUST_EXT" "
+nix run nixpkgs#sqlite -- "$DB_RUST" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "
     SELECT 'CHANGE:' || 
         [table] || '|' || 
         quote(pk) || '|' || 
@@ -599,7 +595,7 @@ else
 fi
 
 # Step 4: Sync resurrection back to Zig
-nix run nixpkgs#sqlite -- "$DB_RUST_RES" -cmd ".load $RUST_EXT" "
+nix run nixpkgs#sqlite -- "$DB_RUST_RES" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" "
     SELECT 'CHANGE:' || 
         [table] || '|' || 
         quote(pk) || '|' || 

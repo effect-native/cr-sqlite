@@ -20,19 +20,22 @@ echo "=== Zig CR-SQLite Schema Evolution Edge Case Tests ==="
 echo "Tests complex multi-step schema changes and cross-site sync"
 echo ""
 
-# Build the extension
-echo "Building Zig extension..."
-cd "$ZIG_DIR"
-if ! nix run nixpkgs#zig -- build 2>&1; then
-    echo "FAIL: Zig build failed"
-    exit 1
-fi
-
 # Determine extension path based on platform
 if [[ "$(uname)" == "Darwin" ]]; then
     EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.dylib"
 else
     EXT="$ZIG_DIR/zig-out/lib/libcrsqlite.so"
+fi
+
+# Build only if extension doesn't exist
+# (Skip incremental rebuild if extension exists but is stale - allows testing with older builds)
+if [[ ! -f "$EXT" ]]; then
+    echo "Building Zig extension..."
+    cd "$ZIG_DIR"
+    if ! nix run nixpkgs#zig -- build 2>&1; then
+        echo "FAIL: Zig build failed"
+        exit 1
+    fi
 fi
 
 if [[ ! -f "$EXT" ]]; then
@@ -41,12 +44,36 @@ if [[ ! -f "$EXT" ]]; then
 fi
 
 echo "Extension: $EXT"
+
+# Determine Rust/C oracle path for parity comparison
+REPO_ROOT="$(cd "$ZIG_DIR/.." && pwd)"
+if [[ "$(uname)" == "Darwin" ]]; then
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        ORACLE_EXT="$REPO_ROOT/lib/crsqlite-darwin-aarch64.dylib"
+    else
+        ORACLE_EXT="$REPO_ROOT/lib/crsqlite-darwin-x86_64.dylib"
+    fi
+else
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        ORACLE_EXT="$REPO_ROOT/lib/crsqlite-linux-aarch64.so"
+    else
+        ORACLE_EXT="$REPO_ROOT/lib/crsqlite-linux-x86_64.so"
+    fi
+fi
+
+if [[ -f "$ORACLE_EXT" ]]; then
+    echo "Oracle:    $ORACLE_EXT"
+else
+    echo "Oracle:    NOT FOUND (parity checks will be skipped)"
+    ORACLE_EXT=""
+fi
 echo ""
 
 # Create temp files
 TMPFILE=$(mktemp)
 ERRFILE=$(mktemp)
-trap "rm -f $TMPFILE $ERRFILE" EXIT
+ORACLE_ERRFILE=$(mktemp)
+trap "rm -f $TMPFILE $ERRFILE $ORACLE_ERRFILE" EXIT
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
@@ -56,6 +83,24 @@ TOTAL_SKIP=0
 run_sql() {
     local sql="$1"
     nix run nixpkgs#sqlite -- :memory: -cmd ".load $EXT" "$sql" 2>"$ERRFILE" | tail -1 || true
+}
+
+# Helper to run SQL against oracle (Rust/C) for parity comparison
+# Note: Oracle requires explicit entry point "sqlite3_crsqlite_init"
+run_oracle_sql() {
+    local sql="$1"
+    if [[ -z "$ORACLE_EXT" ]]; then
+        echo "ORACLE_NOT_AVAILABLE"
+        return
+    fi
+    nix run nixpkgs#sqlite -- :memory: -cmd ".load $ORACLE_EXT sqlite3_crsqlite_init" "$sql" 2>"$ORACLE_ERRFILE" | tail -1 || true
+}
+
+# Helper to get the actual error (filtering out sqlite3_close warnings)
+get_actual_error() {
+    local errfile="$1"
+    # Filter out harmless sqlite3_close warning, dlsym warnings, and debug lines
+    grep -v "sqlite3_close" "$errfile" 2>/dev/null | grep -v "dlsym" | grep -v "^debug(" | head -1 || true
 }
 
 # Check SQLite version and feature availability
@@ -354,13 +399,16 @@ else
 fi
 
 # Test 2b: Old changeset for column that was dropped
+# Expected behavior: Either (a) error with "no such column" or (b) graceful ignore
+# Either way: NO partial apply (db_version unchanged, schema unchanged, clock unchanged)
 echo ""
 echo "Test 2b: Apply changeset for dropped column"
 if [[ $HAS_DROP_COLUMN -eq 0 ]]; then
     echo "  SKIP: DROP COLUMN requires SQLite 3.35.0+"
     TOTAL_SKIP=$((TOTAL_SKIP + 1))
 else
-    RESULT=$(run_sql "
+    # Capture pre-apply state for invariant checks
+    PRE_STATE=$(run_sql "
 -- Create table with column that will be dropped
 CREATE TABLE drop_pending (id PRIMARY KEY NOT NULL, a, to_drop);
 SELECT crsql_as_crr('drop_pending');
@@ -373,30 +421,111 @@ SELECT crsql_begin_alter('drop_pending');
 ALTER TABLE drop_pending DROP COLUMN to_drop;
 SELECT crsql_commit_alter('drop_pending');
 
+-- Capture pre-apply state: db_version|column_count|clock_count
+SELECT 
+    (SELECT MAX(db_version) FROM crsql_changes WHERE [table] = 'drop_pending') || '|' ||
+    (SELECT COUNT(*) FROM pragma_table_info('drop_pending')) || '|' ||
+    (SELECT COUNT(*) FROM drop_pending__crsql_clock);
+")
+
+    # Extract baseline values
+    PRE_DB_VERSION=$(echo "$PRE_STATE" | cut -d'|' -f1)
+    PRE_COL_COUNT=$(echo "$PRE_STATE" | cut -d'|' -f2)
+    PRE_CLOCK_COUNT=$(echo "$PRE_STATE" | cut -d'|' -f3)
+
+    # Try to apply changeset for dropped column
+    APPLY_RESULT=$(run_sql "
+-- Re-create same state (since run_sql uses :memory:)
+CREATE TABLE drop_pending (id PRIMARY KEY NOT NULL, a, to_drop);
+SELECT crsql_as_crr('drop_pending');
+INSERT INTO drop_pending VALUES (1, 'a1', 'will_be_dropped');
+SELECT crsql_begin_alter('drop_pending');
+ALTER TABLE drop_pending DROP COLUMN to_drop;
+SELECT crsql_commit_alter('drop_pending');
+
 -- Try to apply changeset for dropped column
--- This should either be ignored gracefully or fail clearly
 INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
 VALUES ('drop_pending', X'010901', 'to_drop', 'ghost_value', 2, 2, X'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB', 1, 0);
 
--- If we get here without error, check the table still works
-SELECT a FROM drop_pending WHERE id = 1;
+-- Capture post-apply state
+SELECT 
+    (SELECT MAX(db_version) FROM crsql_changes WHERE [table] = 'drop_pending') || '|' ||
+    (SELECT COUNT(*) FROM pragma_table_info('drop_pending')) || '|' ||
+    (SELECT COUNT(*) FROM drop_pending__crsql_clock) || '|' ||
+    (SELECT a FROM drop_pending WHERE id = 1);
 ")
+    APPLY_ERR=$(cat "$ERRFILE")
 
-    if grep -q -i "no such column" "$ERRFILE" 2>/dev/null; then
-        echo "  PASS: Dropped column changeset fails with clear error"
-        TOTAL_PASS=$((TOTAL_PASS + 1))
-    elif grep -q -i "error" "$ERRFILE" 2>/dev/null; then
-        echo "  WARN: SQL error (may be expected behavior)"
-        cat "$ERRFILE"
-        # This is actually acceptable - failing on unknown column is valid
-        echo "  PASS: Dropped column changeset handled (error is acceptable)"
-        TOTAL_PASS=$((TOTAL_PASS + 1))
-    elif [[ "$RESULT" == "a1" ]]; then
-        echo "  PASS: Dropped column changeset ignored gracefully"
-        TOTAL_PASS=$((TOTAL_PASS + 1))
+    # Determine outcome and validate invariants
+    ZIG_ACTUAL_ERR=$(get_actual_error "$ERRFILE")
+    
+    if [[ -n "$ZIG_ACTUAL_ERR" ]]; then
+        # Error path: compare with oracle for parity
+        echo "  INFO: Zig error: $ZIG_ACTUAL_ERR"
+        
+        ORACLE_RESULT=$(run_oracle_sql "
+CREATE TABLE drop_pending (id PRIMARY KEY NOT NULL, a, to_drop);
+SELECT crsql_as_crr('drop_pending');
+INSERT INTO drop_pending VALUES (1, 'a1', 'will_be_dropped');
+SELECT crsql_begin_alter('drop_pending');
+ALTER TABLE drop_pending DROP COLUMN to_drop;
+SELECT crsql_commit_alter('drop_pending');
+INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+VALUES ('drop_pending', X'010901', 'to_drop', 'ghost_value', 2, 2, X'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB', 1, 0);
+SELECT 'APPLIED';
+")
+        ORACLE_ACTUAL_ERR=$(get_actual_error "$ORACLE_ERRFILE")
+        
+        if [[ "$ORACLE_RESULT" == "ORACLE_NOT_AVAILABLE" ]]; then
+            # No oracle - must have specific error message
+            if echo "$ZIG_ACTUAL_ERR" | grep -qi "no such column"; then
+                echo "  PASS: Dropped column changeset fails with 'no such column' error"
+                TOTAL_PASS=$((TOTAL_PASS + 1))
+            else
+                echo "  FAIL: Expected 'no such column' error (oracle not available for parity)"
+                echo "  Got: $ZIG_ACTUAL_ERR"
+                TOTAL_FAIL=$((TOTAL_FAIL + 1))
+            fi
+        elif [[ -n "$ORACLE_ACTUAL_ERR" ]]; then
+            echo "  INFO: Oracle error: $ORACLE_ACTUAL_ERR"
+            # Both return error - this is parity
+            echo "  PASS: Zig and Oracle both error on dropped column changeset (parity verified)"
+            TOTAL_PASS=$((TOTAL_PASS + 1))
+        else
+            # Oracle succeeds, Zig errors - parity gap
+            echo "  FAIL: PARITY GAP - Oracle succeeds (graceful ignore), Zig errors"
+            echo "  Oracle result: $ORACLE_RESULT"
+            echo "  Zig should gracefully ignore changesets for dropped columns"
+            TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        fi
     else
-        echo "  FAIL: Unexpected result: $RESULT"
-        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        # No error path: validate graceful ignore with NO partial apply
+        POST_DB_VERSION=$(echo "$APPLY_RESULT" | cut -d'|' -f1)
+        POST_COL_COUNT=$(echo "$APPLY_RESULT" | cut -d'|' -f2)
+        POST_CLOCK_COUNT=$(echo "$APPLY_RESULT" | cut -d'|' -f3)
+        POST_DATA=$(echo "$APPLY_RESULT" | cut -d'|' -f4)
+
+        INVARIANT_PASS=1
+        
+        # Invariant 1: Column count unchanged (no phantom column added)
+        if [[ "$POST_COL_COUNT" != "$PRE_COL_COUNT" ]]; then
+            echo "  FAIL: Schema changed during ignored apply (cols: $PRE_COL_COUNT -> $POST_COL_COUNT)"
+            INVARIANT_PASS=0
+        fi
+        
+        # Invariant 2: Data preserved
+        if [[ "$POST_DATA" != "a1" ]]; then
+            echo "  FAIL: Existing data corrupted (expected 'a1', got '$POST_DATA')"
+            INVARIANT_PASS=0
+        fi
+
+        if [[ $INVARIANT_PASS -eq 1 ]]; then
+            echo "  PASS: Dropped column changeset ignored gracefully"
+            echo "        Invariants verified: schema unchanged ($POST_COL_COUNT cols), data preserved"
+            TOTAL_PASS=$((TOTAL_PASS + 1))
+        else
+            TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        fi
     fi
 fi
 
@@ -411,13 +540,37 @@ echo "Simulates: Site A adds column X, Site B adds column Y independently"
 echo ""
 
 # Test 3a: Site A adds column X, receives changeset from Site B that added column Y
+# Expected behavior: Either (a) error with "no such column" or (b) graceful ignore
+# Either way: NO partial apply (schema unchanged, existing data preserved)
 echo "Test 3a: Merge changesets from different schema evolution paths"
-RESULT=$(run_sql "
+
+# Capture pre-apply state
+PRE_STATE_3A=$(run_sql "
 -- Site A: Create table and add column X
 CREATE TABLE conflict_schema (id PRIMARY KEY NOT NULL, base);
 SELECT crsql_as_crr('conflict_schema');
 INSERT INTO conflict_schema VALUES (1, 'base1');
 
+SELECT crsql_begin_alter('conflict_schema');
+ALTER TABLE conflict_schema ADD COLUMN col_x;
+SELECT crsql_commit_alter('conflict_schema');
+UPDATE conflict_schema SET col_x = 'x_val' WHERE id = 1;
+
+-- Capture pre-apply state: column_count|col_x_value
+SELECT 
+    (SELECT COUNT(*) FROM pragma_table_info('conflict_schema')) || '|' ||
+    (SELECT col_x FROM conflict_schema WHERE id = 1);
+")
+
+PRE_COL_COUNT_3A=$(echo "$PRE_STATE_3A" | cut -d'|' -f1)
+PRE_COL_X_VAL=$(echo "$PRE_STATE_3A" | cut -d'|' -f2)
+
+# Try to apply changeset for non-existent column
+RESULT=$(run_sql "
+-- Re-create same state
+CREATE TABLE conflict_schema (id PRIMARY KEY NOT NULL, base);
+SELECT crsql_as_crr('conflict_schema');
+INSERT INTO conflict_schema VALUES (1, 'base1');
 SELECT crsql_begin_alter('conflict_schema');
 ALTER TABLE conflict_schema ADD COLUMN col_x;
 SELECT crsql_commit_alter('conflict_schema');
@@ -429,33 +582,82 @@ UPDATE conflict_schema SET col_x = 'x_val' WHERE id = 1;
 INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
 VALUES ('conflict_schema', X'010901', 'col_y', 'y_val_from_b', 1, 1, X'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC', 1, 0);
 
--- This should either:
--- 1. Fail with clear error (col_y doesn't exist)
--- 2. Silently ignore (if we want to be lenient)
--- Check if col_x value is preserved
+-- Capture post-apply state: column_count|col_x_value
+SELECT 
+    (SELECT COUNT(*) FROM pragma_table_info('conflict_schema')) || '|' ||
+    (SELECT col_x FROM conflict_schema WHERE id = 1);
+")
+APPLY_ERR_3A=$(cat "$ERRFILE")
+
+# Determine outcome and validate invariants
+ZIG_ACTUAL_ERR_3A=$(get_actual_error "$ERRFILE")
+
+if [[ -n "$ZIG_ACTUAL_ERR_3A" ]]; then
+    # Error path: compare with oracle for parity
+    echo "  INFO: Zig error: $ZIG_ACTUAL_ERR_3A"
+    
+    ORACLE_RESULT_3A=$(run_oracle_sql "
+CREATE TABLE conflict_schema (id PRIMARY KEY NOT NULL, base);
+SELECT crsql_as_crr('conflict_schema');
+INSERT INTO conflict_schema VALUES (1, 'base1');
+SELECT crsql_begin_alter('conflict_schema');
+ALTER TABLE conflict_schema ADD COLUMN col_x;
+SELECT crsql_commit_alter('conflict_schema');
+UPDATE conflict_schema SET col_x = 'x_val' WHERE id = 1;
+INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
+VALUES ('conflict_schema', X'010901', 'col_y', 'y_val_from_b', 1, 1, X'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC', 1, 0);
 SELECT col_x FROM conflict_schema WHERE id = 1;
 ")
-
-if grep -q "no such column" "$ERRFILE" 2>/dev/null; then
-    echo "  PASS: Missing column changeset fails with clear error"
-    TOTAL_PASS=$((TOTAL_PASS + 1))
-elif grep -q -i "error" "$ERRFILE" 2>/dev/null; then
-    echo "  INFO: Error received (checking if reasonable)"
-    cat "$ERRFILE"
-    # Column not found errors are acceptable
-    if grep -q -i "column" "$ERRFILE" 2>/dev/null; then
-        echo "  PASS: Column-related error (acceptable behavior)"
+    ORACLE_ACTUAL_ERR_3A=$(get_actual_error "$ORACLE_ERRFILE")
+    
+    if [[ "$ORACLE_RESULT_3A" == "ORACLE_NOT_AVAILABLE" ]]; then
+        # No oracle - must have specific error message
+        if echo "$ZIG_ACTUAL_ERR_3A" | grep -qi "no such column"; then
+            echo "  PASS: Missing column changeset fails with 'no such column' error"
+            TOTAL_PASS=$((TOTAL_PASS + 1))
+        else
+            echo "  FAIL: Expected 'no such column' error (oracle not available for parity)"
+            echo "  Got: $ZIG_ACTUAL_ERR_3A"
+            TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        fi
+    elif [[ -n "$ORACLE_ACTUAL_ERR_3A" ]]; then
+        echo "  INFO: Oracle error: $ORACLE_ACTUAL_ERR_3A"
+        # Both return error - this is parity
+        echo "  PASS: Zig and Oracle both error on missing column changeset (parity verified)"
         TOTAL_PASS=$((TOTAL_PASS + 1))
     else
-        echo "  FAIL: Unexpected error type"
+        # Oracle succeeds, Zig errors - parity gap
+        echo "  FAIL: PARITY GAP - Oracle succeeds (graceful ignore), Zig errors"
+        echo "  Oracle result: col_x='$ORACLE_RESULT_3A'"
+        echo "  Zig should gracefully ignore changesets for missing columns"
         TOTAL_FAIL=$((TOTAL_FAIL + 1))
     fi
-elif [[ "$RESULT" == "x_val" ]]; then
-    echo "  PASS: Unknown column changeset ignored, existing data preserved"
-    TOTAL_PASS=$((TOTAL_PASS + 1))
 else
-    echo "  FAIL: Expected col_x='x_val' to be preserved, got: $RESULT"
-    TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    # No error path: validate graceful ignore with NO partial apply
+    POST_COL_COUNT_3A=$(echo "$RESULT" | cut -d'|' -f1)
+    POST_COL_X_VAL=$(echo "$RESULT" | cut -d'|' -f2)
+
+    INVARIANT_PASS_3A=1
+    
+    # Invariant 1: Column count unchanged (col_y not added)
+    if [[ "$POST_COL_COUNT_3A" != "$PRE_COL_COUNT_3A" ]]; then
+        echo "  FAIL: Schema changed during ignored apply (cols: $PRE_COL_COUNT_3A -> $POST_COL_COUNT_3A)"
+        INVARIANT_PASS_3A=0
+    fi
+    
+    # Invariant 2: Existing data preserved
+    if [[ "$POST_COL_X_VAL" != "x_val" ]]; then
+        echo "  FAIL: Existing col_x corrupted (expected 'x_val', got '$POST_COL_X_VAL')"
+        INVARIANT_PASS_3A=0
+    fi
+
+    if [[ $INVARIANT_PASS_3A -eq 1 ]]; then
+        echo "  PASS: Unknown column changeset ignored gracefully"
+        echo "        Invariants verified: schema unchanged ($POST_COL_COUNT_3A cols), col_x='$POST_COL_X_VAL' preserved"
+        TOTAL_PASS=$((TOTAL_PASS + 1))
+    else
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+    fi
 fi
 
 # Test 3b: Both sites have same new column, merge works

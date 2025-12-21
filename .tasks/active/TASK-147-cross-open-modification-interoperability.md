@@ -63,6 +63,36 @@ Unify on the Rust/C trigger schema and semantics:
 
 ## Progress Log
 - 2025-12-21: Task created from hard requirement: cross-open modification must work both directions.
+- 2025-12-21: First attempt by subagent failed — changed pks table schema AND trigger SQL but left backfill using old schema, causing "failed to backfill existing rows" error. Changes stashed and reverted.
+- 2025-12-21: **Remains in active** — needs more careful incremental approach.
+
+## Implementation Notes (from failed attempt)
+The first approach tried to:
+1. Change pks table from `(pk, base_rowid, pks BLOB)` to `(__crsql_key, pk_col1, pk_col2, ...)` (Rust/C schema)
+2. Add `crsql_after_insert/update/delete` SQL functions
+3. Change trigger generation
+
+This failed because:
+- The schema change touched too many functions simultaneously (backfill, triggers, changes_vtab, merge)
+- The pks table schema is deeply embedded in the codebase
+- Need incremental approach: first add functions, then change triggers, then verify
+
+## Recommended Approach (incremental)
+1. **Phase 1**: Add `crsql_after_insert/update/delete` functions that work with CURRENT pks schema
+   - These functions should do what the current inline trigger SQL does
+   - Register them in init.zig
+   - Verify existing tests still pass
+
+2. **Phase 2**: Change trigger generation to call these functions
+   - No schema changes yet
+   - Triggers now call helper functions instead of embedding pack_columns
+   - Verify existing tests still pass
+
+3. **Phase 3**: Test cross-open with current schema
+   - Zig can now open Rust/C DBs (has crsql_after_* functions)
+   - But Rust/C still can't open Zig DBs (triggers still use pack_columns)
+   
+4. **Phase 4**: Align pks schema if needed for full bidirectional support
 
 ## Completion Notes
 (Empty until done.)

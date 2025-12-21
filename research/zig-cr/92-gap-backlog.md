@@ -1,12 +1,14 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-20 (Round 53 — TASK-125, TASK-126 complete — schema_alter pk→key + merge resolution fixed)
+> Last updated: 2025-12-21 (Round 58 — TASK-144, TASK-145 complete — harness fail-fast policy)
 
 ## Status
 
 - MVP: ✅ complete (154/154 tests passing)
 - Oracle parity: ✅ **18/18 pass** (all divergences fixed)
-- Cross-open modification compatibility: ❌ gap captured (XO-003/XO-004/XO-006) — see `.tasks/triage/TASK-143-cross-open-modification-compat.md`
+- Cross-open modification compatibility: ❌ **in progress** (XO-003/XO-004/XO-006) — see `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
+- Cross-platform compat tests: ❌ **2 failures discovered** — see `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
+- Harness fail-fast policy: ✅ TASK-144, TASK-145 complete (no more silent SKIPs or "acceptable errors")
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
@@ -14,7 +16,9 @@
 
 All oracle parity tests pass. Zig implementation is wire-compatible with the Rust/C oracle for sync/wire format and read-only cross-open.
 
-A remaining compatibility gap exists for **cross-open modification** (DB created by Zig modified by Rust/C, or vice versa). This is tracked as a first-class gap: `.tasks/triage/TASK-143-cross-open-modification-compat.md`.
+Remaining compatibility gaps:
+- **Cross-open modification** (DB created by Zig modified by Rust/C, or vice versa) — `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
+- **Cross-platform compat failures** (resurrection + text newlines) — `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
 
 ### Hypothesis Invalidation (Done)
 - [x] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing ✓ `.tasks/done/TASK-127-experimental-parity-invalidation.md`

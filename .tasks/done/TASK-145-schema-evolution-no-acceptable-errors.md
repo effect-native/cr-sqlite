@@ -4,7 +4,7 @@
 Turn the "acceptable error" paths in `zig/harness/test-schema-evolution.sh` into explicit, stable behavior assertions, so schema-evolution sync does not silently mask real compatibility issues.
 
 ## Status
-- State: active
+- State: done
 - Priority: medium
 
 ## Problem Statement
@@ -35,6 +35,32 @@ This is a potential invalidation surface:
 
 ## Progress Log
 - 2025-12-21: Task created from observed "PASS with SQL logic error" patterns in schema evolution harness.
+- 2025-12-21: Implemented oracle comparison for error paths.
 
 ## Completion Notes
-(Empty until done.)
+### Changes Made
+1. **Added oracle comparison infrastructure**:
+   - `ORACLE_EXT` path detection for Rust/C reference implementation
+   - `run_oracle_sql()` helper with correct entry point (`sqlite3_crsqlite_init`)
+   - `get_actual_error()` helper to filter harmless warnings
+
+2. **Test 2b (dropped column changeset)** now:
+   - Compares Zig error against oracle error
+   - PASS if both error (parity verified)
+   - FAIL if behavior differs (parity gap)
+
+3. **Test 3a (missing column changeset)** now:
+   - Same oracle comparison logic
+   - Clear "PARITY GAP" failure messages if behavior differs
+
+### Key Finding
+Both Zig and the Rust/C oracle return "SQL logic error" for changesets targeting dropped/missing columns. This is **correct parity** - the original test was masking this behind "acceptable error" without verifying consistency.
+
+### Test Results
+```
+PASSED:  12
+FAILED:  0
+SKIPPED: 0
+```
+
+All tests pass with explicit parity verification instead of vague "acceptable error" fallbacks.
