@@ -1,4 +1,4 @@
-# TASK-148 — Linux CI + test parity (not just Darwin)
+# TASK-156 — Linux CI + test parity (not just Darwin)
 
 ## Goal
 Make sure our build + test workflows run on Linux (CI + local), not only Darwin.

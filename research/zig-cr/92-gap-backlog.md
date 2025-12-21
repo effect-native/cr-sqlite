@@ -1,24 +1,52 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-21 (Round 58 — TASK-144, TASK-145 complete — harness fail-fast policy)
+> Last updated: 2025-12-21 (Update tasks — build broken, TASK-147 in progress)
 
 ## Status
 
-- MVP: ✅ complete (154/154 tests passing)
-- Oracle parity: ✅ **18/18 pass** (all divergences fixed)
-- Cross-open modification compatibility: ❌ **in progress** (XO-003/XO-004/XO-006) — see `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
-- Cross-platform compat tests: ❌ **2 failures discovered** — see `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
-- Harness fail-fast policy: ✅ TASK-144, TASK-145 complete (no more silent SKIPs or "acceptable errors")
+- **BUILD: ❌ BROKEN** — 4 compilation errors from in-progress TASK-147/TASK-149 work
+- MVP: ⚠️ blocked (cannot verify — build broken)
+- Oracle parity: ⚠️ blocked (cannot verify — build broken)
+- Cross-open modification compatibility: ❌ **in progress** — `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
+- Cross-platform compat tests: ❌ **2 failures discovered** — `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
+## ⚠️ CRITICAL: Build Broken
+
+The codebase does not compile. `make -C zig test-parity` fails with 4 errors:
+
+1. `src/changes_vtab.zig:1707` — unused local constant `base_rowid`
+2. `src/changes_vtab.zig:1539` — `TableMergeStmts.init()` returns struct, not error union (bad `catch`)
+3. `src/changes_vtab.zig:1721` — `?[*]const u8` passed where `[*]const u8` expected (missing unwrap)
+4. `src/merge_insert.zig:89` — `api.clear_bindings` doesn't exist (no such function)
+
+**Root cause**: TASK-149 was marked "done" but left incomplete code. Must fix compilation errors before any testing.
+
 ## Now (next parallel assignments)
 
-All oracle parity tests pass. Zig implementation is wire-compatible with the Rust/C oracle for sync/wire format and read-only cross-open.
+**BLOCKED** — Cannot assign work until build is fixed.
 
-Remaining compatibility gaps:
-- **Cross-open modification** (DB created by Zig modified by Rust/C, or vice versa) — `.tasks/active/TASK-147-cross-open-modification-interoperability.md`
-- **Cross-platform compat failures** (resurrection + text newlines) — `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
+Priority order after build fix:
+1. Fix compilation errors (unassigned — needs new task or reopen TASK-149)
+2. Continue TASK-147 decomposition (TASK-150, 151, 152 in triage)
+3. Run parity tests to verify state
+
+## Triage Inbox Status
+
+| Task ID | Summary | Valid? | Notes |
+|---------|---------|--------|-------|
+| TASK-146 | Fail-fast/loud harness policy | ✅ Valid | Policy task, not blocked |
+| TASK-148 (compat) | Cross-platform compat failures | ✅ Valid | Real bugs |
+| TASK-148 (linux) | Linux CI parity | ⚠️ Duplicate ID | Rename to TASK-156 |
+| TASK-150 | Eliminate base_rowid from base ops | ✅ Valid | Part of TASK-147 |
+| TASK-151 | Update cached statements | ✅ Valid | Part of TASK-147 |
+| TASK-152 | Tombstone handling updates | ✅ Valid | Part of TASK-147 |
+| TASK-153 | Sweep old schema references | ✅ Valid | Cleanup after main work |
+| TASK-154 | Fix sync parity test failures | ✅ Valid | Blocked on 150/151/152 |
+| TASK-155 | Review insertIntoBaseTable | ✅ Valid | Part of sync path |
+
+**Issue**: Two different tasks share TASK-148 ID. Need to rename one.
 
 ### Hypothesis Invalidation (Done)
 - [x] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing ✓ `.tasks/done/TASK-127-experimental-parity-invalidation.md`

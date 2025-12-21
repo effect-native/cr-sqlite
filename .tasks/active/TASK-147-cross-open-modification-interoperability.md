@@ -72,7 +72,12 @@ Unify on the Rust/C trigger schema and semantics:
   - ✅ Cross-open tests: 24/24 PASSING (direct table modifications work)
   - ❌ Sync operations: FAILING (need merge_insert.zig refactoring)
   - Created 7 triage tasks (TASK-149 through TASK-155) for remaining work
-- 2025-12-21: **Next**: Delegate TASK-149 (refactor insertIntoPksTableAndGetPk) to unblock sync INSERT path
+- 2025-12-21: TASK-149 marked "done" but left build broken with 4 compilation errors
+- 2025-12-21: **BUILD IS BROKEN** — Must fix before any testing:
+  1. `changes_vtab.zig:1707` — unused `base_rowid` variable
+  2. `changes_vtab.zig:1539` — `TableMergeStmts.init()` doesn't return error (bad `catch`)
+  3. `changes_vtab.zig:1721` — optional pointer not unwrapped
+  4. `merge_insert.zig:89` — `api.clear_bindings` doesn't exist
 
 ## Implementation Notes (from failed attempt)
 The first approach tried to:

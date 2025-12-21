@@ -4,8 +4,12 @@
 Adapt `insertIntoPksTableAndGetPk` and related pks table insert functions to work with the new Rust/C-compatible schema where PK column values are stored directly instead of as a packed blob.
 
 ## Status
-- State: done
+- State: **REOPENED** — marked done prematurely, left build broken
 - Priority: high (blocks sync operations)
+
+## ⚠️ Build Broken
+This task was marked "done" but left 4 compilation errors. The build does not compile.
+See TASK-147 progress log for details.
 
 ## Context
 The sync INSERT path currently fails because `insertIntoPksTableAndGetPk()` tries to insert into the old schema:
