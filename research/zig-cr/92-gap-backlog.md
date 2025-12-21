@@ -11,11 +11,16 @@
 
 ## Now (next parallel assignments)
 
-### Hypothesis Invalidation (Next Priority)
-- [ ] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing `.tasks/backlog/TASK-127-experimental-parity-invalidation.md`
-- [ ] **TASK-128** — Expand parity suite with findings from TASK-127 `.tasks/backlog/TASK-128-expand-parity-suite.md`
-
 All oracle parity tests pass. Zig implementation is now wire-compatible with Rust/C oracle.
+
+### Hypothesis Invalidation (Done)
+- [x] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing ✓ `.tasks/done/TASK-127-experimental-parity-invalidation.md`
+  - Invalidation successful: Discovered empty blob (`X''`) vs `NULL` divergence
+- [x] **TASK-128** — Expand parity suite with invalidation findings ✓ `.tasks/done/TASK-128-expand-parity-suite.md`
+  - Created `zig/harness/test-edge-cases.sh` with 6 deterministic tests
+- [x] **TASK-129** — Fix empty blob handling in Zig crsql_changes ✓ `.tasks/done/TASK-129-fix-empty-blob-parity.md`
+  - Fixed `changes_vtab.zig` to return empty blob instead of NULL
+  - All edge case tests pass
 
 ### Open Gaps (Parity Divergences)
 - [x] **TASK-123** — Fix clock table schema parity (pk vs key, index) ✓ `.tasks/done/TASK-123-fix-clock-table-schema-parity.md`
@@ -220,6 +225,15 @@ All oracle parity tests pass. Zig implementation is now wire-compatible with Rus
 - Effect Bun scratchpad (blocked on Tom / TS spec-gate): `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
 
 ## Done (recent)
+
+- **Round 54 (2025-12-20)**:
+  - TASK-127: Experimentally invalidate parity hypothesis — found empty blob bug
+  - TASK-128: Expand parity suite — added `test-edge-cases.sh` (6 tests)
+  - TASK-129: Fix empty blob handling — fixed `values` serialization for zero-length blobs
+
+- **Round 53 (2025-12-20)**:
+  - TASK-125: Fix schema_alter pk→key column rename (6/6 pass)
+  - TASK-126: Fix merge resolution parity (site_id ordinal conversion) (18/18 pass)
 
 - **Round 51 (2025-12-20)**:
   - TASK-121: Fix rows_impacted ROLLBACK reset divergence (18/18 pass)

@@ -68,6 +68,129 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (54) — Fuzz parity + edge case tests + empty blob fix (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-127-experimental-parity-invalidation.md`
+- `.tasks/done/TASK-128-expand-parity-suite.md`
+- `.tasks/done/TASK-129-fix-empty-blob-parity.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-fuzz-parity.sh
+bash zig/harness/test-edge-cases.sh
+bash zig/harness/test-oracle-parity.sh
+make -C zig test-parity
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-127: Fuzz parity test created</summary>
+
+Created `zig/harness/test-fuzz-parity.sh` — a stochastic fuzzing test that:
+- Generates random schemas (1-4 columns, types: INTEGER, TEXT, REAL, BLOB)
+- Supports compound primary keys (20% of iterations)
+- Generates random operations (INSERT, UPDATE, DELETE)
+- Optionally wraps operations in transactions (30% of iterations)
+- Includes edge cases: NULL values, empty blobs, empty strings, special characters
+- Compares: table contents, db_version, crsql_changes, clock tables
+
+**DIVERGENCE FOUND**: Empty blob (`X''`) was being reported as `NULL` in crsql_changes.
+
+Minimal reproduction:
+```sql
+CREATE TABLE t (id INTEGER PRIMARY KEY NOT NULL, data BLOB);
+SELECT crsql_as_crr('t');
+INSERT INTO t VALUES (1, X'');
+SELECT quote(val) FROM crsql_changes WHERE [table]='t' AND cid='data';
+-- Expected: X''
+-- Actual (Zig before fix): NULL
+```
+</details>
+
+<details>
+<summary>TASK-128: test-edge-cases.sh (6/6 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Edge Case Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PASS:    6
+  FAIL:    0
+  SKIP:    0
+
+All edge case parity tests PASSED
+```
+
+Tests created:
+1. Empty blob via INSERT
+2. Empty blob via UPDATE
+3. Empty string vs empty blob distinction
+4. NULL vs empty blob vs empty string (triple distinction)
+5. Empty blob sync round-trip (Zig -> Oracle)
+6. typeof() verification for empty values
+</details>
+
+<details>
+<summary>TASK-129: Fix applied to changes_vtab.zig</summary>
+
+**Root cause**: In `fetchColumnValue()` at `zig/src/changes_vtab.zig:1087`, SQLite's `sqlite3_column_blob()` returns `NULL` for zero-length blobs (documented behavior), but `sqlite3_column_type()` correctly returns `SQLITE_BLOB`. When the NULL pointer was passed to `sqlite3_result_blob()`, SQLite interpreted it as a zeroblob request and produced `NULL` output.
+
+**Fix**: Modified lines 1087-1104 to detect the empty blob case and pass a static non-NULL pointer with length 0:
+```zig
+if (blob_ptr != null) {
+    resultBlob(ctx, blob_ptr, blob_len, api.getTransientDestructor());
+} else {
+    // Empty blob case: col_type is SQLITE_BLOB but pointer is NULL
+    const empty_blob = [_]u8{};
+    resultBlob(ctx, &empty_blob, 0, api.SQLITE_STATIC);
+}
+```
+</details>
+
+<details>
+<summary>Oracle parity test (18/18 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Oracle Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Results: 18 passed, 0 failed, 0 skipped
+
+All oracle parity tests PASSED
+```
+</details>
+
+**Files created/modified:**
+- `zig/harness/test-fuzz-parity.sh` (new) — stochastic parity fuzzer
+- `zig/harness/test-edge-cases.sh` (new) — 6 deterministic edge case tests
+- `zig/harness/test-parity.sh` — wired in edge case tests
+- `zig/src/changes_vtab.zig` — fixed empty blob handling
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig` — build Zig extension
+3. `bash zig/harness/test-edge-cases.sh` — verify 6/6 pass
+4. `bash zig/harness/test-oracle-parity.sh` — verify 18/18 pass
+5. `bash zig/harness/test-fuzz-parity.sh` — run fuzzer (no divergences expected now)
+
+**Known gaps / unverified claims**
+- Fuzz test is stochastic; may find additional edge cases with more iterations
+- No coverage captured
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (53) — Fix schema_alter pk→key + merge resolution (2 tasks)
 
 **Tasks executed**
@@ -2144,3 +2267,64 @@ PK UPDATE Test Summary: 11 passed, 5 failed
 - Pre-existing test failures in parity suite (alter-parity, large-data) unrelated to this round
 
 ---
+
+---
+
+## Round 2025-12-20 (54) — Parity Invalidation & Empty Blob Fix (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-127-experimental-parity-invalidation.md`
+- `.tasks/done/TASK-128-expand-parity-suite.md`
+- `.tasks/done/TASK-129-fix-empty-blob-parity.md`
+
+**Commits**
+- `45d54de` — feat(zig): add fuzz parity test, discover empty blob divergence (TASK-127)
+- `8655fe1` — fix(zig): handle empty blobs correctly in crsql_changes (TASK-128, TASK-129)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-edge-cases.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-128/129: test-edge-cases.sh (6/6 pass)</summary>
+
+```text
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Edge Case Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PASS:    6
+  FAIL:    0
+  SKIP:    0
+
+All edge case parity tests PASSED
+```
+
+**Fix:** Updated `zig/src/changes_vtab.zig`:
+- Fixed `fetchColumnValue` to handle zero-length blobs (SQLITE_BLOB type but NULL pointer)
+- Now returns static empty blob (`X''`) instead of `NULL`
+- Matches Rust/C oracle behavior
+
+**Tests:**
+- 6 new deterministic regression tests covering:
+  - Empty blob via INSERT / UPDATE
+  - Empty string vs empty blob
+  - NULL vs empty blob vs empty string
+  - Sync round-trip (Zig -> Oracle)
+  - `typeof()` correctness
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig test-parity` (includes verification)
+3. `bash zig/harness/test-edge-cases.sh`
+
+**Known gaps / unverified claims**
+- No new divergences found after fix
