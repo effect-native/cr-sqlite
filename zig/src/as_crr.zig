@@ -355,296 +355,119 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
 }
 
 /// Create the INSERT trigger that captures new rows.
-/// - Packs PK column values using crsql_pack_columns()
-/// - Creates pks entry with auto-increment key
-/// - Creates clock entries for each non-PK column using pks key (not base rowid)
-/// - For PK-only tables: creates sentinel row ('-1') for row existence tracking
+/// Uses crsql_after_insert() helper function (Rust/C compatible).
 fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    // Get table column information
     const info = try getTableInfo(db, table_name);
-    if (info.count == 0) {
-        return error.NoColumns;
-    }
-
-    // Count non-PK columns to determine if this is a PK-only table
-    var non_pk_count: usize = 0;
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            non_pk_count += 1;
-        }
-    }
+    if (info.count == 0) return error.NoColumns;
 
     var buf: [SQL_BUF_SIZE]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with sync_bit gating
-    // Use INSERT ... ON CONFLICT to handle resurrection: if blob exists (from tombstone),
-    // update base_rowid to point to the new row, keeping the same pk key
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_itrig"
-        \\AFTER INSERT ON "{s}"
-        \\WHEN crsql_internal_sync_bit() = 0
+        \\AFTER INSERT ON "{s}" WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
-        \\  INSERT INTO "{s}__crsql_pks" ("base_rowid", "pks")
-        \\  VALUES (NEW.rowid, crsql_pack_columns(
+        \\  VALUES (crsql_after_insert('{s}'
     , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
 
-    // Build crsql_pack_columns arguments from PK columns in order
-    // PK columns are ordered by their pk_index (1-indexed)
-    var pk_written: usize = 0;
+    // PK columns NEW.
     var pk_order: usize = 1;
+    var pk_written: usize = 0;
     while (pk_written < info.pk_count) : (pk_order += 1) {
-        // Find column with this pk_index
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                writer.print(", NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
                 pk_written += 1;
                 break;
             }
         }
     }
 
-    writer.writeAll(")) ON CONFLICT(pks) DO UPDATE SET base_rowid = NEW.rowid;\n") catch return error.BufferOverflow;
+    writer.writeAll("));\nEND;") catch return error.BufferOverflow;
 
-    // Generate clock entry for each non-PK column
-    // Use subquery to get the pks key for this blob (not base table rowid)
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            // Non-PK column - create clock entry
-            // The key is looked up from pks table by blob, not using base table rowid
-            writer.print(
-                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-                \\  VALUES
-                \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-            , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-            // Rewrite pk columns for subquery
-            pk_written = 0;
-            pk_order = 1;
-            while (pk_written < info.pk_count) : (pk_order += 1) {
-                for (info.columns[0..info.count]) |pk_col| {
-                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
-                        if (pk_written > 0) {
-                            writer.writeAll(", ") catch return error.BufferOverflow;
-                        }
-                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                        pk_written += 1;
-                        break;
-                    }
-                }
-            }
-
-            writer.print(
-                \\)), '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-                \\
-            , .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-        }
-    }
-
-    // Sentinel row for PK-only tables (no non-PK columns)
-    // This emits a change with cid='-1' to track row existence when there are no column changes to emit.
-    // For tables with non-PK columns, the column changes themselves serve as existence markers.
-    // Reference: Rust/C behavior - only emits sentinel for PK-only tables.
-    if (non_pk_count == 0) {
-        writer.print(
-            \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-            \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-            \\  VALUES
-            \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-        , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-        // Rewrite pk columns for subquery
-        pk_written = 0;
-        pk_order = 1;
-        while (pk_written < info.pk_count) : (pk_order += 1) {
-            for (info.columns[0..info.count]) |pk_col| {
-                if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
-                    if (pk_written > 0) {
-                        writer.writeAll(", ") catch return error.BufferOverflow;
-                    }
-                    writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                    pk_written += 1;
-                    break;
-                }
-            }
-        }
-
-        writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\n") catch return error.BufferOverflow;
-    }
-
-    writer.writeAll("END;") catch return error.BufferOverflow;
-
-    // Null-terminate the SQL
     const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
+    if (sql_len >= SQL_BUF_SIZE) return error.BufferOverflow;
     buf[sql_len] = 0;
 
     const sql: [*:0]const u8 = @ptrCast(&buf);
     const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
+    if (rc != api.SQLITE_OK) return error.SqliteError;
 }
 
-/// Create the UPDATE trigger that captures non-PK column changes.
-/// - Fires on ALL updates to non-PK columns (including no-ops) to match Rust/C oracle behavior
-/// - Creates clock entries only for columns that actually changed
-/// - Increments col_version for each changed column
-/// - Always advances db_version (even on no-op updates) for sync protocol parity
-/// Note: PK column changes are handled by the separate PK update trigger
+/// Create the UPDATE trigger that captures column changes.
+/// Uses crsql_after_update() helper function (Rust/C compatible).
 fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    // Get table column information
     const info = try getTableInfo(db, table_name);
-    if (info.count == 0) {
-        return error.NoColumns;
-    }
+    if (info.count == 0) return error.NoColumns;
 
     // Count non-PK columns
     var non_pk_count: usize = 0;
     for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            non_pk_count += 1;
-        }
-    }
-
-    // If there are no non-PK columns, no UPDATE trigger needed
-    if (non_pk_count == 0) {
-        return;
+        if (col.pk_index == 0) non_pk_count += 1;
     }
 
     var buf: [SQL_BUF_SIZE]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with sync_bit gating
-    // This trigger fires on ALL updates where PK columns stay the same (matching Rust/C oracle)
-    // The column change filtering happens in the INSERT statements below, not in the WHEN clause
-    // This ensures db_version advances even on no-op updates for sync protocol parity
-    if (info.pk_count > 0) {
-        // Has PK columns - exclude PK changes (handled by pk_utrig)
-        writer.print(
-            \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
-            \\AFTER UPDATE ON "{s}"
-            \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
-        , .{ table_name, table_name }) catch return error.BufferOverflow;
+    writer.print(
+        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
+        \\AFTER UPDATE ON "{s}" WHEN crsql_internal_sync_bit() = 0
+        \\BEGIN
+        \\  VALUES (crsql_after_update('{s}'
+    , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
 
-        var first_pk = true;
+    // NEW PK values
+    var pk_order: usize = 1;
+    var pk_written: usize = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
         for (info.columns[0..info.count]) |col| {
-            if (col.pk_index > 0) {
-                if (!first_pk) {
-                    writer.writeAll(" AND ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\" IS NEW.\"{s}\"", .{
-                    col.name[0..col.name_len],
-                    col.name[0..col.name_len],
-                }) catch return error.BufferOverflow;
-                first_pk = false;
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                writer.print(", NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
             }
-        }
-        writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
-    } else {
-        // No PK columns - fire on all updates
-        writer.print(
-            \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
-            \\AFTER UPDATE ON "{s}"
-            \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0
-            \\BEGIN
-            \\
-        , .{ table_name, table_name }) catch return error.BufferOverflow;
-    }
-
-    // CRITICAL: Always advance db_version when trigger fires, even on no-op updates
-    // This matches Rust/C oracle behavior and is required for sync protocol parity
-    writer.writeAll("  SELECT crsql_next_db_version();\n") catch return error.BufferOverflow;
-
-    // Generate clock entry for each non-PK column (only when changed)
-    // Use pks table lookup to get the key (not base table rowid)
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            // Non-PK column - create/update clock entry when changed
-            // The key is looked up from pks table by blob
-            writer.print(
-                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-                \\  SELECT
-                \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-            , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-            // Write PK columns for subquery
-            var pk_written_inner: usize = 0;
-            var pk_order_inner: usize = 1;
-            while (pk_written_inner < info.pk_count) : (pk_order_inner += 1) {
-                for (info.columns[0..info.count]) |pk_col| {
-                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order_inner))) {
-                        if (pk_written_inner > 0) {
-                            writer.writeAll(", ") catch return error.BufferOverflow;
-                        }
-                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                        pk_written_inner += 1;
-                        break;
-                    }
-                }
-            }
-
-            // Continue with col_version lookup using the same key subquery pattern
-            writer.print(
-                \\)),
-                \\    '{s}',
-                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE key = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-            , .{ col.name[0..col.name_len], table_name, table_name }) catch return error.BufferOverflow;
-
-            // Write PK columns again for the nested subquery
-            pk_written_inner = 0;
-            pk_order_inner = 1;
-            while (pk_written_inner < info.pk_count) : (pk_order_inner += 1) {
-                for (info.columns[0..info.count]) |pk_col| {
-                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order_inner))) {
-                        if (pk_written_inner > 0) {
-                            writer.writeAll(", ") catch return error.BufferOverflow;
-                        }
-                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                        pk_written_inner += 1;
-                        break;
-                    }
-                }
-            }
-
-            writer.print(
-                \\)) AND col_name = '{s}'), 0) + 1,
-                \\    crsql_next_db_version(),
-                \\    0,
-                \\    crsql_increment_and_get_seq()
-                \\  WHERE OLD."{s}" IS NOT NEW."{s}";
-                \\
-            , .{
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-            }) catch return error.BufferOverflow;
         }
     }
 
-    writer.writeAll("END;") catch return error.BufferOverflow;
+    // OLD PK values
+    pk_order = 1;
+    pk_written = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                writer.print(", OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
 
-    // Null-terminate the SQL
+    if (non_pk_count > 0) {
+        // NEW non-PK values
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == 0) {
+                writer.print(", NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+            }
+        }
+        // OLD non-PK values
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == 0) {
+                writer.print(", OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+            }
+        }
+    }
+
+    writer.writeAll("));\nEND;") catch return error.BufferOverflow;
+
     const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
+    if (sql_len >= SQL_BUF_SIZE) return error.BufferOverflow;
     buf[sql_len] = 0;
 
     const sql: [*:0]const u8 = @ptrCast(&buf);
     const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
+    if (rc != api.SQLITE_OK) return error.SqliteError;
 }
 
 /// Create the PK UPDATE trigger that handles primary key column changes.
@@ -658,389 +481,52 @@ fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 /// even when the base table rowid doesn't change.
 ///
 /// This is sync-critical: without tombstones, replicas would never delete the old PK row.
+/// Create the PK UPDATE trigger - NO-OP
+/// Rust/C trigger schema uses a single UPDATE trigger that calls crsql_after_update,
+/// which handles both PK and non-PK changes.
 fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    // Get table column information
-    const info = try getTableInfo(db, table_name);
-    if (info.count == 0) {
-        return error.NoColumns;
-    }
-
-    // If pk_count == 0, skip - no PK columns to track changes on
-    if (info.pk_count == 0) {
-        return error.NoPrimaryKey;
-    }
-
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
-    // Trigger header: fires when ANY PK column changes
-    writer.print(
-        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_pk_utrig"
-        \\AFTER UPDATE ON "{s}"
-        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0 AND (
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build WHEN clause: OLD.pk_col IS NOT NEW.pk_col OR ...
-    var first_pk = true;
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index > 0) {
-            if (!first_pk) {
-                writer.writeAll(" OR ") catch return error.BufferOverflow;
-            }
-            writer.print("OLD.\"{s}\" IS NOT NEW.\"{s}\"", .{
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-            }) catch return error.BufferOverflow;
-            first_pk = false;
-        }
-    }
-
-    writer.writeAll(")\nBEGIN\n") catch return error.BufferOverflow;
-
-    // Step 1: Tombstone the OLD PK
-    // Look up the OLD pk key from pks table and mark it as deleted
-    // The OLD pks entry stays in place - it maps OLD pk blob to the clock key
-    writer.print(
-        \\  -- Step 1: Tombstone the old PK (mark as deleted)
-        \\  -- Look up the key for OLD pk blob
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  SELECT
-        \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build OLD pk columns for pack_columns
-    var pk_written: usize = 0;
-    var pk_order: usize = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.print(
-        \\)),
-        \\    '-1',
-        \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock"
-        \\       WHERE key = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build OLD pk columns again for nested subquery
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.print(
-        \\)) AND col_name = '-1'),
-        \\      2
-        \\    ),
-        \\    crsql_next_db_version(),
-        \\    0,
-        \\    crsql_increment_and_get_seq();
-        \\  -- Delete all non-sentinel clock entries for old PK
-        \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE key = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build OLD pk columns again for delete
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll(")) AND col_name IS NOT '-1';\n") catch return error.BufferOverflow;
-
-    // Step 1b: Mark old pks entry as tombstoned (clear base_rowid)
-    writer.print(
-        \\  -- Step 1b: Mark old pks entry as tombstoned
-        \\  UPDATE "{s}__crsql_pks" SET base_rowid = NULL
-        \\  WHERE pks = crsql_pack_columns(
-    , .{table_name}) catch return error.BufferOverflow;
-
-    // Build OLD pk columns for update
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll(");\n") catch return error.BufferOverflow;
-
-    // Step 2: Create NEW pks entry for the NEW pk blob
-    // INSERT with base_rowid = NEW.rowid
-    writer.print(
-        \\  -- Step 2: Create NEW pks entry with base_rowid
-        \\  INSERT INTO "{s}__crsql_pks" ("base_rowid", "pks")
-        \\  VALUES (NEW.rowid, crsql_pack_columns(
-    , .{table_name}) catch return error.BufferOverflow;
-
-    // Build NEW pk columns for pack_columns
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-    writer.writeAll("));\n") catch return error.BufferOverflow;
-
-    // Step 3: Create fresh clock entries for all non-PK columns under NEW pks key
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-        writer.print(
-            \\  -- Step 3: Create clock entry for '{s}' under new PK
-            \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-            \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-            \\  VALUES
-            \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-        , .{ col.name[0..col.name_len], table_name, table_name }) catch return error.BufferOverflow;
-
-            // Build NEW pk columns for subquery
-            pk_written = 0;
-            pk_order = 1;
-            while (pk_written < info.pk_count) : (pk_order += 1) {
-                for (info.columns[0..info.count]) |pk_col| {
-                    if (pk_col.pk_index == @as(c_int, @intCast(pk_order))) {
-                        if (pk_written > 0) {
-                            writer.writeAll(", ") catch return error.BufferOverflow;
-                        }
-                        writer.print("NEW.\"{s}\"", .{pk_col.name[0..pk_col.name_len]}) catch return error.BufferOverflow;
-                        pk_written += 1;
-                        break;
-                    }
-                }
-            }
-
-            writer.print(
-                \\)), '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-                \\
-            , .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-        }
-    }
-
-    // Step 4: Create sentinel for new row (row created)
-    writer.print(
-        \\  -- Step 4: Create sentinel for new PK (row created)
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  VALUES
-        \\    ((SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build NEW pk columns for subquery
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll(")), '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());\nEND;") catch return error.BufferOverflow;
-
-    // Null-terminate the SQL
-    const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
-    buf[sql_len] = 0;
-
-    const sql: [*:0]const u8 = @ptrCast(&buf);
-    const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
+    _ = db;
+    _ = table_name;
+    return error.NoPrimaryKey;
 }
 
-/// Create the DELETE trigger that marks rows as deleted.
-/// Semantics (from core/rs/core/src/local_writes/after_delete.rs):
-/// 1. Update (or create) sentinel row with col_name = '-1'
-///    - First delete: col_version = 2 (even = deleted)
-///    - Subsequent: col_version += 1
-/// 2. Drop all clock entries except the sentinel
-/// Note: Uses pks table lookup to get the pk key (not base table rowid)
+/// Create the DELETE trigger that captures row deletion.
+/// Uses crsql_after_delete() helper function (Rust/C compatible).
 fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    // Get table column information for pk columns
     const info = try getTableInfo(db, table_name);
 
     var buf: [SQL_BUF_SIZE]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     const writer = fbs.writer();
 
-    // Trigger header with sync_bit gating
     writer.print(
         \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
-        \\AFTER DELETE ON "{s}"
-        \\WHEN crsql_internal_sync_bit() = 0
+        \\AFTER DELETE ON "{s}" WHEN crsql_internal_sync_bit() = 0
         \\BEGIN
-        \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
-        \\  -- Use pks table lookup to get the key
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  SELECT
-        \\    (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
+        \\  VALUES (crsql_after_delete('{s}'
+    , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
 
-    // Build OLD pk columns for pack_columns
-    var pk_written: usize = 0;
     var pk_order: usize = 1;
+    var pk_written: usize = 0;
     while (pk_written < info.pk_count) : (pk_order += 1) {
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                writer.print(", OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
                 pk_written += 1;
                 break;
             }
         }
     }
 
-    writer.print(
-        \\)),
-        \\    '-1',
-        \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock"
-        \\       WHERE key = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
+    writer.writeAll("));\nEND;") catch return error.BufferOverflow;
 
-    // Build OLD pk columns again for nested subquery
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.print(
-        \\)) AND col_name = '-1'),
-        \\      2
-        \\    ),
-        \\    crsql_next_db_version(),
-        \\    0,
-        \\    crsql_increment_and_get_seq();
-        \\  -- Drop all clock entries except the sentinel
-        \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE key = (SELECT pk FROM "{s}__crsql_pks" WHERE pks = crsql_pack_columns(
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build OLD pk columns again for delete
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll(")) AND col_name IS NOT '-1';\n") catch return error.BufferOverflow;
-
-    // Mark pks entry as tombstoned (clear base_rowid)
-    writer.print(
-        \\  -- Mark pks entry as tombstoned
-        \\  UPDATE "{s}__crsql_pks" SET base_rowid = NULL
-        \\  WHERE pks = crsql_pack_columns(
-    , .{table_name}) catch return error.BufferOverflow;
-
-    // Build OLD pk columns for update
-    pk_written = 0;
-    pk_order = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("OLD.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll(");\nEND;") catch return error.BufferOverflow;
-
-    // Null-terminate the SQL
     const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
+    if (sql_len >= SQL_BUF_SIZE) return error.BufferOverflow;
     buf[sql_len] = 0;
 
     const sql: [*:0]const u8 = @ptrCast(&buf);
     const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
+    if (rc != api.SQLITE_OK) return error.SqliteError;
 }
 
 /// Backfill existing rows in the base table with clock entries.
@@ -1048,9 +534,9 @@ fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 /// pre-existing data gets tracked.
 ///
 /// Algorithm (from Rust reference core/rs/core/src/backfill.rs):
-/// 1. Find rows in base table not yet in pks table (via LEFT JOIN/EXCEPT)
-/// 2. For each such row:
-///    a. Insert into pks table: (rowid, crsql_pack_columns(pk_cols...))
+/// 1. Find PK tuples in base table not yet in pks table (EXCEPT)
+/// 2. For each such PK tuple:
+///    a. Insert into pks table: (pk_cols...) RETURNING __crsql_key
 ///    b. Insert clock entries for each non-PK column with col_version=1
 /// 3. Use crsql_next_db_version() to get appropriate db_version
 fn backfillExistingRows(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
@@ -1481,28 +967,48 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
         }
     }
 
-    // Build the SELECT query to find rows not yet backfilled
+    // Build the SELECT query to find PK tuples in base table not yet in __crsql_pks
+    // Rust/C algorithm: SELECT pk_cols FROM base EXCEPT SELECT pk_cols FROM pks
     var select_buf: [SQL_BUF_SIZE]u8 = undefined;
     var select_fbs = std.io.fixedBufferStream(&select_buf);
     const select_writer = select_fbs.writer();
 
-    select_writer.print("SELECT rowid", .{}) catch return error.BufferOverflow;
+    select_writer.writeAll("SELECT ") catch return error.BufferOverflow;
 
-    // Add PK columns in order for crsql_pack_columns
     var pk_order: usize = 1;
     var pk_written: usize = 0;
     while (pk_written < info.pk_count) : (pk_order += 1) {
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                select_writer.print(", \"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                if (pk_written > 0) {
+                    select_writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                select_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
                 pk_written += 1;
                 break;
             }
         }
     }
 
-    // Find rows not yet in pks table
-    select_writer.print(" FROM \"{s}\" WHERE rowid NOT IN (SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE base_rowid IS NOT NULL)", .{ table_name, table_name }) catch return error.BufferOverflow;
+    select_writer.print(" FROM \"{s}\" AS t1 ", .{table_name}) catch return error.BufferOverflow;
+    select_writer.writeAll("EXCEPT SELECT ") catch return error.BufferOverflow;
+
+    pk_order = 1;
+    pk_written = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    select_writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                select_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    select_writer.print(" FROM \"{s}__crsql_pks\" AS t2", .{table_name}) catch return error.BufferOverflow;
 
     const select_len = select_fbs.pos;
     if (select_len >= SQL_BUF_SIZE) return error.BufferOverflow;
@@ -1518,13 +1024,30 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
     defer _ = api.finalize(select_stmt);
 
     // Build INSERT statement for pks table
+    // INSERT INTO "{table}__crsql_pks" (pk_cols...) VALUES (?, ?, ...) RETURNING __crsql_key
     var pks_insert_buf: [SQL_BUF_SIZE]u8 = undefined;
     var pks_fbs = std.io.fixedBufferStream(&pks_insert_buf);
     const pks_writer = pks_fbs.writer();
 
-    pks_writer.print("INSERT OR IGNORE INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, crsql_pack_columns(", .{table_name}) catch return error.BufferOverflow;
+    pks_writer.print("INSERT INTO \"{s}__crsql_pks\" (", .{table_name}) catch return error.BufferOverflow;
 
-    // Add placeholders for each PK column value
+    var pk_order_insert: usize = 1;
+    var pk_written_insert: usize = 0;
+    while (pk_written_insert < info.pk_count) : (pk_order_insert += 1) {
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == @as(c_int, @intCast(pk_order_insert))) {
+                if (pk_written_insert > 0) {
+                    pks_writer.writeAll(", ") catch return error.BufferOverflow;
+                }
+                pks_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
+                pk_written_insert += 1;
+                break;
+            }
+        }
+    }
+
+    pks_writer.writeAll(") VALUES (") catch return error.BufferOverflow;
+
     for (0..info.pk_count) |i| {
         if (i > 0) {
             pks_writer.writeAll(", ") catch return error.BufferOverflow;
@@ -1532,7 +1055,7 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
         pks_writer.writeAll("?") catch return error.BufferOverflow;
     }
 
-    pks_writer.writeAll("))") catch return error.BufferOverflow;
+    pks_writer.writeAll(") RETURNING __crsql_key") catch return error.BufferOverflow;
 
     const pks_len = pks_fbs.pos;
     if (pks_len >= SQL_BUF_SIZE) return error.BufferOverflow;
@@ -1565,15 +1088,8 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
 
     // Iterate over rows that need backfilling
     while (api.step(select_stmt) == api.SQLITE_ROW) {
-        const rowid = api.column_int64(select_stmt, 0);
-
-        // Insert into pks table
-        if (api.bind_int64(pks_stmt, 1, rowid) != api.SQLITE_OK) {
-            return error.SqliteError;
-        }
-
-        // Bind PK column values
-        for (1..info.pk_count + 1) |i| {
+        // Bind PK column values from select (columns 0..pk_count)
+        for (0..info.pk_count) |i| {
             const col_idx: c_int = @intCast(i);
             const bind_idx: c_int = @intCast(i + 1);
             const value = api.column_value(select_stmt, col_idx);
@@ -1608,13 +1124,18 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
             }
         }
 
-        _ = api.step(pks_stmt);
+        // Insert into pks and get assigned __crsql_key
+        const step_rc = api.step(pks_stmt);
+        if (step_rc != api.SQLITE_ROW) {
+            return error.SqliteError;
+        }
+        const key = api.column_int64(pks_stmt, 0);
         _ = api.reset(pks_stmt);
 
         // Insert clock entries for each non-PK column
         for (info.columns[0..info.count]) |col| {
             if (col.pk_index == 0) {
-                if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+                if (api.bind_int64(clock_stmt, 1, key) != api.SQLITE_OK) {
                     return error.SqliteError;
                 }
 
@@ -1630,7 +1151,80 @@ fn backfillExistingRowsNoTx(db: ?*api.sqlite3, table_name: [*:0]const u8) !void 
 
         // If there are no non-PK columns, insert sentinel row
         if (non_pk_count == 0) {
-            if (api.bind_int64(clock_stmt, 1, rowid) != api.SQLITE_OK) {
+            if (api.bind_int64(clock_stmt, 1, key) != api.SQLITE_OK) {
+                return error.SqliteError;
+            }
+            if (api.bind_text(clock_stmt, 2, "-1", 2, api.SQLITE_STATIC) != api.SQLITE_OK) {
+                return error.SqliteError;
+            }
+            _ = api.step(clock_stmt);
+            _ = api.reset(clock_stmt);
+        }
+
+        // Bind PK column values from select (columns 0..pk_count)
+        for (0..info.pk_count) |i| {
+            const col_idx: c_int = @intCast(i);
+            const bind_idx: c_int = @intCast(i + 1);
+            const value = api.column_value(select_stmt, col_idx);
+            if (value) |v| {
+                const val_type = api.value_type(v);
+                const bind_rc = switch (val_type) {
+                    api.SQLITE_INTEGER => api.bind_int64(pks_stmt, bind_idx, api.value_int64(v)),
+                    api.SQLITE_FLOAT => api.bind_double(pks_stmt, bind_idx, api.value_double(v)),
+                    api.SQLITE_TEXT => blk: {
+                        const text = api.value_text(v);
+                        const len = api.value_bytes(v);
+                        if (text) |t| {
+                            break :blk api.bind_text(pks_stmt, bind_idx, t, len, api.getTransientDestructor());
+                        } else {
+                            break :blk api.bind_null(pks_stmt, bind_idx);
+                        }
+                    },
+                    api.SQLITE_BLOB => blk: {
+                        const blob = api.value_blob(v);
+                        const len = api.value_bytes(v);
+                        break :blk api.bind_blob(pks_stmt, bind_idx, blob, len, api.getTransientDestructor());
+                    },
+                    else => api.bind_null(pks_stmt, bind_idx),
+                };
+                if (bind_rc != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+            } else {
+                if (api.bind_null(pks_stmt, bind_idx) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+            }
+        }
+
+        // Insert into pks and capture assigned __crsql_key
+        const step_rc2 = api.step(pks_stmt);
+        if (step_rc2 != api.SQLITE_ROW) {
+            return error.SqliteError;
+        }
+        const key2 = api.column_int64(pks_stmt, 0);
+        _ = api.reset(pks_stmt);
+
+        // Insert clock entries for each non-PK column
+        for (info.columns[0..info.count]) |col| {
+            if (col.pk_index == 0) {
+                if (api.bind_int64(clock_stmt, 1, key2) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+
+                const col_name_slice = col.name[0..col.name_len];
+                if (api.bind_text(clock_stmt, 2, @ptrCast(col_name_slice.ptr), @intCast(col.name_len), api.getTransientDestructor()) != api.SQLITE_OK) {
+                    return error.SqliteError;
+                }
+
+                _ = api.step(clock_stmt);
+                _ = api.reset(clock_stmt);
+            }
+        }
+
+        // If there are no non-PK columns, insert sentinel row
+        if (non_pk_count == 0) {
+            if (api.bind_int64(clock_stmt, 1, key2) != api.SQLITE_OK) {
                 return error.SqliteError;
             }
             if (api.bind_text(clock_stmt, 2, "-1", 2, api.SQLITE_STATIC) != api.SQLITE_OK) {

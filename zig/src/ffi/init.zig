@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const api = @import("api.zig");
+const after_write = @import("../local_writes/after_write.zig");
 const as_crr = @import("../as_crr.zig");
 const automigrate = @import("../automigrate.zig");
 const changes_vtab = @import("../changes_vtab.zig");
@@ -150,6 +151,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
 
     // Register crsql_config_get() and crsql_config_set() functions
     rc = config.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_after_insert/update/delete functions (Rust/C trigger compatibility)
+    rc = after_write.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
     return api.SQLITE_OK;

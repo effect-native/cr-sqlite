@@ -983,23 +983,105 @@ fn changesEof(pCursor: ?*vtab.VTabCursor) callconv(.c) c_int {
     return if (cursor.is_eof) 1 else 0;
 }
 
-/// Fetch the packed pks blob from __crsql_pks table
-/// Returns the blob directly via sqlite3_result_blob
-fn fetchPksBlob(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64, ctx: ?*api.sqlite3_context) void {
-    var sql_buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT pks FROM \"{s}__crsql_pks\" WHERE pk = ?", .{table_name}) catch {
+/// Fetch the packed pks blob from __crsql_pks table.
+///
+/// Zig implementation stores PK columns unpacked in __crsql_pks (Rust/C schema).
+/// For the `crsql_changes` virtual table we expose `pk` as a packed blob,
+/// so we re-pack the PK columns using `crsql_pack_columns(...)`.
+fn fetchPksBlob(db: ?*vtab.sqlite3, table_name: []const u8, key: i64, ctx: ?*api.sqlite3_context) void {
+    // Build a SELECT that packs PK columns by joining clock key -> pks row.
+    // SELECT crsql_pack_columns(pk_tbl."a", pk_tbl."b", ...) FROM "{table}__crsql_pks" AS pk_tbl
+    // WHERE pk_tbl.__crsql_key = ?
+
+    var sql_buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&sql_buf);
+    const writer = fbs.writer();
+
+    writer.print("SELECT crsql_pack_columns(", .{}) catch {
         resultNull(ctx);
         return;
     };
 
+    // Discover PK columns via pragma_table_info
+    const api_db = toApiDb(db);
+    var pragma_buf: [256]u8 = undefined;
+    const pragma_sql = std.fmt.bufPrintZ(&pragma_buf, "PRAGMA table_info(\"{s}\")", .{table_name}) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    var pragma_stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(api_db, pragma_sql, -1, &pragma_stmt, null) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+    defer _ = finalizeStmt(pragma_stmt);
+
+    // We need PK columns in pk index order.
+    // Simple approach: collect them then emit in order (bounded).
+    var pk_names: [64][128]u8 = undefined;
+    var pk_name_lens: [64]usize = undefined;
+    var pk_positions: [64]usize = undefined;
+    var pk_count: usize = 0;
+
+    while (stepStmt(pragma_stmt) == vtab.SQLITE_ROW) {
+        const pk_pos = columnInt64FromStmt(pragma_stmt, 5);
+        if (pk_pos > 0) {
+            const name_ptr = columnTextFromStmt(pragma_stmt, 1) orelse continue;
+            const name_slice = std.mem.span(name_ptr);
+            if (pk_count >= 64 or name_slice.len >= 128) {
+                resultNull(ctx);
+                return;
+            }
+            @memcpy(pk_names[pk_count][0..name_slice.len], name_slice);
+            pk_name_lens[pk_count] = name_slice.len;
+            pk_positions[pk_count] = @intCast(pk_pos);
+            pk_count += 1;
+        }
+    }
+
+    // Emit in pk order
+    var emitted: usize = 0;
+    var pk_order: usize = 1;
+    while (emitted < pk_count) : (pk_order += 1) {
+        for (0..pk_count) |i| {
+            if (pk_positions[i] == pk_order) {
+                if (emitted > 0) {
+                    writer.writeAll(", ") catch {
+                        resultNull(ctx);
+                        return;
+                    };
+                }
+                writer.print("pk_tbl.\"{s}\"", .{pk_names[i][0..pk_name_lens[i]]}) catch {
+                    resultNull(ctx);
+                    return;
+                };
+                emitted += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(") FROM \"{s}__crsql_pks\" AS pk_tbl WHERE pk_tbl.__crsql_key = ?", .{table_name}) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    const sql_len = fbs.pos;
+    if (sql_len >= sql_buf.len) {
+        resultNull(ctx);
+        return;
+    }
+    sql_buf[sql_len] = 0;
+
     var stmt: ?*api.sqlite3_stmt = null;
-    if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
+    if (prepareV2(api_db, @ptrCast(&sql_buf), -1, &stmt, null) != vtab.SQLITE_OK) {
         resultNull(ctx);
         return;
     }
     defer _ = finalizeStmt(stmt);
 
-    if (api.bind_int64(stmt, 1, pk) != vtab.SQLITE_OK) {
+    if (api.bind_int64(stmt, 1, key) != vtab.SQLITE_OK) {
         resultNull(ctx);
         return;
     }
@@ -1016,62 +1098,137 @@ fn fetchPksBlob(db: ?*vtab.sqlite3, table_name: []const u8, pk: i64, ctx: ?*api.
 /// Fetch the actual column value from the base table
 /// col_name is the column name to fetch, pk is the pks table key (not base table rowid)
 /// We first look up base_rowid from pks table, then query the base table
-fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []const u8, pk: i64, ctx: ?*api.sqlite3_context) void {
-    // First, get base_rowid from pks table
-    var base_rowid_sql_buf: [256]u8 = undefined;
-    const base_rowid_sql = std.fmt.bufPrintZ(&base_rowid_sql_buf, "SELECT base_rowid FROM \"{s}__crsql_pks\" WHERE pk = ?", .{table_name}) catch {
+fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []const u8, key: i64, ctx: ?*api.sqlite3_context) void {
+    // With Rust/C pks schema there is no base_rowid indirection.
+    // We can fetch base table values directly using PK equality.
+
+    const api_db = toApiDb(db);
+
+    // Build WHERE clause with PK columns
+    var sql_buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&sql_buf);
+    const writer = fbs.writer();
+
+    writer.print("SELECT \"{s}\" FROM \"{s}\" WHERE ", .{ col_name, table_name }) catch {
         resultNull(ctx);
         return;
     };
 
-    var base_rowid_stmt: ?*api.sqlite3_stmt = null;
-    if (prepareV2(toApiDb(db), base_rowid_sql, -1, &base_rowid_stmt, null) != vtab.SQLITE_OK) {
-        resultNull(ctx);
-        return;
-    }
-    defer _ = finalizeStmt(base_rowid_stmt);
-
-    if (api.bind_int64(base_rowid_stmt, 1, pk) != vtab.SQLITE_OK) {
-        resultNull(ctx);
-        return;
-    }
-
-    if (stepStmt(base_rowid_stmt) != vtab.SQLITE_ROW) {
-        // No pks entry found
-        resultNull(ctx);
-        return;
-    }
-
-    // Check if base_rowid is NULL (tombstoned entry)
-    if (columnTypeFromStmt(base_rowid_stmt, 0) == api.SQLITE_NULL) {
-        // Tombstoned entry - no value to fetch
-        resultNull(ctx);
-        return;
-    }
-
-    const base_rowid = columnInt64FromStmt(base_rowid_stmt, 0);
-
-    // Now fetch the actual column value from base table
-    var sql_buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&sql_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE rowid = ?", .{ col_name, table_name }) catch {
+    // Discover PK columns via pragma_table_info
+    var pragma_buf: [256]u8 = undefined;
+    const pragma_sql = std.fmt.bufPrintZ(&pragma_buf, "PRAGMA table_info(\"{s}\")", .{table_name}) catch {
         resultNull(ctx);
         return;
     };
+
+    var pragma_stmt: ?*api.sqlite3_stmt = null;
+    if (prepareV2(api_db, pragma_sql, -1, &pragma_stmt, null) != vtab.SQLITE_OK) {
+        resultNull(ctx);
+        return;
+    }
+    defer _ = finalizeStmt(pragma_stmt);
+
+    var pk_names: [64][128]u8 = undefined;
+    var pk_name_lens: [64]usize = undefined;
+    var pk_positions: [64]usize = undefined;
+    var pk_count: usize = 0;
+
+    while (stepStmt(pragma_stmt) == vtab.SQLITE_ROW) {
+        const pk_pos = columnInt64FromStmt(pragma_stmt, 5);
+        if (pk_pos > 0) {
+            const name_ptr = columnTextFromStmt(pragma_stmt, 1) orelse continue;
+            const name_slice = std.mem.span(name_ptr);
+            if (pk_count >= 64 or name_slice.len >= 128) {
+                resultNull(ctx);
+                return;
+            }
+            @memcpy(pk_names[pk_count][0..name_slice.len], name_slice);
+            pk_name_lens[pk_count] = name_slice.len;
+            pk_positions[pk_count] = @intCast(pk_pos);
+            pk_count += 1;
+        }
+    }
+
+    var emitted: usize = 0;
+    var pk_order: usize = 1;
+    while (emitted < pk_count) : (pk_order += 1) {
+        for (0..pk_count) |i| {
+            if (pk_positions[i] == pk_order) {
+                if (emitted > 0) {
+                    writer.writeAll(" AND ") catch {
+                        resultNull(ctx);
+                        return;
+                    };
+                }
+                writer.print("\"{s}\" = pk_tbl.\"{s}\"", .{ pk_names[i][0..pk_name_lens[i]], pk_names[i][0..pk_name_lens[i]] }) catch {
+                    resultNull(ctx);
+                    return;
+                };
+                emitted += 1;
+                break;
+            }
+        }
+    }
+
+    // Now embed pks row as subquery via join: ... FROM base JOIN pks ON ... WHERE pks.__crsql_key = ?
+    // We rewrite SQL to include join at the end (keep it simple in one statement):
+    // SELECT base."col" FROM "table" AS base JOIN "table__crsql_pks" AS pk_tbl ON <pk equality> WHERE pk_tbl.__crsql_key = ?
+
+    // Replace the earlier "FROM \"table\"" with alias base
+    // Since we built full SQL already, easiest is to rebuild:
+    fbs.reset();
+
+    writer.print("SELECT base.\"{s}\" FROM \"{s}\" AS base JOIN \"{s}__crsql_pks\" AS pk_tbl ON ", .{ col_name, table_name, table_name }) catch {
+        resultNull(ctx);
+        return;
+    };
+
+    emitted = 0;
+    pk_order = 1;
+    while (emitted < pk_count) : (pk_order += 1) {
+        for (0..pk_count) |i| {
+            if (pk_positions[i] == pk_order) {
+                if (emitted > 0) {
+                    writer.writeAll(" AND ") catch {
+                        resultNull(ctx);
+                        return;
+                    };
+                }
+                writer.print("base.\"{s}\" = pk_tbl.\"{s}\"", .{ pk_names[i][0..pk_name_lens[i]], pk_names[i][0..pk_name_lens[i]] }) catch {
+                    resultNull(ctx);
+                    return;
+                };
+                emitted += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(" WHERE pk_tbl.__crsql_key = ?") catch {
+        resultNull(ctx);
+        return;
+    };
+
+    const sql_len = fbs.pos;
+    if (sql_len >= sql_buf.len) {
+        resultNull(ctx);
+        return;
+    }
+    sql_buf[sql_len] = 0;
 
     var stmt: ?*api.sqlite3_stmt = null;
-    if (prepareV2(toApiDb(db), sql, -1, &stmt, null) != vtab.SQLITE_OK) {
+    if (prepareV2(api_db, @ptrCast(&sql_buf), -1, &stmt, null) != vtab.SQLITE_OK) {
         resultNull(ctx);
         return;
     }
     defer _ = finalizeStmt(stmt);
 
-    if (api.bind_int64(stmt, 1, base_rowid) != vtab.SQLITE_OK) {
+    if (api.bind_int64(stmt, 1, key) != vtab.SQLITE_OK) {
         resultNull(ctx);
         return;
     }
 
     if (stepStmt(stmt) == vtab.SQLITE_ROW) {
-        // Return based on actual type
         const col_type = columnTypeFromStmt(stmt, 0);
         switch (col_type) {
             api.SQLITE_INTEGER => resultInt64(ctx, columnInt64FromStmt(stmt, 0)),
@@ -1085,20 +1242,11 @@ fn fetchColumnValue(db: ?*vtab.sqlite3, table_name: []const u8, col_name: []cons
                 }
             },
             api.SQLITE_BLOB => {
-                // For blobs, sqlite3_column_blob returns NULL for zero-length blobs,
-                // but sqlite3_column_type still returns SQLITE_BLOB and sqlite3_column_bytes returns 0.
-                // We must handle this case to distinguish empty blob X'' from actual NULL.
-                //
-                // SQLite's sqlite3_result_blob interprets NULL pointer as zeroblob,
-                // but passing NULL with n=0 can result in NULL output instead of empty blob.
-                // To ensure we get X'' (empty blob), we pass a non-NULL pointer with n=0.
                 const blob_len = columnBytesFromStmt(stmt, 0);
                 const blob_ptr = columnBlobFromStmt(stmt, 0);
                 if (blob_ptr != null) {
                     resultBlob(ctx, blob_ptr, blob_len, api.getTransientDestructor());
                 } else {
-                    // Empty blob case: col_type is SQLITE_BLOB but pointer is NULL
-                    // Use a static non-NULL pointer with length 0 to produce X''
                     const empty_blob = [_]u8{};
                     resultBlob(ctx, &empty_blob, 0, api.SQLITE_STATIC);
                 }
