@@ -12,7 +12,7 @@
 # 5. Edge cases: empty table, 1000+ rows, sequential ALTERs, add+update
 #
 # NOTE: Schema differences between implementations:
-# - Rust uses "key" column, Zig uses "pk" column in clock table
+# - Both use "key" column in clock table
 # - Clock backfill behavior may differ
 set -uo pipefail
 
@@ -76,7 +76,7 @@ run_rust() {
     $SQLITE_CR "$RUST_DB" < "$SQL_FILE" 2>/dev/null || true
 }
 
-# Helper: run SQL on Zig DB (uses "pk" column in clock table)
+# Helper: run SQL on Zig DB (uses "key" column in clock table)
 run_zig() {
     local sql="$1"
     echo "$sql" > "$SQL_FILE"
@@ -84,7 +84,7 @@ run_zig() {
 }
 
 # Helper: compare clock table states (normalized)
-# Note: Rust uses "key", Zig uses "pk"; we normalize both to "pk" for comparison
+# Note: Both use "key" column; we alias to "pk" for output readability
 # Also filters out sentinel (-1) entries since they may differ
 compare_clocks() {
     local table="$1"
@@ -93,8 +93,8 @@ compare_clocks() {
     # Get clock state from Rust (uses "key" column) - filter out sentinel
     run_rust "SELECT key AS pk, col_name, col_version, db_version FROM ${table}__crsql_clock WHERE col_name != '-1' ORDER BY key, col_name;" > "$RUST_OUT"
     
-    # Get clock state from Zig (uses "pk" column) - filter out sentinel
-    run_zig "SELECT pk, col_name, col_version, db_version FROM ${table}__crsql_clock WHERE col_name != '-1' ORDER BY pk, col_name;" > "$ZIG_OUT"
+    # Get clock state from Zig (uses "key" column) - filter out sentinel
+    run_zig "SELECT key AS pk, col_name, col_version, db_version FROM ${table}__crsql_clock WHERE col_name != '-1' ORDER BY key, col_name;" > "$ZIG_OUT"
     
     if diff -q "$RUST_OUT" "$ZIG_OUT" > /dev/null 2>&1; then
         echo "  PASS: $test_name - clock states match"
@@ -557,7 +557,7 @@ UPDATE t9 SET data = 'third' WHERE id = 1;
 
 # Record pre-alter clock state
 run_rust "SELECT key AS pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY key;" > "$RUST_OUT.pre"
-run_zig "SELECT pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY pk;" > "$ZIG_OUT.pre"
+run_zig "SELECT key AS pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY key;" > "$ZIG_OUT.pre"
 
 # ALTER (should NOT change existing entries)
 run_rust "SELECT crsql_begin_alter('t9'); ALTER TABLE t9 ADD COLUMN extra TEXT; SELECT crsql_commit_alter('t9');"
@@ -565,7 +565,7 @@ run_zig "SELECT crsql_begin_alter('t9'); ALTER TABLE t9 ADD COLUMN extra TEXT; S
 
 # Record post-alter clock state for existing column
 run_rust "SELECT key AS pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY key;" > "$RUST_OUT.post"
-run_zig "SELECT pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY pk;" > "$ZIG_OUT.post"
+run_zig "SELECT key AS pk, col_name, col_version, db_version FROM t9__crsql_clock WHERE col_name = 'data' ORDER BY key;" > "$ZIG_OUT.post"
 
 # Verify existing clock entries unchanged
 if diff -q "$RUST_OUT.pre" "$RUST_OUT.post" > /dev/null 2>&1; then

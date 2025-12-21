@@ -83,19 +83,19 @@ run_zig() {
 }
 
 # Helper: Dump clock table sorted for comparison
-# Note: Rust uses "key" column, Zig uses "pk" column - we normalize to "pk" in output
+# Note: Both implementations use "key" column in clock tables
 dump_clock_rust() {
     local db="$1"
     local table="$2"
     $SQLITE "$db" -cmd ".load $RUST_EXT sqlite3_crsqlite_init" \
-        "SELECT key AS pk, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY key, col_name, db_version;" 2>/dev/null || true
+        "SELECT key, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY key, col_name, db_version;" 2>/dev/null || true
 }
 
 dump_clock_zig() {
     local db="$1"
     local table="$2"
     $SQLITE "$db" -cmd ".load $ZIG_EXT sqlite3_crsqlite_init" \
-        "SELECT pk, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY pk, col_name, db_version;" 2>/dev/null || true
+        "SELECT key, col_name, col_version, db_version, seq FROM ${table}__crsql_clock ORDER BY key, col_name, db_version;" 2>/dev/null || true
 }
 
 # Helper: Compare clock tables between implementations
