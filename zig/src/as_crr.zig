@@ -305,7 +305,7 @@ fn createPksTable(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 }
 
 /// Query PRAGMA table_info to get column information
-fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
+pub fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
     var info = TableInfo{
         .columns = undefined,
         .count = 0,

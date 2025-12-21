@@ -21,6 +21,7 @@ const std = @import("std");
 const api = @import("ffi/api.zig");
 const codec = @import("codec.zig");
 const site_identity = @import("site_identity.zig");
+const as_crr = @import("as_crr.zig");
 
 /// Error set for merge operations
 pub const MergeError = error{
@@ -354,25 +355,96 @@ pub fn setWinnerClock(
 }
 
 /// Find the pk (pks table key) from a packed PK blob.
-/// Queries the __crsql_pks table to find matching row.
-/// Returns the pks table's auto-increment key, NOT the base table rowid.
+/// Queries the __crsql_pks table to find matching row using unpacked PK column values.
+/// Returns the pks table's auto-increment key (__crsql_key), NOT the base table rowid.
+///
+/// NEW SCHEMA: The pks table stores PK columns directly, not as a packed blob.
+/// This function unpacks the pk_blob and queries:
+///   SELECT __crsql_key FROM table__crsql_pks WHERE col1 = ? AND col2 = ?
 pub fn findPkFromBlob(
     db: ?*api.sqlite3,
     table_name: []const u8,
     pk_blob: [*]const u8,
     pk_blob_len: usize,
 ) MergeError!i64 {
-    var buf: [512]u8 = undefined;
-    const sql = std.fmt.bufPrintZ(&buf, "SELECT pk FROM \"{s}__crsql_pks\" WHERE pks = ?", .{table_name}) catch return MergeError.BufferOverflow;
+    // Get TableInfo to know PK column names and count
+    // getTableInfo requires null-terminated string
+    var table_name_buf: [256]u8 = undefined;
+    const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+    const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
 
+    if (info.pk_count == 0) {
+        return MergeError.SqliteError; // Table must have a primary key
+    }
+
+    // Unpack the pk_blob into individual values
+    // We need a temporary allocator for the unpacked values
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const pk_blob_slice: []const u8 = pk_blob[0..pk_blob_len];
+    const values = codec.unpack(allocator, pk_blob_slice) catch return MergeError.DecodeError;
+
+    if (values.len != info.pk_count) {
+        return MergeError.DecodeError; // Mismatch between unpacked values and PK column count
+    }
+
+    // Build SQL: SELECT __crsql_key FROM "table__crsql_pks" WHERE "col1" = ? AND "col2" = ?
+    var sql_buf: [1024]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&sql_buf);
+    var writer = fbs.writer();
+
+    writer.print("SELECT __crsql_key FROM \"{s}__crsql_pks\" WHERE ", .{table_name}) catch return MergeError.BufferOverflow;
+
+    // Build WHERE clause with PK columns in order
+    var pk_order: usize = 1;
+    var pk_written: usize = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        // Find the column with this pk_order
+        var col_name: ?[]const u8 = null;
+        for (0..info.count) |i| {
+            const col = &info.columns[i];
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                col_name = col.name[0..col.name_len];
+                break;
+            }
+        }
+
+        const name = col_name orelse return MergeError.SqliteError;
+
+        if (pk_written > 0) {
+            writer.writeAll(" AND ") catch return MergeError.BufferOverflow;
+        }
+        writer.print("\"{s}\" IS ?", .{name}) catch return MergeError.BufferOverflow;
+        pk_written += 1;
+    }
+
+    const sql = std.mem.sliceTo(&sql_buf, 0);
+
+    // Prepare statement
     var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+    if (api.prepare_v2(db, sql.ptr, -1, &stmt, null) != api.SQLITE_OK) {
         return MergeError.SqliteError;
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_blob(stmt, 1, pk_blob, @intCast(pk_blob_len), api.getTransientDestructor());
+    // Bind unpacked PK values in order
+    for (values, 0..) |value, idx| {
+        const param_idx: c_int = @intCast(idx + 1);
+        const rc = switch (value) {
+            .Null => api.bind_null(stmt, param_idx),
+            .Integer => |i| api.bind_int64(stmt, param_idx, i),
+            .Float => |f| api.bind_double(stmt, param_idx, f),
+            .Text => |t| api.bind_text(stmt, param_idx, t.ptr, @intCast(t.len), api.getTransientDestructor()),
+            .Blob => |b| api.bind_blob(stmt, param_idx, b.ptr, @intCast(b.len), api.getTransientDestructor()),
+        };
+        if (rc != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    }
 
+    // Execute and return __crsql_key
     if (api.step(stmt) == api.SQLITE_ROW) {
         return api.column_int64(stmt, 0);
     }
