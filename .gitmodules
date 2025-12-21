@@ -5,9 +5,6 @@
 [submodule ".refs/zig-sqlite"]
 	path = .refs/zig-sqlite
 	url = git@github.com:vrischmann/zig-sqlite.git
-[submodule ".refs/sqlite"]
-	path = .refs/sqlite
-	url = git@github.com:mackyle/sqlite.git
 [submodule ".refs/effect"]
 	path = .refs/effect
 	url = git@github.com:Effect-TS/effect.git
