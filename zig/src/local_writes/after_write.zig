@@ -50,7 +50,7 @@ const TableInfo = struct {
 
 fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
     var info = TableInfo{
-        .columns = undefined,
+        .columns = [_]ColumnInfo{.{ .name = [_]u8{0} ** 128, .name_len = 0, .pk_index = 0 }} ** 64,
         .count = 0,
         .pk_count = 0,
         .non_pk_count = 0,
@@ -112,7 +112,9 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
 }
 
 fn getPkColumnName(info: *const TableInfo, pk_order: usize) ?[]const u8 {
-    for (info.columns[0..info.count]) |col| {
+    // IMPORTANT: Iterate by index, not by value, to avoid returning slice into local copy
+    for (0..info.count) |i| {
+        const col = &info.columns[i];
         if (col.pk_index == @as(c_int, @intCast(pk_order))) {
             const result = col.name[0..col.name_len];
             // Debug: ensure we're returning a valid name
@@ -220,21 +222,6 @@ fn getOrCreatePkKey(
             };
         }
         const before_pos = select_fbs.pos;
-
-        // DEBUG: Force error on second iteration to see col_name
-        if (iteration == 2) {
-            // Don't try to format col_name as string, just show length and first few bytes as hex
-            var hex_buf: [256]u8 = undefined;
-            var hex_len: usize = 0;
-            for (col_name, 0..) |byte, i| {
-                if (hex_len + 5 >= hex_buf.len) break;
-                const part = std.fmt.bufPrint(hex_buf[hex_len..], "{x:0>2} ", .{byte}) catch break;
-                hex_len += part.len;
-                if (i >= 10) break; // Limit to first 10 bytes
-            }
-            setLastErrorFmt("ITER2: len={} hex=[{s}] pos={} order={}", .{ col_name.len, hex_buf[0..hex_len], before_pos, pk_order });
-            return null;
-        }
 
         select_writer.print("\"{s}\" IS ?", .{col_name}) catch |err| {
             setLastErrorFmt("failed write pk_order={} col_name=[{s}] len={} pos={} err={}", .{ pk_order, col_name, col_name.len, before_pos, err });
