@@ -14,6 +14,26 @@ const site_identity = @import("../site_identity.zig");
 const compare_values = @import("../compare_values.zig");
 
 const MAX_SQL_BUF = 4096;
+const MAX_ERR_BUF = 512;
+
+// Thread-local error buffer for diagnostics
+threadlocal var last_error_buf: [MAX_ERR_BUF]u8 = undefined;
+threadlocal var last_error_len: usize = 0;
+
+fn setLastError(msg: []const u8) void {
+    const len = @min(msg.len, MAX_ERR_BUF - 1);
+    @memcpy(last_error_buf[0..len], msg[0..len]);
+    last_error_len = len;
+    last_error_buf[len] = 0;
+}
+
+fn setLastErrorFmt(comptime fmt: []const u8, args: anytype) void {
+    const msg = std.fmt.bufPrint(&last_error_buf, fmt, args) catch {
+        setLastError("error formatting failed");
+        return;
+    };
+    last_error_len = msg.len;
+}
 
 const ColumnInfo = struct {
     name: [128]u8,
@@ -55,7 +75,10 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
 
     var stmt: ?*api.sqlite3_stmt = null;
     const rc = api.prepare_v2(db, pragma_sql, -1, &stmt, null);
-    if (rc != api.SQLITE_OK) return null;
+    if (rc != api.SQLITE_OK) {
+        setLastErrorFmt("getTableInfo PRAGMA prepare failed for table {s}", .{table_name});
+        return null;
+    }
     defer _ = api.finalize(stmt);
 
     while (api.step(stmt) == api.SQLITE_ROW) {
@@ -80,15 +103,27 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
         info.count += 1;
     }
 
+    // Debug: log what we found
+    if (info.count == 0) {
+        setLastErrorFmt("getTableInfo found 0 columns for table {s}", .{table_name});
+    }
+
     return info;
 }
 
 fn getPkColumnName(info: *const TableInfo, pk_order: usize) ?[]const u8 {
     for (info.columns[0..info.count]) |col| {
         if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-            return col.name[0..col.name_len];
+            const result = col.name[0..col.name_len];
+            // Debug: ensure we're returning a valid name
+            if (result.len == 0) {
+                setLastErrorFmt("getPkColumnName found empty name for pk_order={}", .{pk_order});
+            }
+            return result;
         }
     }
+    // Debug: record which pk_order we couldn't find
+    setLastErrorFmt("getPkColumnName: no column found with pk_index={} (have {} cols, {} pks)", .{ pk_order, info.count, info.pk_count });
     return null;
 }
 
@@ -124,22 +159,93 @@ fn getOrCreatePkKey(
     info: *const TableInfo,
     pk_values: []*api.sqlite3_value,
 ) ?i64 {
-    if (db == null) return null;
+    if (db == null) {
+        setLastError("db is null");
+        return null;
+    }
+
+    // Debug: log what we have
+    if (info.pk_count == 0) {
+        setLastError("info.pk_count is 0");
+        return null;
+    }
+
+    // Build a debug string of all columns and fail immediately to see column info
+    var debug_buf: [512]u8 = undefined;
+    var debug_len: usize = 0;
+    for (info.columns[0..info.count]) |col| {
+        const name_slice = col.name[0..col.name_len];
+        const part = std.fmt.bufPrint(debug_buf[debug_len..], "{s}(pk={}),", .{ name_slice, col.pk_index }) catch break;
+        debug_len += part.len;
+    }
+
+    // Debug info logged (we know cols are correct now)
+
     // SELECT __crsql_key FROM "{table}__crsql_pks" WHERE "pk1" IS ? AND "pk2" IS ? ...
     var select_buf: [MAX_SQL_BUF]u8 = undefined;
     var select_fbs = std.io.fixedBufferStream(&select_buf);
     const select_writer = select_fbs.writer();
 
-    select_writer.print("SELECT __crsql_key FROM \"{s}__crsql_pks\" WHERE ", .{table_name}) catch return null;
+    select_writer.print("SELECT __crsql_key FROM \"{s}__crsql_pks\" WHERE ", .{table_name}) catch {
+        setLastError("failed to format SELECT SQL");
+        return null;
+    };
 
     var pk_order: usize = 1;
     var pk_written: usize = 0;
+    var iteration: usize = 0;
     while (pk_written < info.pk_count) : (pk_order += 1) {
-        const col_name = getPkColumnName(info, pk_order) orelse return null;
-        if (pk_written > 0) {
-            select_writer.writeAll(" AND ") catch return null;
+        iteration += 1;
+        // DEBUG: Log each iteration
+        if (iteration > 10) {
+            setLastError("infinite loop protection");
+            return null;
         }
-        select_writer.print("\"{s}\" IS ?", .{col_name}) catch return null;
+        const col_name = getPkColumnName(info, pk_order) orelse {
+            // Error already set by getPkColumnName - add iteration context
+            var err_buf: [512]u8 = undefined;
+            const prev_err = last_error_buf[0..last_error_len];
+            const msg = std.fmt.bufPrint(&err_buf, "iter pk_order={} pk_written={}: {s}", .{ pk_order, pk_written, prev_err }) catch "getPkColumnName failed";
+            setLastError(msg);
+            return null;
+        };
+        if (col_name.len == 0) {
+            setLastErrorFmt("empty col_name at pk_order={} pk_written={}", .{ pk_order, pk_written });
+            return null;
+        }
+        if (pk_written > 0) {
+            select_writer.writeAll(" AND ") catch {
+                setLastErrorFmt("failed AND at pos={} pk_order={}", .{ select_fbs.pos, pk_order });
+                return null;
+            };
+        }
+        const before_pos = select_fbs.pos;
+
+        // DEBUG: Force error on second iteration to see col_name
+        if (iteration == 2) {
+            // Don't try to format col_name as string, just show length and first few bytes as hex
+            var hex_buf: [256]u8 = undefined;
+            var hex_len: usize = 0;
+            for (col_name, 0..) |byte, i| {
+                if (hex_len + 5 >= hex_buf.len) break;
+                const part = std.fmt.bufPrint(hex_buf[hex_len..], "{x:0>2} ", .{byte}) catch break;
+                hex_len += part.len;
+                if (i >= 10) break; // Limit to first 10 bytes
+            }
+            setLastErrorFmt("ITER2: len={} hex=[{s}] pos={} order={}", .{ col_name.len, hex_buf[0..hex_len], before_pos, pk_order });
+            return null;
+        }
+
+        select_writer.print("\"{s}\" IS ?", .{col_name}) catch |err| {
+            setLastErrorFmt("failed write pk_order={} col_name=[{s}] len={} pos={} err={}", .{ pk_order, col_name, col_name.len, before_pos, err });
+            return null;
+        };
+        const after_pos = select_fbs.pos;
+        // Detect if write succeeded but didn't actually write
+        if (after_pos == before_pos) {
+            setLastErrorFmt("SILENT FAIL: pk_order={} col=[{s}] before_pos={} after_pos={}", .{ pk_order, col_name, before_pos, after_pos });
+            return null;
+        }
         pk_written += 1;
     }
 
@@ -147,10 +253,15 @@ fn getOrCreatePkKey(
     if (select_len >= MAX_SQL_BUF) return null;
     select_buf[select_len] = 0;
 
-    var select_stmt: ?*api.sqlite3_stmt = null;
     const select_sql: [*:0]const u8 = @ptrCast(&select_buf);
+
+    var select_stmt: ?*api.sqlite3_stmt = null;
     var rc = api.prepare_v2(db, select_sql, -1, &select_stmt, null);
-    if (rc != api.SQLITE_OK) return null;
+    if (rc != api.SQLITE_OK) {
+        const err = api.errmsg(db);
+        setLastErrorFmt("SELECT prepare failed (rc={}): {s} | SQL: {s}", .{ rc, std.mem.span(err), std.mem.span(select_sql) });
+        return null;
+    }
     defer _ = api.finalize(select_stmt);
 
 
@@ -197,12 +308,19 @@ fn getOrCreatePkKey(
     var insert_stmt: ?*api.sqlite3_stmt = null;
     const insert_sql: [*:0]const u8 = @ptrCast(&insert_buf);
     rc = api.prepare_v2(db, insert_sql, -1, &insert_stmt, null);
-    if (rc != api.SQLITE_OK) return null;
+    if (rc != api.SQLITE_OK) {
+        const err = api.errmsg(db);
+        setLastErrorFmt("INSERT prepare failed (rc={}): {s} | SQL: {s}", .{ rc, std.mem.span(err), std.mem.span(insert_sql) });
+        return null;
+    }
     defer _ = api.finalize(insert_stmt);
 
     for (0..info.pk_count) |i| {
         rc = bindValue(insert_stmt, @intCast(i + 1), pk_values[i]);
-        if (rc != api.SQLITE_OK) return null;
+        if (rc != api.SQLITE_OK) {
+            setLastErrorFmt("INSERT bind failed at index {} (rc={})", .{ i + 1, rc });
+            return null;
+        }
     }
 
     rc = api.step(insert_stmt);
@@ -210,6 +328,8 @@ fn getOrCreatePkKey(
         return api.column_int64(insert_stmt, 0);
     }
 
+    const err = api.errmsg(db);
+    setLastErrorFmt("INSERT step failed (rc={}): {s}", .{ rc, std.mem.span(err) });
     return null;
 }
 
@@ -427,9 +547,17 @@ fn crsqlAfterInsertFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     const table_name = std.mem.span(table_name_ptr.?);
 
     const info = getTableInfo(db, table_name) orelse {
-        api.result_error(pCtx, "crsql_after_insert: failed to get table info", -1);
+        var err_buf: [1024]u8 = undefined;
+        const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_insert getTableInfo failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_insert: failed to get table info";
+        api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
+
+    // Validate we got the expected number of PK columns
+    if (info.pk_count == 0) {
+        api.result_error(pCtx, "crsql_after_insert: table has no PK columns", -1);
+        return;
+    }
 
     const pk_count: usize = @intCast(argc - 1);
     if (pk_count != info.pk_count) {
@@ -445,9 +573,10 @@ fn crsqlAfterInsertFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     // Get or create the key in __crsql_pks.
     // Note: we intentionally do this before reading current clocks.
     const key_existing = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
-        // Emit debug info that helps pinpoint which SQL path failed.
-        // (Note: error message returned to SQLite)
-        api.result_error(pCtx, "crsql_after_insert: failed geteting or creating lookaside key (pks schema lookup/insert failed)", -1);
+        // Return the captured error message with context
+        var err_buf: [1024]u8 = undefined;
+        const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_insert failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_insert: getOrCreatePkKey failed";
+        api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
 
@@ -522,7 +651,9 @@ fn crsqlAfterUpdateFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     const next_db_version = site_identity.nextDbVersion(null);
 
     const new_key = getOrCreatePkKey(db, table_name, &info, pk_new_values[0..pk_count]) orelse {
-        api.result_error(pCtx, "crsql_after_update: failed geteting or creating lookaside key", -1);
+        var err_buf: [1024]u8 = undefined;
+        const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_update (new_key) failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_update: getOrCreatePkKey failed";
+        api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
 
@@ -536,7 +667,9 @@ fn crsqlAfterUpdateFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
 
     if (pk_changed) {
         const old_key = getOrCreatePkKey(db, table_name, &info, pk_old_values[0..pk_count]) orelse {
-            api.result_error(pCtx, "crsql_after_update: failed geteting or creating lookaside key", -1);
+            var err_buf: [1024]u8 = undefined;
+            const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_update (old_key) failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_update: getOrCreatePkKey failed";
+            api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
             return;
         };
         const seq_del = site_identity.getNextSeq();
@@ -607,7 +740,9 @@ fn crsqlAfterDeleteFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     const seq = site_identity.getNextSeq();
 
     const key = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
-        api.result_error(pCtx, "crsql_after_delete: failed geteting or creating lookaside key", -1);
+        var err_buf: [1024]u8 = undefined;
+        const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_delete failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_delete: getOrCreatePkKey failed";
+        api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
 
