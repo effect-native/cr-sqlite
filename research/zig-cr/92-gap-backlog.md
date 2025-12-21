@@ -6,12 +6,15 @@
 
 - MVP: ✅ complete (154/154 tests passing)
 - Oracle parity: ✅ **18/18 pass** (all divergences fixed)
+- Cross-open modification compatibility: ❌ gap captured (XO-003/XO-004/XO-006) — see `.tasks/triage/TASK-143-cross-open-modification-compat.md`
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-All oracle parity tests pass. Zig implementation is now wire-compatible with Rust/C oracle.
+All oracle parity tests pass. Zig implementation is wire-compatible with the Rust/C oracle for sync/wire format and read-only cross-open.
+
+A remaining compatibility gap exists for **cross-open modification** (DB created by Zig modified by Rust/C, or vice versa). This is tracked as a first-class gap: `.tasks/triage/TASK-143-cross-open-modification-compat.md`.
 
 ### Hypothesis Invalidation (Done)
 - [x] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing ✓ `.tasks/done/TASK-127-experimental-parity-invalidation.md`
