@@ -6,8 +6,8 @@
 //!
 //! Known settings:
 //!   - 'merge-equal-values': Controls whether merging identical values advances the clock
-//!     - 1 (default): Merging same value with higher col_version advances db_version
-//!     - 0: Merging same value is a no-op (clock not advanced)
+//!     - 0 (default): Merging same value is a no-op (clock not advanced)
+//!     - 1: Merging same value with higher col_version advances db_version
 //!
 //! Reference: core/rs/core/src/config.rs
 
@@ -17,8 +17,8 @@ const api = @import("ffi/api.zig");
 /// Config key for merge-equal-values setting
 pub const MERGE_EQUAL_VALUES: []const u8 = "merge-equal-values";
 
-/// Default value for merge-equal-values (1 = enabled, site_id tie-break on equal values)
-pub const DEFAULT_MERGE_EQUAL_VALUES: i64 = 1;
+/// Default value for merge-equal-values (0 = disabled, matches Rust/C oracle)
+pub const DEFAULT_MERGE_EQUAL_VALUES: i64 = 0;
 
 /// Per-connection config storage.
 /// Uses the sqlite3* pointer as a key to store per-connection state.
@@ -282,8 +282,8 @@ pub fn register(db: ?*api.sqlite3) c_int {
 // Tests
 // =============================================================================
 
-test "default merge_equal_values is 1" {
-    try std.testing.expectEqual(@as(i64, 1), DEFAULT_MERGE_EQUAL_VALUES);
+test "default merge_equal_values is 0 (matches Rust/C oracle)" {
+    try std.testing.expectEqual(@as(i64, 0), DEFAULT_MERGE_EQUAL_VALUES);
 }
 
 test "getMergeEqualValues returns default for null db" {

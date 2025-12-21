@@ -68,6 +68,91 @@ Artifacts:
 
 ---
 
+## Round 2025-12-20 (57) — Fix NUL byte truncation and config default parity (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-141-fix-nul-byte-truncation.md`
+- `.tasks/done/TASK-142-fix-config-default-parity.md`
+
+**Commits**
+- `c1cb20a7` — fix(zig): NUL byte truncation in sync + config default parity (Round 57)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-boundary-values.sh
+bash zig/harness/test-config.sh
+make -C zig test-parity
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-141: NUL byte truncation (8/8 pass)</summary>
+
+```text
+Boundary Value Edge Case Test Summary
+
+  PASS:    8
+  FAIL:    0
+  SKIP:    0
+
+All boundary value edge case tests PASSED
+
+Verified parity for:
+  - EC-010: MAX_INT64 (9223372036854775807)
+  - EC-011: MIN_INT64 (-9223372036854775808)
+  - EC-012: MAX_FLOAT
+  - EC-013: 1MB text
+  - EC-014: 1MB blob
+  - EC-020: Emoji (🎉🚀🌈🦄💯)
+  - EC-021: NULL bytes in text
+  - Bidirectional sync (Zig -> Rust)
+```
+
+**Root cause**: The Zig implementation correctly stores TEXT with embedded NUL bytes. The issue was in the test script's sync protocol — SQLite's `quote()` function treats TEXT as C-strings and truncates at the first NUL byte. Fixed by using `CAST(X'...' AS TEXT)` format for TEXT values in the sync SQL.
+
+**Files modified:**
+- `zig/harness/test-boundary-values.sh` — Updated sync SQL quoting
+</details>
+
+<details>
+<summary>TASK-142: Config default parity (16/16 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║                           TEST SUMMARY                               ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  16                                                         ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+All tests PASSED
+```
+
+**Root cause**: Zig defaulted `merge-equal-values` to `1`, but Rust/C oracle defaults to `0`.
+
+**Files modified:**
+- `zig/src/config.zig` — Changed `DEFAULT_MERGE_EQUAL_VALUES` from `1` to `0`
+- `zig/harness/test-config.sh` — Fixed test expectation to match oracle (0, not 1)
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig` — build Zig extension
+3. `bash zig/harness/test-boundary-values.sh` — verify 8/8 pass
+4. `bash zig/harness/test-config.sh` — verify 16/16 pass
+
+**Known gaps / unverified claims**
+- No regressions in parity suite (verified via `make -C zig test-parity`)
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (56) — Cross-open, boundary values, config isolation, and stress tests (4 tasks)
 
 **Tasks executed**

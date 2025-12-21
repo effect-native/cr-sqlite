@@ -552,11 +552,11 @@ echo "  Zig fresh database default: $ZIG_FRESH"
 if [[ "$CONFIG_GET_AVAILABLE" == "false" ]]; then
     echo "  FAIL: crsql_config_get not implemented (expected for RED phase)"
     TOTAL_FAIL=$((TOTAL_FAIL + 1))
-elif [[ "$ZIG_FRESH" == "1" ]]; then
-    echo "  PASS: Fresh database has default value (1)"
+elif [[ "$ZIG_FRESH" == "0" ]]; then
+    echo "  PASS: Fresh database has default value (0, matches oracle)"
     TOTAL_PASS=$((TOTAL_PASS + 1))
 else
-    echo "  FAIL: Expected default 1, got: '$ZIG_FRESH'"
+    echo "  FAIL: Expected default 0, got: '$ZIG_FRESH'"
     TOTAL_FAIL=$((TOTAL_FAIL + 1))
 fi
 

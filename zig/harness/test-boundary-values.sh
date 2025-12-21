@@ -111,6 +111,11 @@ is_blocked() {
     return 1
 }
 
+# SQL expression to properly quote val, preserving embedded NUL bytes in TEXT.
+# SQLite's quote() function truncates TEXT at the first NUL byte, so for TEXT
+# values we use CAST(X'...' AS TEXT) to preserve the full content.
+QUOTE_VAL="CASE typeof(val) WHEN 'text' THEN 'CAST(X''' || hex(val) || ''' AS TEXT)' WHEN 'null' THEN 'NULL' ELSE quote(val) END"
+
 # Sync from source DB to target DB (extract changes, apply)
 # Usage: sync_changes SOURCE_DB SOURCE_RUN_FN TARGET_DB TARGET_RUN_FN
 # This extracts all crsql_changes from source and applies to target
@@ -127,19 +132,25 @@ sync_changes() {
     tgt_site=$($tgt_fn "$tgt_db" "SELECT quote(crsql_site_id());")
     
     # Export changes from source
+    # Note: For TEXT values, we use CAST(X'...' AS TEXT) to preserve embedded NUL bytes,
+    # because SQLite's quote() function truncates TEXT at the first NUL byte.
     $src_fn "$src_db" "
         SELECT 'INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq) VALUES (' ||
             quote([table]) || ', ' ||
             quote(pk) || ', ' ||
             quote(cid) || ', ' ||
-            quote(val) || ', ' ||
+            CASE typeof(val)
+                WHEN 'text' THEN 'CAST(X''' || hex(val) || ''' AS TEXT)'
+                WHEN 'null' THEN 'NULL'
+                ELSE quote(val)
+            END || ', ' ||
             col_version || ', ' ||
             db_version || ', ' ||
             quote(site_id) || ', ' ||
             cl || ', ' ||
             seq || ');'
         FROM crsql_changes
-        WHERE site_id IS NOT $tgt_site;
+        WHERE site_id IS NOT \$tgt_site;
     " > "$changes_file"
     
     # Apply changes to target
@@ -182,7 +193,7 @@ CHANGES=$(run_rust "$DB_RUST_10" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -241,7 +252,7 @@ CHANGES=$(run_rust "$DB_RUST_11" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -303,7 +314,7 @@ CHANGES=$(run_rust "$DB_RUST_12" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -371,7 +382,7 @@ CHANGES=$(run_rust "$DB_RUST_13" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -441,7 +452,7 @@ CHANGES=$(run_rust "$DB_RUST_14" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -505,7 +516,7 @@ CHANGES=$(run_rust "$DB_RUST_20" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -568,12 +579,14 @@ RUST_HEX=$(run_rust "$DB_RUST_21" "SELECT hex(value) FROM t WHERE id=1;")
 RUST_LEN=$(run_rust "$DB_RUST_21" "SELECT length(value) FROM t WHERE id=1;")
 
 # Sync Rust -> Zig
+# NOTE: This test specifically requires the QUOTE_VAL expression to preserve
+# embedded NUL bytes. SQLite's quote() truncates TEXT at NUL bytes.
 CHANGES=$(run_rust "$DB_RUST_21" "
     SELECT 'INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq) VALUES (' ||
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
@@ -633,7 +646,7 @@ CHANGES=$(run_zig "$DB_ZIG_BI" "
         quote([table]) || ', ' ||
         quote(pk) || ', ' ||
         quote(cid) || ', ' ||
-        quote(val) || ', ' ||
+        $QUOTE_VAL || ', ' ||
         col_version || ', ' ||
         db_version || ', ' ||
         quote(site_id) || ', ' ||
