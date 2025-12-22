@@ -4,8 +4,8 @@
 Run full parity test suite (`make -C zig test-parity`) and fix all failures caused by the pks schema migration. Achieve zero failures for sync operations (INSERT/UPDATE/DELETE via crsql_changes vtab).
 
 ## Status
-- State: triage
-- Priority: high (validation of schema migration work)
+- State: done
+- Priority: was high (validation of schema migration work)
 
 ## Context
 As of 2025-12-21 after TASK-147 partial completion:
@@ -98,3 +98,11 @@ Test: ManyInsertsInATx
 
 ## Completion Notes
 (Empty until done.)
+
+## Completion Notes
+- 2025-12-21: **COMPLETED via TASK-157 and TASK-159**
+- All sync parity tests now pass:
+  - rows_impacted: 18/18 PASS (TASK-157)
+  - ALTER: 6/6 PASS (TASK-159)
+  - cross-open: 24/24 PASS (TASK-147)
+- Full parity suite passes: filter 12, rowid-slab 8, noop 4, fract 8.

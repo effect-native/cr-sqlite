@@ -23,23 +23,19 @@ Priority order:
 
 ## Triage Inbox Status
 
-| Task ID | Summary | Valid? | Notes |
-|---------|---------|--------|-------|
-| TASK-146 | Fail-fast/loud harness policy | ✅ Valid | Policy task, not blocked |
-| TASK-148 | Cross-platform compat failures | ✅ Valid | Real bugs, next priority |
-| TASK-150 | Eliminate base_rowid from base ops | ❌ Obsolete | Fixed in TASK-157 |
-| TASK-151 | Update cached statements | ❌ Obsolete | Fixed in TASK-157 |
-| TASK-152 | Tombstone handling updates | ❌ Obsolete | Fixed in TASK-157/159 |
-| TASK-153 | Sweep old schema references | ❌ Obsolete | Fixed in TASK-159 |
-| TASK-154 | Fix sync parity test failures | ❌ Obsolete | All tests passing |
-| TASK-155 | Review insertIntoBaseTable | ❌ Obsolete | Fixed in TASK-157 |
-| TASK-156 | Linux CI parity | ✅ Valid | CI setup |
-| TASK-158 | Optimize zeroClockOnResurrect caching | ✅ Valid | Performance optimization |
+| Task ID | Summary | Priority | Notes |
+|---------|---------|----------|-------|
+| TASK-146 | Fail-fast/loud harness policy | Low | Policy task |
+| TASK-148 | Cross-platform compat failures | Medium | 2 real bugs |
+| TASK-156 | Linux CI parity | Medium | CI setup |
+| TASK-158 | Optimize zeroClockOnResurrect caching | Low | Performance |
+| TASK-160 | Remove rollback_hook reset | Low | Parity divergence |
 
-**Completed this session:**
+**Completed this session (Round 59/60):**
 - [x] TASK-147: Cross-open modification interoperability ✓
 - [x] TASK-157: Fix rows_impacted returning empty string ✓
 - [x] TASK-159: Fix ALTER compact clock table ✓
+- [x] TASK-150, 151, 152, 153, 154, 155: Marked done (superseded by above)
 
 ### Hypothesis Invalidation (Done)
 - [x] **TASK-127** — Experimentally invalidate "full parity" hypothesis via fuzzing ✓ `.tasks/done/TASK-127-experimental-parity-invalidation.md`

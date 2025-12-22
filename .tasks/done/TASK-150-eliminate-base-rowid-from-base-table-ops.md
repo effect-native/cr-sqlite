@@ -4,8 +4,8 @@
 Refactor all merge_insert.zig functions that operate on the base table to use PK column values from the pks table instead of relying on a stored `base_rowid` column (which no longer exists in the new schema).
 
 ## Status
-- State: triage
-- Priority: high (blocks sync UPDATE/DELETE operations)
+- State: done (superseded)
+- Priority: was high (blocks sync UPDATE/DELETE operations)
 
 ## Context
 Multiple functions in merge_insert.zig follow this pattern:
@@ -82,4 +82,7 @@ Affected functions discovered in Round 49 (TASK-119) and Round 58:
 - 2025-12-21: Created from TASK-147 work. Root cause identified: base_rowid column no longer exists, need to query PK values from pks and use in WHERE clauses.
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-21: **SUPERSEDED by TASK-157**
+- The work described in this task was completed as part of TASK-157 (rows_impacted fix).
+- All base table operations now use pk directly as rowid (simpler approach than originally planned).
+- Tests pass: rows_impacted 18/18, cross-open 24/24, ALTER 6/6.

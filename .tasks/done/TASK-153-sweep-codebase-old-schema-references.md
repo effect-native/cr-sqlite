@@ -4,7 +4,7 @@
 Systematically search and eliminate all remaining references to the old pks schema (`base_rowid` column, `pks BLOB` column) throughout the Zig codebase.
 
 ## Status
-- State: triage
+- State: done (superseded)
 - Priority: medium (cleanup after main refactoring)
 
 ## Context
@@ -72,3 +72,10 @@ Potential places with residual references:
 
 ## Completion Notes
 (Empty until done.)
+
+## Completion Notes
+- 2025-12-21: **SUPERSEDED by TASK-159**
+- Old schema references were cleaned up as part of TASK-159 (ALTER fix).
+- Duplicate trigger code was removed from schema_alter.zig.
+- Column names fixed: pk -> key, pk -> __crsql_key where appropriate.
+- Tests pass: rows_impacted 18/18, cross-open 24/24, ALTER 6/6.

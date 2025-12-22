@@ -4,7 +4,7 @@
 Verify that `insertIntoBaseTable()` in merge_insert.zig works correctly with the new pks schema, or identify and fix any issues with base table row insertion during sync.
 
 ## Status
-- State: triage
+- State: done (superseded)
 - Priority: high (part of sync INSERT path)
 
 ## Context
@@ -76,3 +76,9 @@ Potential issues:
 
 ## Completion Notes
 (Empty until done.)
+
+## Completion Notes
+- 2025-12-21: **SUPERSEDED by TASK-157**
+- insertIntoBaseTable was reviewed and fixed as part of TASK-157.
+- The function now correctly uses the new pks schema.
+- Tests pass: rows_impacted 18/18, cross-open 24/24, ALTER 6/6.

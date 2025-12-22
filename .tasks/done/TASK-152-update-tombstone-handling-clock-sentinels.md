@@ -4,8 +4,8 @@
 Remove `base_rowid = NULL` tombstone logic from merge_insert.zig and update to use clock table sentinel markers for deletion tracking, matching Rust/C implementation.
 
 ## Status
-- State: triage
-- Priority: medium (correctness for DELETE sync)
+- State: done (superseded)
+- Priority: was medium (correctness for DELETE sync)
 
 ## Context
 OLD TOMBSTONE MECHANISM (Zig with base_rowid):
@@ -89,3 +89,9 @@ Current code locations with old tombstone logic:
 
 ## Completion Notes
 (Empty until done.)
+
+## Completion Notes
+- 2025-12-21: **SUPERSEDED by TASK-157/159**
+- Tombstone handling was fixed as part of TASK-157 and TASK-159.
+- The code now uses clock table sentinels correctly.
+- Tests pass: rows_impacted 18/18, cross-open 24/24, ALTER 6/6.

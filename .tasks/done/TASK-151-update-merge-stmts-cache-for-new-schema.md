@@ -4,8 +4,8 @@
 Refactor the `TableMergeStmts` statement cache and all `*Cached()` function variants to work with the new pks schema (no base_rowid, no pks blob, PK columns stored directly).
 
 ## Status
-- State: triage
-- Priority: medium (performance optimization; uncached variants work first)
+- State: done (superseded)
+- Priority: was medium (performance optimization)
 
 ## Context
 `TableMergeStmts` provides per-table statement caching to avoid thousands of prepare/finalize cycles during sync. For a 1000-change sync, this reduces ~4000+ prepares to ~4 per table (significant perf win).
@@ -66,3 +66,9 @@ Problem: These SQL buffers and statements are built once per table and expect ol
 
 ## Completion Notes
 (Empty until done.)
+
+## Completion Notes
+- 2025-12-21: **SUPERSEDED by TASK-157**
+- The cached statement fixes were completed as part of TASK-157.
+- SQL buffers are now properly initialized before getOrPrepare calls.
+- Tests pass: rows_impacted 18/18, cross-open 24/24, ALTER 6/6.
