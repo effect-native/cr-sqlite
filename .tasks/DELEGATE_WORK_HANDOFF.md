@@ -68,6 +68,142 @@ Artifacts:
 
 ---
 
+## Round 2025-12-21 (60) — Fix ALTER "failed to compact clock table" error (1 task)
+
+**Tasks executed**
+- `.tasks/done/TASK-159-fix-alter-compact-clock-table-failure.md`
+
+**Commits**
+- (pending commit — combined with Round 59)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-alter.sh
+bash zig/harness/test-rows-impacted-parity.sh
+bash zig/harness/test-cross-open-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-159: ALTER tests (6/6 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║                           TEST SUMMARY                               ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:  6                                                          ║
+║  FAILED:  0                                                          ║
+║  SKIPPED: 0                                                          ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+✓ All implemented tests PASSED
+```
+
+**Root cause**: Schema mismatch between `schema_alter.zig` and `as_crr.zig`:
+1. `deleteOrphanedPkLookasides` used `pk` but pks table has `__crsql_key`
+2. Duplicate trigger functions in schema_alter.zig used old schema (`pk`, `pks` columns)
+3. Fixed by making as_crr trigger functions public and reusing them
+
+**Files modified:**
+- `zig/src/as_crr.zig` — Made 4 functions public (`dropTriggers`, `createInsertTrigger`, `createUpdateTrigger`, `createDeleteTrigger`)
+- `zig/src/schema_alter.zig` — Removed duplicate trigger code, fixed `pk` → `__crsql_key`, use as_crr functions
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-alter.sh` — verify 6/6 pass
+4. `bash zig/harness/test-rows-impacted-parity.sh` — verify 18/18 pass
+5. `bash zig/harness/test-cross-open-parity.sh` — verify 24/24 pass
+
+**Known gaps / unverified claims**
+- Full parity suite not run this round (should be run before commit)
+- CI integration not verified (local runs only)
+
+---
+
+## Round 2025-12-21 (59) — Fix rows_impacted returning empty string (1 task)
+
+**Tasks executed**
+- `.tasks/done/TASK-157-rows-impacted-returns-empty.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-rows-impacted-parity.sh
+bash zig/harness/test-cross-open-parity.sh
+make -C zig test-parity
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-157: rows_impacted parity (18/18 pass)</summary>
+
+```text
+rows_impacted Parity Test Summary
+=============================================================================
+  PASSED:      18
+  FAILED:      0
+  DIVERGENCES: 0 (critical - will break sync client batching)
+=============================================================================
+
+All rows_impacted parity tests PASSED
+```
+
+**Root cause**: Multiple schema mismatches and missing SQL buffer initialization in cached functions:
+1. SQL buffers not formatted before `getOrPrepare` calls
+2. Wrong column names (`__crsql_key` vs `key` for clock table)
+3. Old schema assumptions (`base_rowid` column doesn't exist in new pks schema)
+4. Missing fallback logic in `getLocalClCached`
+
+**Files modified:**
+- `zig/src/merge_insert.zig` — Fixed cached function SQL initialization, column names, schema assumptions
+- `zig/src/changes_vtab.zig` — Updated call sites for `setWinnerClock`, removed cached `findPkFromBlobCached` call
+</details>
+
+<details>
+<summary>Cross-open parity (24/24 pass)</summary>
+
+```text
+Cross-Open Parity Test Summary
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Results:
+  PASSED:      24
+  FAILED:      0
+  KNOWN_FAIL:  0 (cross-implementation modification not yet supported)
+  SKIPPED:     0
+
+All cross-open parity tests PASSED
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-rows-impacted-parity.sh` — verify 18/18 pass
+4. `bash zig/harness/test-cross-open-parity.sh` — verify 24/24 pass
+
+**Known gaps / unverified claims**
+- ALTER tests: 4/6 fail with "failed to compact clock table" — tracked in `.tasks/triage/TASK-159-fix-alter-compact-clock-table-failure.md`
+- CI integration not verified this round (local runs only)
+
+---
+
 ## Round 2025-12-20 (57) — Fix NUL byte truncation and config default parity (2 tasks)
 
 **Tasks executed**

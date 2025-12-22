@@ -114,7 +114,7 @@ pub fn getLocalCl(
     // Get sentinel col_version (which stores the row's CL)
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "SELECT col_version FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = '-1'",
+        "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = '-1'",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -132,7 +132,7 @@ pub fn getLocalCl(
 
     // No sentinel - check if row exists at all
     var exists_buf: [512]u8 = undefined;
-    const exists_sql = std.fmt.bufPrintZ(&exists_buf, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
+    const exists_sql = std.fmt.bufPrintZ(&exists_buf, "SELECT 1 FROM \"{s}__crsql_clock\" WHERE key = ? LIMIT 1", .{table_name}) catch return MergeError.BufferOverflow;
 
     var exists_stmt: ?*api.sqlite3_stmt = null;
     if (api.prepare_v2(db, exists_sql, -1, &exists_stmt, null) != api.SQLITE_OK) {
@@ -156,7 +156,7 @@ pub fn getLocalClCached(
 ) MergeError!i64 {
     // Format SQL on first use
     if (stmts.local_cl_stmt == null) {
-        _ = std.fmt.bufPrintZ(&stmts.sql_local_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = '-1'", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+        _ = std.fmt.bufPrintZ(&stmts.sql_local_cl, "SELECT col_version FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = '-1'", .{stmts.table_name}) catch return MergeError.BufferOverflow;
     }
     const stmt = try stmts.getOrPrepare(&stmts.local_cl_stmt, @ptrCast(&stmts.sql_local_cl));
 
@@ -166,7 +166,10 @@ pub fn getLocalClCached(
         return api.column_int64(stmt, 0);
     }
 
-    return 0; // No entry = causal length 0
+    // No sentinel - fall back to uncached version which checks if row exists
+    // This is important because locally created rows may not have a sentinel
+    // but should still have CL=1
+    return getLocalCl(stmts.db, stmts.table_name, pk);
 }
 
 /// Get the local col_version for a (pk, col) pair from the clock table.
@@ -180,7 +183,7 @@ pub fn getLocalColVersion(
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "SELECT MAX(col_version) FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name = ? AND site_id IS NULL",
+        "SELECT MAX(col_version) FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ? AND site_id = 0",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -209,6 +212,10 @@ pub fn getLocalColVersionCached(
     pk: i64,
     col_name: []const u8,
 ) MergeError!i64 {
+    // Format SQL on first use
+    if (stmts.local_col_version_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_local_col_version, "SELECT MAX(col_version) FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ? AND site_id = 0", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.local_col_version_stmt, @ptrCast(&stmts.sql_local_col_version));
 
     _ = api.bind_int64(stmt, 1, pk);
@@ -225,7 +232,9 @@ pub fn getLocalColVersionCached(
 }
 
 /// Set winner clock entry for a (pk, col, col_version, db_version) in the clock table.
-/// Inserts or updates the entry with the given causal length and site ID.
+/// Inserts or updates the entry with the given col_version and site ID.
+/// site_id can be null for local changes (will be stored as 0).
+/// Note: col_version parameter is used for the col_version column, and seq is always 0.
 pub fn setWinnerClock(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -233,17 +242,23 @@ pub fn setWinnerClock(
     col_name: []const u8,
     col_version: i64,
     db_version: i64,
-    site_id: [*]const u8,
+    site_id: ?[*]const u8,
     site_id_len: usize,
-    cl: i64,
+    seq: i64,
 ) MergeError!void {
+    _ = site_id_len; // site_id is stored as ordinal (INTEGER), not blob
+    _ = site_id; // site_id is stored as ordinal (INTEGER), not blob
     var buf: [1024]u8 = undefined;
+    // Note: site_id in clock table is INTEGER (ordinal), not BLOB
+    // For local changes (site_id NULL), we use 0 as the ordinal
     const sql = std.fmt.bufPrintZ(
         &buf,
-        \\INSERT INTO "{s}__crsql_clock" (__crsql_key, col_name, col_version, db_version, site_id, cl, seq)
-        \\VALUES (?, ?, ?, ?, ?, ?, 0)
-        \\ON CONFLICT(__crsql_key, col_name, col_version, db_version, site_id)
-        \\DO UPDATE SET cl = excluded.cl, seq = 0
+        \\INSERT INTO "{s}__crsql_clock" (key, col_name, col_version, db_version, site_id, seq)
+        \\VALUES (?, ?, ?, ?, 0, ?)
+        \\ON CONFLICT(key, col_name) DO UPDATE SET
+        \\  col_version = excluded.col_version,
+        \\  db_version = excluded.db_version,
+        \\  seq = excluded.seq
     ,
         .{table_name},
     ) catch return MergeError.BufferOverflow;
@@ -258,8 +273,7 @@ pub fn setWinnerClock(
     _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
     _ = api.bind_int64(stmt, 3, col_version);
     _ = api.bind_int64(stmt, 4, db_version);
-    _ = api.bind_blob(stmt, 5, site_id, @intCast(site_id_len), api.getTransientDestructor());
-    _ = api.bind_int64(stmt, 6, cl);
+    _ = api.bind_int64(stmt, 5, seq);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -268,24 +282,40 @@ pub fn setWinnerClock(
 }
 
 /// Cached variant of setWinnerClock using TableMergeStmts.
+/// site_id can be null for local changes (will be stored as 0).
 pub fn setWinnerClockCached(
     stmts: *TableMergeStmts,
     pk: i64,
     col_name: []const u8,
     col_version: i64,
     db_version: i64,
-    site_id: [*]const u8,
+    site_id: ?[*]const u8,
     site_id_len: usize,
-    cl: i64,
+    seq: i64,
 ) MergeError!void {
+    _ = site_id_len; // site_id is stored as ordinal (INTEGER), not blob
+    _ = site_id; // site_id is stored as ordinal (INTEGER), not blob
+    // Format SQL on first use
+    if (stmts.set_winner_clock_stmt == null) {
+        _ = std.fmt.bufPrintZ(
+            &stmts.sql_set_winner_clock,
+            \\INSERT INTO "{s}__crsql_clock" (key, col_name, col_version, db_version, site_id, seq)
+            \\VALUES (?, ?, ?, ?, 0, ?)
+            \\ON CONFLICT(key, col_name) DO UPDATE SET
+            \\  col_version = excluded.col_version,
+            \\  db_version = excluded.db_version,
+            \\  seq = excluded.seq
+        ,
+            .{stmts.table_name},
+        ) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.set_winner_clock_stmt, @ptrCast(&stmts.sql_set_winner_clock));
 
     _ = api.bind_int64(stmt, 1, pk);
     _ = api.bind_text(stmt, 2, col_name.ptr, @intCast(col_name.len), api.getTransientDestructor());
     _ = api.bind_int64(stmt, 3, col_version);
     _ = api.bind_int64(stmt, 4, db_version);
-    _ = api.bind_blob(stmt, 5, site_id, @intCast(site_id_len), api.getTransientDestructor());
-    _ = api.bind_int64(stmt, 6, cl);
+    _ = api.bind_int64(stmt, 5, seq);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -384,11 +414,12 @@ pub fn findPkFromBlob(
         pk_written += 1;
     }
 
-    const sql = std.mem.sliceTo(&sql_buf, 0);
+    const sql_len = fbs.pos;
+    const sql = sql_buf[0..sql_len];
 
     // Prepare statement
     var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql.ptr, -1, &stmt, null) != api.SQLITE_OK) {
+    if (api.prepare_v2(db, sql.ptr, @intCast(sql_len), &stmt, null) != api.SQLITE_OK) {
         return MergeError.SqliteError;
     }
     defer _ = api.finalize(stmt);
@@ -444,16 +475,13 @@ pub fn getBaseRowidFromPk(
     return MergeError.NoRows;
 }
 
-/// Check if a row exists in the base table by __crsql_key (pk).
-/// First looks up base_rowid from pks table, then checks if row exists in base table.
+/// Check if a row exists in the base table by __crsql_key (which equals base rowid).
+/// In the new schema, __crsql_key from pks table equals the base table's rowid.
 pub fn rowExistsInBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
     pk: i64,
 ) MergeError!bool {
-    const base_rowid_opt = getBaseRowidFromPk(db, table_name, pk) catch return false;
-    const base_rowid = base_rowid_opt orelse return false; // Tombstoned = no row
-
     var buf: [256]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return false;
 
@@ -463,23 +491,20 @@ pub fn rowExistsInBaseTable(
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, base_rowid);
+    // In the new schema, __crsql_key equals base table rowid
+    _ = api.bind_int64(stmt, 1, pk);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
 
-/// Delete row from base table by __crsql_key (pk).
-/// First looks up base_rowid from pks table, then deletes from base table.
-/// Also marks the pks entry as tombstoned (sets base_rowid to NULL).
+/// Delete row from base table by __crsql_key (which equals base rowid).
+/// In the new schema, __crsql_key from pks table equals the base table's rowid.
 pub fn deleteFromBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
     pk: i64,
 ) MergeError!void {
-    const base_rowid_opt = getBaseRowidFromPk(db, table_name, pk) catch return;
-    const base_rowid = base_rowid_opt orelse return; // Already tombstoned
-
-    // Delete from base table
+    // Delete from base table - __crsql_key equals base table rowid
     var buf: [256]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -489,29 +514,14 @@ pub fn deleteFromBaseTable(
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, base_rowid);
+    _ = api.bind_int64(stmt, 1, pk);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
-
-    // Mark pks entry as tombstoned
-    var tombstone_buf: [512]u8 = undefined;
-    const tombstone_sql = std.fmt.bufPrintZ(&tombstone_buf, "UPDATE \"{s}__crsql_pks\" SET base_rowid = NULL WHERE __crsql_key = ?", .{table_name}) catch return MergeError.BufferOverflow;
-
-    var tombstone_stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, tombstone_sql, -1, &tombstone_stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
-    }
-    defer _ = api.finalize(tombstone_stmt);
-
-    _ = api.bind_int64(tombstone_stmt, 1, pk);
-
-    const tombstone_rc = api.step(tombstone_stmt);
-    if (tombstone_rc != api.SQLITE_DONE) {
-        return MergeError.SqliteError;
-    }
+    // Note: In the new schema, tombstoning is tracked via the clock table sentinel,
+    // not via a base_rowid column in the pks table.
 }
 
 /// Drop all clock entries for a row except the sentinel (col_name = '-1') entry.
@@ -524,7 +534,7 @@ pub fn dropNonSentinelClocks(
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "DELETE FROM \"{s}__crsql_clock\" WHERE __crsql_key = ? AND col_name != '-1'",
+        "DELETE FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name != '-1'",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -552,7 +562,7 @@ pub fn zeroClockOnResurrect(
     var buf: [512]u8 = undefined;
     const sql = std.fmt.bufPrintZ(
         &buf,
-        "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE __crsql_key = ? AND col_name != '-1'",
+        "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE key = ? AND col_name != '-1'",
         .{table_name},
     ) catch return MergeError.BufferOverflow;
 
@@ -654,7 +664,8 @@ pub fn insertRowForResurrection(
 }
 
 /// Update a column value in the base table for an existing row.
-/// Uses the pks table key (pk) to find the actual base table rowid.
+/// Updates a column in the base table using __crsql_key (which equals base rowid).
+/// In the new schema, __crsql_key from pks table equals the base table's rowid.
 pub fn updateBaseTableColumn(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -662,12 +673,9 @@ pub fn updateBaseTableColumn(
     col_name: []const u8,
     value: ?*api.sqlite3_value,
 ) MergeError!void {
-    // First, get base_rowid from pks table
-    const base_rowid_opt = try getBaseRowidFromPk(db, table_name, pk);
-    const base_rowid = base_rowid_opt orelse return; // Tombstoned entry, nothing to update
-
     var buf: [1024]u8 = undefined;
 
+    // In the new schema, __crsql_key equals base table rowid
     const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
@@ -703,7 +711,8 @@ pub fn updateBaseTableColumn(
     } else {
         _ = api.bind_null(stmt, 1);
     }
-    _ = api.bind_int64(stmt, 2, base_rowid);
+    // In the new schema, __crsql_key equals base table rowid
+    _ = api.bind_int64(stmt, 2, pk);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -884,11 +893,12 @@ pub fn insertIntoPksTableAndGetPk(
 
     writer.writeAll(")") catch return MergeError.BufferOverflow;
 
-    const sql = std.mem.sliceTo(&sql_buf, 0);
+    const sql_len = fbs.pos;
+    const sql = sql_buf[0..sql_len];
 
     // Prepare statement
     var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql.ptr, -1, &stmt, null) != api.SQLITE_OK) {
+    if (api.prepare_v2(db, sql.ptr, @intCast(sql_len), &stmt, null) != api.SQLITE_OK) {
         return MergeError.SqliteError;
     }
     defer _ = api.finalize(stmt);
@@ -998,6 +1008,10 @@ pub fn findPkFromBlobCached(
     pk_blob: [*]const u8,
     pk_blob_len: usize,
 ) MergeError!i64 {
+    // Format SQL on first use
+    if (stmts.find_pk_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_find_pk, "SELECT __crsql_key FROM \"{s}__crsql_pks\" WHERE pks = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.find_pk_stmt, @ptrCast(&stmts.sql_find_pk));
 
     _ = api.bind_blob(stmt, 1, pk_blob, @intCast(pk_blob_len), api.getTransientDestructor());
@@ -1010,63 +1024,53 @@ pub fn findPkFromBlobCached(
 }
 
 /// Check if a row exists in the base table by pks table key using cached statement.
-/// First looks up base_rowid from pks table, then checks base table.
+/// Check if row exists in base table (cached variant).
+/// In the new schema, __crsql_key from pks table equals the base table's rowid.
 ///
 /// This is the cached variant of `rowExistsInBaseTable` for use with `TableMergeStmts`.
 pub fn rowExistsInBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!bool {
-    // First, get base_rowid from pks table (not cached - uses uncached lookup)
-    const base_rowid_opt = getBaseRowidFromPk(stmts.db, stmts.table_name, pk) catch return false;
-    const base_rowid = base_rowid_opt orelse return false; // Tombstoned entry = no row exists
-
+    // Format SQL on first use
+    if (stmts.row_exists_base_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_row_exists_base, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.row_exists_base_stmt, @ptrCast(&stmts.sql_row_exists_base));
 
-    _ = api.bind_int64(stmt, 1, base_rowid);
+    // In the new schema, __crsql_key equals base table rowid
+    _ = api.bind_int64(stmt, 1, pk);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
 
-/// Delete row from base table by pks table key using cached statement.
-/// First looks up base_rowid from pks table, then deletes from base table.
-/// Also marks the pks entry as tombstoned (sets base_rowid to NULL).
+/// Delete row from base table by __crsql_key (cached variant).
+/// In the new schema, __crsql_key from pks table equals the base table's rowid.
 ///
 /// This is the cached variant of `deleteFromBaseTable` for use with `TableMergeStmts`.
 pub fn deleteFromBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
-    // First, get base_rowid from pks table (not cached - uses uncached lookup)
-    const base_rowid_opt = getBaseRowidFromPk(stmts.db, stmts.table_name, pk) catch return;
-    const base_rowid = base_rowid_opt orelse return; // Already tombstoned, nothing to delete
-
-    // Delete from base table
+    // Format SQL on first use
+    if (stmts.delete_base_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_delete_base, "DELETE FROM \"{s}\" WHERE rowid = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
+    // Delete from base table - __crsql_key equals base table rowid
     const stmt = try stmts.getOrPrepare(&stmts.delete_base_stmt, @ptrCast(&stmts.sql_delete_base));
 
-    _ = api.bind_int64(stmt, 1, base_rowid);
+    _ = api.bind_int64(stmt, 1, pk);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
-
-    // Mark pks entry as tombstoned (not cached - infrequent operation)
-    var buf: [512]u8 = undefined;
-    const tombstone_sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}__crsql_pks\" SET base_rowid = NULL WHERE __crsql_key = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
-
-    var tombstone_stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(stmts.db, tombstone_sql, -1, &tombstone_stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
-    }
-    defer _ = api.finalize(tombstone_stmt);
-
-    _ = api.bind_int64(tombstone_stmt, 1, pk);
-
-    const tombstone_rc = api.step(tombstone_stmt);
-    if (tombstone_rc != api.SQLITE_DONE) {
-        return MergeError.SqliteError;
-    }
+    // Note: In the new schema, tombstoning is tracked via the clock table sentinel,
+    // not via a base_rowid column in the pks table.
 }
 
 /// Drop all clock entries except sentinel (-1) using cached statement.
 ///
 /// This is the cached variant of `dropNonSentinelClocks` for use with `TableMergeStmts`.
 pub fn dropNonSentinelClocksCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+    // Format SQL on first use
+    if (stmts.drop_non_sentinel_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_drop_non_sentinel, "DELETE FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name != '-1'", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.drop_non_sentinel_stmt, @ptrCast(&stmts.sql_drop_non_sentinel));
 
     _ = api.bind_int64(stmt, 1, pk);
@@ -1086,6 +1090,10 @@ pub fn insertIntoPksTableCached(
     pks_blob: [*]const u8,
     pks_len: usize,
 ) MergeError!i64 {
+    // Format SQL on first use
+    if (stmts.insert_pks_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_insert_pks, "INSERT OR IGNORE INTO \"{s}__crsql_pks\" (base_rowid, pks) VALUES (?, ?)", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
     const stmt = try stmts.getOrPrepare(&stmts.insert_pks_stmt, @ptrCast(&stmts.sql_insert_pks));
 
     _ = api.bind_int64(stmt, 1, base_rowid);

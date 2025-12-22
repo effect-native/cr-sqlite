@@ -4,8 +4,8 @@
 Fix `crsql_rows_impacted()` to return proper integer values. Currently returns empty string, breaking 9 rows_impacted parity tests.
 
 ## Status
-- State: triage
-- Priority: high (blocking parity tests)
+- State: done
+- Priority: high (was blocking parity tests)
 
 ## Context
 Discovered during build fix session (2025-12-21). After fixing compilation errors from TASK-149, the rows_impacted tests fail with:
@@ -67,4 +67,12 @@ Note: The "got:" values are empty strings, not integers.
 - 2025-12-21: Created from build fix session. Observed empty return values.
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-21: Fixed in Round 59.
+- Root cause: Multiple schema mismatches and missing SQL buffer initialization in cached functions:
+  1. SQL buffers not formatted before `getOrPrepare` calls
+  2. Wrong column names (`__crsql_key` vs `key` for clock table)
+  3. Old schema assumptions (`base_rowid` column doesn't exist)
+  4. Missing fallback logic in `getLocalClCached`
+- Files modified: `zig/src/merge_insert.zig`, `zig/src/changes_vtab.zig`
+- Test results: 18/18 rows_impacted tests pass, 24/24 cross-open tests pass
+- Remaining issue: 4 alter tests fail with "failed to compact clock table" — separate task needed

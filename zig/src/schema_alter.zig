@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const api = @import("ffi/api.zig");
+const as_crr = @import("as_crr.zig");
 
 /// SQL buffer size for DDL generation
 const SQL_BUF_SIZE = 8192;
@@ -68,7 +69,7 @@ fn crsqlBeginAlterFunc(
     }
 
     // Drop all triggers for the table
-    dropTriggers(db, table_name_ptr) catch {
+    as_crr.dropTriggers(db, table_name_ptr) catch {
         api.result_error(pCtx, "crsql_begin_alter: failed to drop triggers", -1);
         _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
         return;
@@ -123,28 +124,28 @@ fn crsqlCommitAlterFunc(
 
     // Step 2: Recreate triggers with updated schema
     // First, ensure triggers are dropped (they should be from begin_alter, but be safe)
-    dropTriggers(db, table_name_ptr) catch {
+    as_crr.dropTriggers(db, table_name_ptr) catch {
         api.result_error(pCtx, "crsql_commit_alter: failed to drop triggers", -1);
         _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
         return;
     };
 
     // Create INSERT trigger
-    createInsertTrigger(db, table_name_ptr) catch {
+    as_crr.createInsertTrigger(db, table_name_ptr) catch {
         api.result_error(pCtx, "crsql_commit_alter: failed to create insert trigger", -1);
         _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
         return;
     };
 
     // Create UPDATE trigger
-    createUpdateTrigger(db, table_name_ptr) catch {
+    as_crr.createUpdateTrigger(db, table_name_ptr) catch {
         api.result_error(pCtx, "crsql_commit_alter: failed to create update trigger", -1);
         _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
         return;
     };
 
     // Create DELETE trigger
-    createDeleteTrigger(db, table_name_ptr) catch {
+    as_crr.createDeleteTrigger(db, table_name_ptr) catch {
         api.result_error(pCtx, "crsql_commit_alter: failed to create delete trigger", -1);
         _ = api.exec(db, "ROLLBACK TO alter_crr", null, null, null);
         return;
@@ -164,23 +165,6 @@ fn crsqlCommitAlterFunc(
 
     // Return NULL on success
     api.result_null(pCtx);
-}
-
-/// Drop all CRR triggers for a table
-fn dropTriggers(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-
-    // Drop INSERT trigger
-    var sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_itrig\"", .{table_name}) catch return error.BufferOverflow;
-    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
-
-    // Drop UPDATE trigger
-    sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_utrig\"", .{table_name}) catch return error.BufferOverflow;
-    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
-
-    // Drop DELETE trigger
-    sql = std.fmt.bufPrintZ(&buf, "DROP TRIGGER IF EXISTS \"{s}__crsql_dtrig\"", .{table_name}) catch return error.BufferOverflow;
-    if (api.exec(db, sql, null, null, null) != api.SQLITE_OK) return error.SqliteError;
 }
 
 /// Detect if primary key columns have changed between the table schema and the pks index.
@@ -404,8 +388,8 @@ fn deleteOrphanedPkLookasides(db: ?*api.sqlite3, table_name: [*:0]const u8) !voi
     var buf: [SQL_BUF_SIZE]u8 = undefined;
 
     const sql = std.fmt.bufPrintZ(&buf,
-        \\DELETE FROM "{s}__crsql_pks" WHERE pk NOT IN (
-        \\  SELECT key FROM "{s}__crsql_clock"
+        \\DELETE FROM "{s}__crsql_pks" WHERE __crsql_key NOT IN (
+        \\  SELECT "key" FROM "{s}__crsql_clock"
         \\)
     , .{ table_name, table_name }) catch return error.BufferOverflow;
 
@@ -537,211 +521,8 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
     return info;
 }
 
-/// Create the INSERT trigger that captures new rows.
-/// (Duplicated from as_crr.zig - could be refactored into shared module)
-fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    const info = try getTableInfo(db, table_name);
-    if (info.count == 0) {
-        return error.NoColumns;
-    }
-
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
-    // Trigger header with sync_bit gating
-    writer.print(
-        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_itrig"
-        \\AFTER INSERT ON "{s}"
-        \\WHEN crsql_internal_sync_bit() = 0
-        \\BEGIN
-        \\  INSERT OR REPLACE INTO "{s}__crsql_pks" ("pk", "pks")
-        \\  VALUES (NEW.rowid, crsql_pack_columns(
-    , .{ table_name, table_name, table_name }) catch return error.BufferOverflow;
-
-    // Build crsql_pack_columns arguments from PK columns in order
-    var pk_written: usize = 0;
-    var pk_order: usize = 1;
-    while (pk_written < info.pk_count) : (pk_order += 1) {
-        for (info.columns[0..info.count]) |col| {
-            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
-                if (pk_written > 0) {
-                    writer.writeAll(", ") catch return error.BufferOverflow;
-                }
-                writer.print("NEW.\"{s}\"", .{col.name[0..col.name_len]}) catch return error.BufferOverflow;
-                pk_written += 1;
-                break;
-            }
-        }
-    }
-
-    writer.writeAll("));\n") catch return error.BufferOverflow;
-
-    // Generate clock entry for each non-PK column
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            writer.print(
-                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-                \\  VALUES
-                \\    (NEW.rowid, '{s}', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-                \\
-            , .{ table_name, col.name[0..col.name_len] }) catch return error.BufferOverflow;
-        }
-    }
-
-    // Sentinel row for row creation tracking
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
-    writer.print(
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  VALUES
-        \\    (NEW.rowid, '-1', 1, crsql_next_db_version(), 0, crsql_increment_and_get_seq());
-        \\END;
-    , .{table_name}) catch return error.BufferOverflow;
-
-    const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
-    buf[sql_len] = 0;
-
-    const sql: [*:0]const u8 = @ptrCast(&buf);
-    const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
-}
-
-/// Create the UPDATE trigger that captures column changes.
-/// - Fires on ALL updates (including no-ops) to match Rust/C oracle behavior
-/// - Creates clock entries only for columns that actually changed
-/// - Always advances db_version (even on no-op updates) for sync protocol parity
-fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    const info = try getTableInfo(db, table_name);
-    if (info.count == 0) {
-        return error.NoColumns;
-    }
-
-    // Count non-PK columns
-    var non_pk_count: usize = 0;
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            non_pk_count += 1;
-        }
-    }
-
-    // If there are no non-PK columns, no UPDATE trigger needed
-    if (non_pk_count == 0) {
-        return;
-    }
-
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
-    // Trigger header with sync_bit gating
-    // This trigger fires on ALL updates (matching Rust/C oracle)
-    // The column change filtering happens in the INSERT statements below
-    // This ensures db_version advances even on no-op updates for sync protocol parity
-    writer.print(
-        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_utrig"
-        \\AFTER UPDATE ON "{s}"
-        \\FOR EACH ROW WHEN crsql_internal_sync_bit() = 0
-        \\BEGIN
-        \\
-    , .{ table_name, table_name }) catch return error.BufferOverflow;
-
-    // CRITICAL: Always advance db_version when trigger fires, even on no-op updates
-    // This matches Rust/C oracle behavior and is required for sync protocol parity
-    writer.writeAll("  SELECT crsql_next_db_version();\n") catch return error.BufferOverflow;
-
-    // Generate clock entry for each non-PK column (only when changed)
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
-    for (info.columns[0..info.count]) |col| {
-        if (col.pk_index == 0) {
-            writer.print(
-                \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-                \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-                \\  SELECT
-                \\    NEW.rowid,
-                \\    '{s}',
-                \\    COALESCE((SELECT col_version FROM "{s}__crsql_clock" WHERE key = NEW.rowid AND col_name = '{s}'), 0) + 1,
-                \\    crsql_next_db_version(),
-                \\    0,
-                \\    crsql_increment_and_get_seq()
-                \\  WHERE OLD."{s}" IS NOT NEW."{s}";
-                \\
-            , .{
-                table_name,
-                col.name[0..col.name_len],
-                table_name,
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-                col.name[0..col.name_len],
-            }) catch return error.BufferOverflow;
-        }
-    }
-
-    writer.writeAll("END;") catch return error.BufferOverflow;
-
-    const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
-    buf[sql_len] = 0;
-
-    const sql: [*:0]const u8 = @ptrCast(&buf);
-    const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
-}
-
-/// Create the DELETE trigger that marks rows as deleted.
-fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
-    var buf: [SQL_BUF_SIZE]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
-
-    // seq uses crsql_increment_and_get_seq() to get unique seq within transaction
-    writer.print(
-        \\CREATE TRIGGER IF NOT EXISTS "{s}__crsql_dtrig"
-        \\AFTER DELETE ON "{s}"
-        \\WHEN crsql_internal_sync_bit() = 0
-        \\BEGIN
-        \\  -- Mark row as deleted: insert sentinel with col_version=2, or increment existing
-        \\  INSERT OR REPLACE INTO "{s}__crsql_clock"
-        \\    ("key", "col_name", "col_version", "db_version", "site_id", "seq")
-        \\  SELECT
-        \\    OLD.rowid,
-        \\    '-1',
-        \\    COALESCE(
-        \\      (SELECT col_version + 1 FROM "{s}__crsql_clock" WHERE key = OLD.rowid AND col_name = '-1'),
-        \\      2
-        \\    ),
-        \\    crsql_next_db_version(),
-        \\    0,
-        \\    crsql_increment_and_get_seq();
-        \\  -- Drop all clock entries except the sentinel
-        \\  DELETE FROM "{s}__crsql_clock"
-        \\  WHERE key = OLD.rowid AND col_name IS NOT '-1';
-        \\END;
-    , .{ table_name, table_name, table_name, table_name, table_name }) catch return error.BufferOverflow;
-
-    const sql_len = fbs.pos;
-    if (sql_len >= SQL_BUF_SIZE) {
-        return error.BufferOverflow;
-    }
-    buf[sql_len] = 0;
-
-    const sql: [*:0]const u8 = @ptrCast(&buf);
-    const rc = api.exec(db, sql, null, null, null);
-    if (rc != api.SQLITE_OK) {
-        return error.SqliteError;
-    }
-}
+// NOTE: trigger creation functions (createInsertTrigger, createUpdateTrigger, createDeleteTrigger)
+// are now imported from as_crr.zig to avoid duplication and schema mismatches.
 
 /// Register the crsql_begin_alter and crsql_commit_alter functions with a database connection.
 pub fn register(db: ?*api.sqlite3) c_int {

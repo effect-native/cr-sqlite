@@ -1674,14 +1674,9 @@ fn changesUpdate(
     });
     const api_db = toApiDb(vtab_db);
 
-    // Use cached findPkFromBlob if available, fall back to uncached
-    const find_pk_result = blk: {
-        if (merge_stmts) |stmts| {
-            break :blk merge_insert.findPkFromBlobCached(stmts, pk_ptr, @intCast(pk_len));
-        } else {
-            break :blk merge_insert.findPkFromBlob(api_db, table_slice, pk_ptr, @intCast(pk_len));
-        }
-    };
+    // Always use uncached findPkFromBlob - the cached version uses old schema with pks blob,
+    // but new schema has individual PK columns. The uncached version handles the new schema.
+    const find_pk_result = merge_insert.findPkFromBlob(api_db, table_slice, pk_ptr, @intCast(pk_len));
 
     const pk_rowid = find_pk_result catch |err| {
         // If row doesn't exist locally, we need to INSERT it
@@ -1716,11 +1711,8 @@ fn changesUpdate(
                 };
 
                 // Insert sentinel clock entry using pks_pk
-                // site_id_blob is optional, unwrap or error
-                const site_id_ptr_sentinel: [*]const u8 = @ptrCast(site_id_blob orelse {
-                    log.debug("changesUpdate: site_id_blob is NULL for PK-only sentinel", .{});
-                    return vtab.SQLITE_ERROR;
-                });
+                // site_id_blob can be NULL for local changes
+                const site_id_ptr_sentinel: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
                 if (merge_stmts) |stmts| {
                     merge_insert.setWinnerClockCached(stmts, pks_pk, "-1", col_version, db_version, site_id_ptr_sentinel, @intCast(site_id_len), seq) catch {
                         log.debug("changesUpdate: setWinnerClockCached for PK-only sentinel failed", .{});
@@ -1758,10 +1750,8 @@ fn changesUpdate(
             };
 
             // Step 1c: Insert clock entry for the column using pks_pk (NOT base_rowid)
-            const site_id_ptr_insert: [*]const u8 = @ptrCast(site_id_blob orelse {
-                log.debug("changesUpdate: site_id_blob is NULL for new row", .{});
-                return vtab.SQLITE_ERROR;
-            });
+            // site_id_blob can be NULL for local changes
+            const site_id_ptr_insert: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
             if (merge_stmts) |stmts| {
                 merge_insert.setWinnerClockCached(stmts, pks_pk, cid_slice, col_version, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClockCached for new row failed", .{});
@@ -1846,10 +1836,8 @@ fn changesUpdate(
 
         // Update the sentinel clock with the tombstone marker
         // Use col_version from the incoming change (which carries the authoritative cl)
-        const site_id_ptr_tomb: [*]const u8 = @ptrCast(site_id_blob orelse {
-            log.debug("changesUpdate: site_id_blob is NULL for tombstone", .{});
-            return vtab.SQLITE_ERROR;
-        });
+        // site_id_blob can be NULL for local changes
+        const site_id_ptr_tomb: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
         if (merge_stmts) |stmts| {
             merge_insert.setWinnerClockCached(stmts, pk_rowid, "-1", col_version, db_version, site_id_ptr_tomb, @intCast(site_id_len), seq) catch {
                 log.debug("changesUpdate: setWinnerClockCached failed for tombstone sentinel", .{});
@@ -1927,13 +1915,15 @@ fn changesUpdate(
             }
 
             // Update the sentinel clock (use cached if available)
+            // site_id_blob can be NULL for local changes
+            const site_id_ptr_sentinel: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
             if (merge_stmts) |stmts| {
-                merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_sentinel, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClockCached for sentinel failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
             } else {
-                merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, @ptrCast(site_id_blob), @intCast(site_id_len), seq) catch {
+                merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_sentinel, @intCast(site_id_len), seq) catch {
                     log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
                     return vtab.SQLITE_ERROR;
                 };
@@ -1975,10 +1965,8 @@ fn changesUpdate(
         };
 
         // Update clock entry for the column (use cached if available)
-        const site_id_ptr_res: [*]const u8 = @ptrCast(site_id_blob orelse {
-            log.debug("changesUpdate: site_id_blob is NULL for resurrection", .{});
-            return vtab.SQLITE_ERROR;
-        });
+        // site_id_blob can be NULL for local changes
+        const site_id_ptr_res: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
         if (merge_stmts) |stmts| {
             merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
                 log.debug("changesUpdate: setWinnerClockCached for resurrection failed", .{});
@@ -2125,10 +2113,8 @@ fn changesUpdate(
     };
 
     // Update clock table (use cached if available)
-    const site_id_ptr: [*]const u8 = @ptrCast(site_id_blob orelse {
-        log.debug("changesUpdate: site_id_blob is NULL for update", .{});
-        return vtab.SQLITE_ERROR;
-    });
+    // site_id_blob can be NULL for local changes
+    const site_id_ptr: ?[*]const u8 = if (site_id_blob) |blob| @ptrCast(blob) else null;
     if (merge_stmts) |stmts| {
         merge_insert.setWinnerClockCached(stmts, pk_rowid, cid_slice, col_version, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
             log.debug("changesUpdate: setWinnerClockCached failed", .{});

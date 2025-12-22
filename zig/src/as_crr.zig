@@ -356,7 +356,7 @@ pub fn getTableInfo(db: ?*api.sqlite3, table_name: [*:0]const u8) !TableInfo {
 
 /// Create the INSERT trigger that captures new rows.
 /// Uses crsql_after_insert() helper function (Rust/C compatible).
-fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+pub fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const info = try getTableInfo(db, table_name);
     if (info.count == 0) return error.NoColumns;
 
@@ -397,7 +397,7 @@ fn createInsertTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
 /// Create the UPDATE trigger that captures column changes.
 /// Uses crsql_after_update() helper function (Rust/C compatible).
-fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+pub fn createUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const info = try getTableInfo(db, table_name);
     if (info.count == 0) return error.NoColumns;
 
@@ -492,7 +492,7 @@ fn createPkUpdateTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
 
 /// Create the DELETE trigger that captures row deletion.
 /// Uses crsql_after_delete() helper function (Rust/C compatible).
-fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+pub fn createDeleteTrigger(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     const info = try getTableInfo(db, table_name);
 
     var buf: [SQL_BUF_SIZE]u8 = undefined;
@@ -873,7 +873,7 @@ fn crsqlAsTableFunc(
     api.result_null(pCtx);
 }
 
-fn dropTriggers(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
+pub fn dropTriggers(db: ?*api.sqlite3, table_name: [*:0]const u8) !void {
     var buf: [SQL_BUF_SIZE]u8 = undefined;
 
     // Drop INSERT trigger

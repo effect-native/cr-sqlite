@@ -6,8 +6,8 @@ Change the Zig implementation to match the Rust/C implementation such that a dat
 This is a hard requirement.
 
 ## Status
-- State: active
-- Priority: highest
+- State: done
+- Priority: highest (completed)
 
 ## Problem Statement
 Cross-open read-only works, but cross-open modification fails due to trigger schema incompatibility.
@@ -108,4 +108,14 @@ This failed because:
 4. **Phase 4**: Align pks schema if needed for full bidirectional support
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-21 (Round 59): **ALL ACCEPTANCE CRITERIA MET**
+- Cross-open parity tests: **24/24 PASS** including XO-003, XO-004, XO-006
+- rows_impacted tests: **18/18 PASS** (fixed in TASK-157)
+- Key changes made across multiple rounds:
+  1. Refactored `findPkFromBlob` for new pks schema
+  2. Fixed compound PK handling (dangling pointer bug)
+  3. Fixed cached function SQL initialization
+  4. Fixed clock table column names (`__crsql_key` → `key`)
+  5. Fixed base table operations to use pk directly as rowid
+- Files modified: `zig/src/merge_insert.zig`, `zig/src/changes_vtab.zig`, `zig/src/as_crr.zig`
+- Remaining issues: ALTER tests fail (tracked in TASK-159) — separate from cross-open modification
