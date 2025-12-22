@@ -1,37 +1,38 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-21 (Round 60: ALL MAJOR TESTS PASSING)
+> Last updated: 2025-12-21 (Round 61: Cross-platform compat + optimizations)
 
 ## Status
 
 - **BUILD: ✅ PASSING** — compiles successfully
 - **MVP: ✅ PASSING** — all core tests pass
-- Oracle parity: ⚠️ needs full verification
+- Oracle parity: ✅ **18/18 PASSING**
 - Cross-open parity: ✅ **24/24 PASSING** — `.tasks/done/TASK-147-cross-open-modification-interoperability.md`
 - rows_impacted: ✅ **18/18 PASSING** — `.tasks/done/TASK-157-rows-impacted-returns-empty.md`
 - ALTER tests: ✅ **6/6 PASSING** — `.tasks/done/TASK-159-fix-alter-compact-clock-table-failure.md`
-- Cross-platform compat tests: ❌ **2 failures discovered** — `.tasks/triage/TASK-148-cross-platform-compat-failures.md`
+- Cross-platform compat: ✅ **ALL PASSING** — `.tasks/done/TASK-148-cross-platform-compat-failures.md`
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
 Priority order:
-1. Run full oracle parity suite to verify state
-2. Clean up obsolete triage tasks (TASK-150, 151, 152, 153, 154, 155 may be resolved)
-3. Address remaining cross-platform compat failures (TASK-148)
+1. Address Linux CI parity (TASK-156)
+2. Implement fail-fast harness policy (TASK-146)
 
 ## Triage Inbox Status
 
 | Task ID | Summary | Priority | Notes |
 |---------|---------|----------|-------|
 | TASK-146 | Fail-fast/loud harness policy | Low | Policy task |
-| TASK-148 | Cross-platform compat failures | Medium | 2 real bugs |
 | TASK-156 | Linux CI parity | Medium | CI setup |
-| TASK-158 | Optimize zeroClockOnResurrect caching | Low | Performance |
-| TASK-160 | Remove rollback_hook reset | Low | Parity divergence |
 
-**Completed this session (Round 59/60):**
+**Completed Round 61 (2025-12-21):**
+- [x] TASK-148: Fix cross-platform compat failures (resurrection + text newlines) ✓
+- [x] TASK-158: Optimize zeroClockOnResurrect caching ✓
+- [x] TASK-160: Remove rollback_hook reset (was already fixed) ✓
+
+**Completed Rounds 59/60 (2025-12-21):**
 - [x] TASK-147: Cross-open modification interoperability ✓
 - [x] TASK-157: Fix rows_impacted returning empty string ✓
 - [x] TASK-159: Fix ALTER compact clock table ✓

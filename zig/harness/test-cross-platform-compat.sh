@@ -1142,12 +1142,13 @@ ZIG_TXT_SITE=$(run_zig "$DB_ZIG_TXT" "SELECT quote(crsql_site_id());")
 RUST_TXT_SITE=$(run_rust "$DB_RUST_TXT" "SELECT quote(crsql_site_id());")
 
 # Export and apply
+# Note: Replace newlines with \n escape sequence for shell-safe parsing, then unescape on insert
 nix run nixpkgs#sqlite -- "$DB_ZIG_TXT" -cmd ".load $ZIG_EXT" "
     SELECT 'CHANGE:' || 
         [table] || '|' || 
         quote(pk) || '|' || 
         cid || '|' || 
-        quote(val) || '|' || 
+        replace(quote(val), char(10), '\n') || '|' || 
         col_version || '|' || 
         db_version || '|' || 
         quote(site_id) || '|' || 
@@ -1161,9 +1162,10 @@ while IFS= read -r line; do
     if [[ "$line" == CHANGE:* ]]; then
         change="${line#CHANGE:}"
         IFS='|' read -r tbl pk cid val col_ver db_ver site_id cl seq <<< "$change"
+        # Unescape \n back to actual newline for insertion
         run_rust "$DB_RUST_TXT" "
             INSERT INTO crsql_changes ([table], pk, cid, val, col_version, db_version, site_id, cl, seq)
-            VALUES ('$tbl', $pk, '$cid', $val, $col_ver, $db_ver, $site_id, $cl, $seq);
+            VALUES ('$tbl', $pk, '$cid', replace($val, '\n', char(10)), $col_ver, $db_ver, $site_id, $cl, $seq);
         "
     fi
 done < "$CHANGES_FILE"

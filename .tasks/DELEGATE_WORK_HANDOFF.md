@@ -68,6 +68,99 @@ Artifacts:
 
 ---
 
+## Round 2025-12-21 (61) — Cross-platform compat + optimizations (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-148-cross-platform-compat-failures.md`
+- `.tasks/done/TASK-158-optimize-zeroClockOnResurrect-caching.md`
+- `.tasks/done/TASK-160-remove-rollback-hook-rows-impacted-reset.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-cross-platform-compat.sh
+bash zig/harness/test-rows-impacted-parity.sh
+make -C zig test-parity
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-148: Cross-platform compat (all pass)</summary>
+
+```text
+All cross-platform compatibility tests PASSED
+
+Wire format compatibility verified:
+  - Zig -> Rust/C sync works
+  - Rust/C -> Zig sync works
+  - PK blob encoding is identical
+  - db_version Lamport clock works
+  - NULL values preserved
+  - Delete tombstones sync correctly
+  - Delete + resurrection works
+  - Primary key updates work
+  - Compound primary keys work
+  - Float edge cases handled
+  - Blob handling (empty, regular, large)
+  - Schema evolution (ADD COLUMN)
+  - Text edge cases (Unicode, special chars)
+```
+
+**Root causes fixed:**
+
+1. **Resurrection bug**: The merge functions in `merge_insert.zig` were using `__crsql_key` as if it equaled the base table rowid. For `INTEGER PRIMARY KEY` tables, the rowid equals the declared PK column value. Added `getPkValueFromKey()` to look up actual PK values from the pks table.
+
+2. **Text newlines (harness bug)**: Bash `read` splits on newlines. Fixed by escaping newlines in export with `replace(quote(val), char(10), '\n')` and unescaping on import.
+
+</details>
+
+<details>
+<summary>TASK-158: zeroClockOnResurrect caching</summary>
+
+Implemented proper statement caching following existing pattern:
+- Added `sql_zero_clock_resurrect: [512]u8` buffer
+- Added `zero_clock_resurrect_stmt: ?*api.sqlite3_stmt` handle
+- Updated `deinit()` to finalize statement
+- Implemented caching in `zeroClockOnResurrectCached()`
+
+All tests pass.
+</details>
+
+<details>
+<summary>TASK-160: Rollback hook reset (already fixed)</summary>
+
+```text
+The fix was already implemented in zig/src/rows_impacted.zig.
+The rollbackHookCallback does NOT call resetCounter().
+All 18 rows_impacted parity tests pass.
+```
+</details>
+
+**Files modified:**
+- `zig/src/merge_insert.zig` — Added `getPkValueFromKey()`, fixed base table ops, added caching
+- `zig/harness/test-cross-platform-compat.sh` — Fixed newline handling in Test M
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-cross-platform-compat.sh` — verify all pass
+4. `bash zig/harness/test-rows-impacted-parity.sh` — verify 18/18 pass
+5. `make -C zig test-parity` — verify no regressions
+
+**Known gaps / unverified claims**
+- The test script `test-rows-impacted-parity.sh` has an outdated "KNOWN DIVERGENCE" message that should be removed
+- CI integration not verified (local runs only)
+
+---
+
 ## Round 2025-12-21 (60) — Fix ALTER "failed to compact clock table" error (1 task)
 
 **Tasks executed**

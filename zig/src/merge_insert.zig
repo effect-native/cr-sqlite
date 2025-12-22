@@ -46,6 +46,7 @@ pub const TableMergeStmts = struct {
     sql_delete_base: [512]u8 = undefined,
     sql_drop_non_sentinel: [512]u8 = undefined,
     sql_insert_pks: [1024]u8 = undefined, // DEPRECATED - not used with new schema
+    sql_zero_clock_resurrect: [512]u8 = undefined,
 
     // Statement handles (nullable, lazily prepared)
     local_cl_stmt: ?*api.sqlite3_stmt = null,
@@ -56,6 +57,7 @@ pub const TableMergeStmts = struct {
     delete_base_stmt: ?*api.sqlite3_stmt = null,
     drop_non_sentinel_stmt: ?*api.sqlite3_stmt = null,
     insert_pks_stmt: ?*api.sqlite3_stmt = null, // DEPRECATED - not used with new schema
+    zero_clock_resurrect_stmt: ?*api.sqlite3_stmt = null,
 
     pub fn init(db: ?*api.sqlite3, table_name: []const u8) !TableMergeStmts {
         return TableMergeStmts{
@@ -73,6 +75,7 @@ pub const TableMergeStmts = struct {
         if (self.delete_base_stmt) |stmt| _ = api.finalize(stmt);
         if (self.drop_non_sentinel_stmt) |stmt| _ = api.finalize(stmt);
         if (self.insert_pks_stmt) |stmt| _ = api.finalize(stmt);
+        if (self.zero_clock_resurrect_stmt) |stmt| _ = api.finalize(stmt);
     }
 
     /// Get or prepare a cached statement.
@@ -475,13 +478,59 @@ pub fn getBaseRowidFromPk(
     return MergeError.NoRows;
 }
 
-/// Check if a row exists in the base table by __crsql_key (which equals base rowid).
-/// In the new schema, __crsql_key from pks table equals the base table's rowid.
+/// Get the actual PK value(s) for a given __crsql_key from the pks table.
+/// For single-column INTEGER PRIMARY KEY tables, this returns the actual PK value
+/// which equals the base table's rowid.
+/// Returns MergeError.NoRows if the __crsql_key is not found.
+pub fn getPkValueFromKey(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    crsql_key: i64,
+) MergeError!i64 {
+    // Get the PK column name
+    const pk_col = getPkColumnName(db, table_name) catch return MergeError.SqliteError;
+    if (pk_col == null) {
+        // No single PK column - fall back to using __crsql_key as rowid
+        // This handles rowid-only tables where __crsql_key == base rowid
+        return crsql_key;
+    }
+
+    const pk_col_name = pk_col.?;
+    const pk_col_len = std.mem.indexOfScalar(u8, &pk_col_name, 0) orelse pk_col_name.len;
+    const pk_col_slice = pk_col_name[0..pk_col_len];
+
+    var buf: [512]u8 = undefined;
+    const sql = std.fmt.bufPrintZ(&buf, "SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?", .{ pk_col_slice, table_name }) catch return MergeError.BufferOverflow;
+
+    var stmt: ?*api.sqlite3_stmt = null;
+    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        return MergeError.SqliteError;
+    }
+    defer _ = api.finalize(stmt);
+
+    _ = api.bind_int64(stmt, 1, crsql_key);
+
+    if (api.step(stmt) == api.SQLITE_ROW) {
+        return api.column_int64(stmt, 0);
+    }
+
+    return MergeError.NoRows;
+}
+
+/// Check if a row exists in the base table by __crsql_key.
+/// Looks up the actual PK value from the pks table and uses that to match the base row.
+/// For INTEGER PRIMARY KEY tables, the rowid equals the PK column value.
 pub fn rowExistsInBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
-    pk: i64,
+    crsql_key: i64,
 ) MergeError!bool {
+    // Look up the actual PK value from the pks table
+    const pk_value = getPkValueFromKey(db, table_name, crsql_key) catch |err| {
+        if (err == MergeError.NoRows) return false;
+        return err;
+    };
+
     var buf: [256]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return false;
 
@@ -491,20 +540,24 @@ pub fn rowExistsInBaseTable(
     }
     defer _ = api.finalize(stmt);
 
-    // In the new schema, __crsql_key equals base table rowid
-    _ = api.bind_int64(stmt, 1, pk);
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
+    _ = api.bind_int64(stmt, 1, pk_value);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
 
-/// Delete row from base table by __crsql_key (which equals base rowid).
-/// In the new schema, __crsql_key from pks table equals the base table's rowid.
+/// Delete row from base table by __crsql_key.
+/// Looks up the actual PK value from the pks table and uses that to delete the base row.
+/// For INTEGER PRIMARY KEY tables, the rowid equals the PK column value.
 pub fn deleteFromBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
-    pk: i64,
+    crsql_key: i64,
 ) MergeError!void {
-    // Delete from base table - __crsql_key equals base table rowid
+    // Look up the actual PK value from the pks table
+    const pk_value = try getPkValueFromKey(db, table_name, crsql_key);
+
+    // Delete from base table using the actual PK value
     var buf: [256]u8 = undefined;
     const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
 
@@ -514,7 +567,8 @@ pub fn deleteFromBaseTable(
     }
     defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, pk);
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
+    _ = api.bind_int64(stmt, 1, pk_value);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -585,20 +639,33 @@ pub fn zeroClockOnResurrectCached(
     stmts: *TableMergeStmts,
     pk: i64,
 ) MergeError!void {
-    // Format SQL on first use - need to add sql buffer and stmt handle for this
-    // For now, fall back to uncached version
-    return zeroClockOnResurrect(stmts.db, stmts.table_name, pk);
+    // Format SQL on first use
+    if (stmts.zero_clock_resurrect_stmt == null) {
+        _ = std.fmt.bufPrintZ(&stmts.sql_zero_clock_resurrect, "UPDATE \"{s}__crsql_clock\" SET col_version = 0 WHERE key = ? AND col_name != '-1'", .{stmts.table_name}) catch return MergeError.BufferOverflow;
+    }
+    const stmt = try stmts.getOrPrepare(&stmts.zero_clock_resurrect_stmt, @ptrCast(&stmts.sql_zero_clock_resurrect));
+
+    _ = api.bind_int64(stmt, 1, pk);
+
+    const rc = api.step(stmt);
+    if (rc != api.SQLITE_DONE) {
+        return MergeError.SqliteError;
+    }
 }
 
 /// Insert a row for resurrection (resurrecting a deleted row with new data).
-/// Creates a new row with the given PK and column value.
+/// Creates a new row with the given __crsql_key and column value.
+/// Looks up the actual PK value from the pks table.
 pub fn insertRowForResurrection(
     db: ?*api.sqlite3,
     table_name: []const u8,
-    pk: i64,
+    crsql_key: i64,
     col_name: []const u8,
     value: ?*api.sqlite3_value,
 ) MergeError!void {
+    // Look up the actual PK value from the pks table
+    const pk_value = try getPkValueFromKey(db, table_name, crsql_key);
+
     // Get the PK column name from the table schema
     const pk_col_name = try getPkColumnName(db, table_name);
 
@@ -626,8 +693,8 @@ pub fn insertRowForResurrection(
     }
     defer _ = api.finalize(stmt);
 
-    // Bind the pk value
-    _ = api.bind_int64(stmt, 1, pk);
+    // Bind the actual PK value (not __crsql_key)
+    _ = api.bind_int64(stmt, 1, pk_value);
 
     // Bind column value based on type
     if (value) |v| {
@@ -664,18 +731,21 @@ pub fn insertRowForResurrection(
 }
 
 /// Update a column value in the base table for an existing row.
-/// Updates a column in the base table using __crsql_key (which equals base rowid).
-/// In the new schema, __crsql_key from pks table equals the base table's rowid.
+/// Looks up the actual PK value from the pks table and uses that to update the base row.
+/// For INTEGER PRIMARY KEY tables, the rowid equals the PK column value.
 pub fn updateBaseTableColumn(
     db: ?*api.sqlite3,
     table_name: []const u8,
-    pk: i64,
+    crsql_key: i64,
     col_name: []const u8,
     value: ?*api.sqlite3_value,
 ) MergeError!void {
+    // Look up the actual PK value from the pks table
+    const pk_value = try getPkValueFromKey(db, table_name, crsql_key);
+
     var buf: [1024]u8 = undefined;
 
-    // In the new schema, __crsql_key equals base table rowid
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
     const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
 
     var stmt: ?*api.sqlite3_stmt = null;
@@ -711,8 +781,8 @@ pub fn updateBaseTableColumn(
     } else {
         _ = api.bind_null(stmt, 1);
     }
-    // In the new schema, __crsql_key equals base table rowid
-    _ = api.bind_int64(stmt, 2, pk);
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
+    _ = api.bind_int64(stmt, 2, pk_value);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
@@ -1023,37 +1093,46 @@ pub fn findPkFromBlobCached(
     return MergeError.NoRows;
 }
 
-/// Check if a row exists in the base table by pks table key using cached statement.
 /// Check if row exists in base table (cached variant).
-/// In the new schema, __crsql_key from pks table equals the base table's rowid.
+/// Looks up the actual PK value from the pks table and uses that to match the base row.
 ///
 /// This is the cached variant of `rowExistsInBaseTable` for use with `TableMergeStmts`.
-pub fn rowExistsInBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!bool {
+pub fn rowExistsInBaseTableCached(stmts: *TableMergeStmts, crsql_key: i64) MergeError!bool {
+    // Look up the actual PK value from the pks table
+    const pk_value = getPkValueFromKey(stmts.db, stmts.table_name, crsql_key) catch |err| {
+        if (err == MergeError.NoRows) return false;
+        return err;
+    };
+
     // Format SQL on first use
     if (stmts.row_exists_base_stmt == null) {
         _ = std.fmt.bufPrintZ(&stmts.sql_row_exists_base, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
     }
     const stmt = try stmts.getOrPrepare(&stmts.row_exists_base_stmt, @ptrCast(&stmts.sql_row_exists_base));
 
-    // In the new schema, __crsql_key equals base table rowid
-    _ = api.bind_int64(stmt, 1, pk);
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
+    _ = api.bind_int64(stmt, 1, pk_value);
 
     return api.step(stmt) == api.SQLITE_ROW;
 }
 
-/// Delete row from base table by __crsql_key (cached variant).
-/// In the new schema, __crsql_key from pks table equals the base table's rowid.
+/// Delete row from base table (cached variant).
+/// Looks up the actual PK value from the pks table and uses that to delete the base row.
 ///
 /// This is the cached variant of `deleteFromBaseTable` for use with `TableMergeStmts`.
-pub fn deleteFromBaseTableCached(stmts: *TableMergeStmts, pk: i64) MergeError!void {
+pub fn deleteFromBaseTableCached(stmts: *TableMergeStmts, crsql_key: i64) MergeError!void {
+    // Look up the actual PK value from the pks table
+    const pk_value = try getPkValueFromKey(stmts.db, stmts.table_name, crsql_key);
+
     // Format SQL on first use
     if (stmts.delete_base_stmt == null) {
         _ = std.fmt.bufPrintZ(&stmts.sql_delete_base, "DELETE FROM \"{s}\" WHERE rowid = ?", .{stmts.table_name}) catch return MergeError.BufferOverflow;
     }
-    // Delete from base table - __crsql_key equals base table rowid
+    // Delete from base table using the actual PK value
     const stmt = try stmts.getOrPrepare(&stmts.delete_base_stmt, @ptrCast(&stmts.sql_delete_base));
 
-    _ = api.bind_int64(stmt, 1, pk);
+    // Use the actual PK value (which equals rowid for INTEGER PRIMARY KEY tables)
+    _ = api.bind_int64(stmt, 1, pk_value);
 
     const rc = api.step(stmt);
     if (rc != api.SQLITE_DONE) {
