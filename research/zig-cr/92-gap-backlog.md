@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-23 (Round 66: Savepoint, ATTACH, site_id collision tests)
+> Last updated: 2025-12-23 (Round 67: db_version savepoint fix, trigger CRR tests)
 
 ## Status
 
@@ -15,29 +15,24 @@
 - Sentinel parity: ✅ **6/6 PASSING** (Round 63)
 - Multinode sync: ✅ **6/6 PASSING** (Round 63)
 - Schema mismatch: ⚠️ **11/12 PASSING** (1 divergence: unknown column behavior)
-- Savepoint sync: ⚠️ **15/16 PASSING** (1 divergence: db_version with savepoints)
+- Savepoint sync: ✅ **16/16 PASSING** (Round 67 — TASK-181 fixed)
 - ATTACH CRR: ✅ **15/15 PASSING** (Round 66)
 - Site ID collision: ✅ **13/13 PASSING** (Round 66)
-- Test scripts: **60 total**
+- Trigger CRR: ✅ **31/31 PASSING** (Round 67)
+- Test scripts: **61 total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-**Backlog is empty** — Triage contains 6 items ready for prioritization.
+**Backlog is empty** — Triage contains 4 items ready for prioritization.
 
 ### Triage Inbox (organized by priority)
-
-#### HIGH Priority — Bug Fix
-| Task | Summary | Risk | Effort |
-|------|---------|------|--------|
-| **TASK-181** | db_version not advancing with savepoint + crsql_changes | Sync correctness | Medium |
 
 #### MEDIUM Priority — Behavioral Parity
 | Task | Summary | Risk | Effort |
 |------|---------|------|--------|
 | **TASK-186** | Schema mismatch: unknown column behavior | Design decision | Low |
-| **TASK-182** | User triggers modify other CRRs | Real-world pattern | Medium |
 
 #### LOW Priority — Nice to Have
 | Task | Summary | Risk | Effort |
@@ -45,6 +40,10 @@
 | **TASK-178** | VACUUM on CRR database | Maintenance op | Low |
 | **TASK-183** | Wide table (50+ cols) performance | Performance only | Medium |
 | **TASK-156** | Linux CI parity | CI only | Medium |
+
+### Completed Round 67 (2025-12-23)
+- [x] TASK-181: Fix db_version savepoint bug ✓ (16/16 pass now)
+- [x] TASK-182: Trigger CRR tests ✓ (31/31 pass, full parity)
 
 ### Completed Round 66 (2025-12-23)
 - [x] TASK-175: Savepoint sync tests ✓ (15/16 pass, 1 divergence → TASK-181)

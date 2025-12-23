@@ -68,6 +68,107 @@ Artifacts:
 
 ---
 
+## Round 2025-12-23 (67) — db_version savepoint fix + trigger CRR tests (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-181-zig-dbversion-savepoint-bug.md`
+- `.tasks/done/TASK-182-triggers-modify-other-crr.md`
+
+**Commits**
+- `bf0a27c4` — Round 67: fix db_version savepoint bug + trigger CRR tests
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-savepoint-sync.sh
+bash zig/harness/test-db-version-parity.sh
+bash zig/harness/test-trigger-crr.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-181: db_version savepoint fix (16/16 pass, was 15/16)</summary>
+
+```text
+==================================================================
+           SAVEPOINT SYNC TEST SUMMARY
+==================================================================
+  PASSED:     16
+  FAILED:     0
+  SKIPPED:    0
+  DIVERGENCES: 0
+==================================================================
+
+Savepoint Sync Test Summary: 16 passed, 0 failed, 0 skipped
+```
+
+**Root Cause**: When changes are applied via `INSERT INTO crsql_changes`, the merge path writes clock entries with the incoming db_version but never called `nextDbVersion()` to update `pending_db_version`. The commit hook only promotes pending to global when pending > global, so db_version never advanced.
+
+**Fix Applied**: In `zig/src/merge_insert.zig`, added calls to `site_identity.nextDbVersion(db_version)` after successfully writing clock entries in both `setWinnerClock()` (line ~305) and `setWinnerClockCached()` (line ~358).
+
+</details>
+
+<details>
+<summary>TASK-182: Trigger CRR tests (31/31 pass, new suite)</summary>
+
+```text
+==================================================================
+         TRIGGER CRR TEST SUMMARY
+==================================================================
+  PASSED:  31
+  FAILED:  0
+  SKIPPED: 0
+==================================================================
+
+Key Findings:
+  1. User triggers that modify other CRRs work correctly
+  2. Trigger-inserted rows get proper clock entries
+  3. db_version advances for both original and triggered changes
+  4. Triggered changes appear in crsql_changes for sync
+  5. Trigger chains (A->B->C) work across multiple CRRs
+  6. DELETE triggers can implement soft cascades between CRRs
+
+All trigger CRR tests PASSED
+```
+
+**Tests Created (11 scenarios, 31 assertions):**
+1. Basic trigger INSERT (UPDATE items -> INSERT audit_log)
+2. Trigger-inserted row has clock entries
+3. db_version advances for both changes
+4. Sync works for triggered inserts
+5. DELETE trigger (DELETE items -> INSERT audit_log)
+6. Multiple CRR triggers in chain (A -> B -> C)
+7. Trigger with FK-like reference (soft relationship)
+8. Parity — Zig and Rust/C produce identical results
+9. INSERT trigger (INSERT items -> INSERT audit_log)
+10. Trigger UPDATE on another CRR
+11. Trigger DELETE on another CRR (cascade)
+
+</details>
+
+**Files modified/created**
+- `zig/src/merge_insert.zig` — Added `nextDbVersion()` calls in `setWinnerClock` and `setWinnerClockCached`
+- `zig/harness/test-trigger-crr.sh` (new, ~566 lines)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-savepoint-sync.sh` — verify 16/16 pass
+4. `bash zig/harness/test-db-version-parity.sh` — verify 14/14 pass
+5. `bash zig/harness/test-trigger-crr.sh` — verify 31/31 pass
+
+**Known gaps / unverified claims**
+- TASK-186 (schema mismatch unknown column behavior) remains in triage — design decision needed
+- CI integration not verified (local runs only)
+- No coverage captured
+
+---
+
 ## Round 2025-12-23 (66) — Savepoint, ATTACH, site_id collision test suites (3 tasks)
 
 **Tasks executed**

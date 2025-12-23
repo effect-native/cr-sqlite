@@ -298,6 +298,11 @@ pub fn setWinnerClock(
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
+
+    // Update pending_db_version to track the maximum db_version written.
+    // This ensures crsql_db_version() advances correctly after COMMIT.
+    // Without this, changes applied via crsql_changes wouldn't update db_version.
+    _ = site_identity.nextDbVersion(db_version);
 }
 
 /// Cached variant of setWinnerClock using TableMergeStmts.
@@ -351,6 +356,11 @@ pub fn setWinnerClockCached(
     if (rc != api.SQLITE_DONE) {
         return MergeError.SqliteError;
     }
+
+    // Update pending_db_version to track the maximum db_version written.
+    // This ensures crsql_db_version() advances correctly after COMMIT.
+    // Without this, changes applied via crsql_changes wouldn't update db_version.
+    _ = site_identity.nextDbVersion(db_version);
 }
 
 /// Helper to get the name of the single PK column for a table, if it exists.
