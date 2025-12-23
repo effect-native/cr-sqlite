@@ -16,6 +16,9 @@ const compare_values = @import("../compare_values.zig");
 const MAX_SQL_BUF = 4096;
 const MAX_ERR_BUF = 512;
 
+/// Maximum number of columns we support (SQLite's default SQLITE_MAX_COLUMN is 2000)
+const MAX_COLUMNS = 2000;
+
 // Thread-local error buffer for diagnostics
 threadlocal var last_error_buf: [MAX_ERR_BUF]u8 = undefined;
 threadlocal var last_error_len: usize = 0;
@@ -42,7 +45,7 @@ const ColumnInfo = struct {
 };
 
 const TableInfo = struct {
-    columns: [64]ColumnInfo,
+    columns: [MAX_COLUMNS]ColumnInfo,
     count: usize,
     pk_count: usize,
     non_pk_count: usize,
@@ -50,7 +53,7 @@ const TableInfo = struct {
 
 fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
     var info = TableInfo{
-        .columns = [_]ColumnInfo{.{ .name = [_]u8{0} ** 128, .name_len = 0, .pk_index = 0 }} ** 64,
+        .columns = [_]ColumnInfo{.{ .name = [_]u8{0} ** 128, .name_len = 0, .pk_index = 0 }} ** MAX_COLUMNS,
         .count = 0,
         .pk_count = 0,
         .non_pk_count = 0,
@@ -82,7 +85,7 @@ fn getTableInfo(db: ?*api.sqlite3, table_name: []const u8) ?TableInfo {
     defer _ = api.finalize(stmt);
 
     while (api.step(stmt) == api.SQLITE_ROW) {
-        if (info.count >= 64) return null;
+        if (info.count >= MAX_COLUMNS) return null;
 
         const name_ptr = api.column_text(stmt, 1) orelse continue;
         const name_slice = std.mem.span(name_ptr);

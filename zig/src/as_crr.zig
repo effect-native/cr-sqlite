@@ -17,8 +17,8 @@ const MAX_TABLE_NAME_LEN = 1024;
 /// SQL buffer size for DDL generation
 const SQL_BUF_SIZE = 8192;
 
-/// Maximum number of columns we support
-const MAX_COLUMNS = 64;
+/// Maximum number of columns we support (SQLite's default SQLITE_MAX_COLUMN is 2000)
+const MAX_COLUMNS = 2000;
 
 /// Column information from PRAGMA table_info
 const ColumnInfo = struct {

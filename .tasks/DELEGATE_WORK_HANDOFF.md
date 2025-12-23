@@ -68,6 +68,74 @@ Artifacts:
 
 ---
 
+## Round 2025-12-23 (69) — Fix 64-column limit bug (1 task)
+
+**Tasks executed**
+- `.tasks/done/TASK-189-64-column-limit-bug.md`
+
+**Commits**
+- `38eb37b1` — Round 69: fix 64-column limit bug (MAX_COLUMNS 64 -> 2000)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-wide-table.sh
+# Manual verification with 100-column table
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-189: 64-column limit fix (verified)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║                   WIDE TABLE PERFORMANCE SUMMARY                     ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  Configuration: 63 columns x 100 rows                                  ║
+║  Mode: CI (reduced)                                                    ║
+║  PASSED: 13                                                            ║
+║  FAILED: 0                                                             ║
+╚═══════════════════════════════════════════════════════════════════════╝
+```
+
+**Root cause:** `MAX_COLUMNS = 64` hardcoded in 3 files:
+- `zig/src/as_crr.zig` line 21
+- `zig/src/schema_alter.zig` line 17
+- `zig/src/local_writes/after_write.zig` lines 45, 53, 85
+
+**Fix:** Increased `MAX_COLUMNS` to 2000 (matches SQLite's default `SQLITE_MAX_COLUMN`).
+
+**Verification:** 100-column table now works:
+```
+100-column CRR: SUCCESS
+1 rows in base table
+100 clock entries
+```
+
+</details>
+
+**Files modified**
+- `zig/src/as_crr.zig` — `MAX_COLUMNS = 64` → `MAX_COLUMNS = 2000`
+- `zig/src/schema_alter.zig` — `MAX_COLUMNS = 64` → `MAX_COLUMNS = 2000`
+- `zig/src/local_writes/after_write.zig` — Added `MAX_COLUMNS = 2000` constant, updated array sizes
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-wide-table.sh` — verify 13/13 pass
+4. Test manually with 100-column table (see task card for SQL)
+
+**Known gaps / unverified claims**
+- Parity test suite not fully run this round (local verification only)
+- CI integration not verified
+
+---
+
 ## Round 2025-12-23 (68) — VACUUM + wide table test suites (2 tasks)
 
 **Tasks executed**
@@ -75,7 +143,7 @@ Artifacts:
 - `.tasks/done/TASK-183-wide-table-performance.md`
 
 **Commits**
-- (pending)
+- `8367f896` — Round 68: VACUUM CRR tests (17/17) + wide table tests (11/11, 63-col limit found)
 
 **Environment**
 - OS: darwin (macOS ARM64)
