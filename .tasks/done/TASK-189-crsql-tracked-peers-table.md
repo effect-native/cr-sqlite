@@ -4,7 +4,7 @@
 Create the crsql_tracked_peers table that Rust/C creates on initialization.
 
 ## Status
-- State: triage
+- State: done
 - Priority: high (sync infrastructure)
 - Discovered: Round 64 update tasks
 
@@ -39,7 +39,7 @@ Purpose:
 - Used by sync clients to maintain sync cursors
 
 ## Files to Modify
-- `zig/src/ffi/init.zig` — add table creation in `initModule()`
+- `zig/src/ffi/init.zig` — add table creation in `sqlite3_crsqlite_init()`
 - `zig/harness/test-tracked-peers.sh` (new) — test the table
 
 ## Acceptance Criteria
@@ -56,6 +56,26 @@ Purpose:
 
 ## Progress Log
 - 2025-12-22: Created from gap analysis.
+- 2025-12-22: Implemented table creation in `zig/src/ffi/init.zig:220-242`.
 
 ## Completion Notes
-(Empty until done.)
+- **Date**: 2025-12-22
+- **Files Modified**:
+  - `zig/src/ffi/init.zig` - Added CREATE TABLE for `crsql_tracked_peers` after `writeVersionToMaster()` call
+  - `zig/harness/test-tracked-peers.sh` (new) - Test suite with 9 tests
+- **All Acceptance Criteria Met**:
+  1. Table exists after extension loads
+  2. Schema matches Rust/C oracle exactly (verified with parity test)
+  3. Table is STRICT (type enforcement test passes)
+  4. Primary key constraint works (duplicate key rejected)
+  5. INSERT/UPDATE/DELETE all work
+  6. Table persists across close/reopen
+- **Test Output**:
+  ```
+  PASSED:  9
+  FAILED:  0
+  ```
+- **Oracle Parity**: Both Zig and Rust/C now create the same crsql_ tables:
+  - crsql_master
+  - crsql_site_id
+  - crsql_tracked_peers

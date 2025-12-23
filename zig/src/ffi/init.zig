@@ -21,6 +21,7 @@ const pack_columns = @import("../pack_columns.zig");
 const rows_impacted = @import("../rows_impacted.zig");
 const schema_alter = @import("../schema_alter.zig");
 const site_identity = @import("../site_identity.zig");
+const sha = @import("../sha.zig");
 const sync_bit = @import("../sync_bit.zig");
 
 /// CR-SQLite Zig implementation version string.
@@ -157,6 +158,10 @@ fn registerFunctions(db: ?*api.sqlite3) c_int {
     rc = after_write.register(db);
     if (rc != api.SQLITE_OK) return rc;
 
+    // Register crsql_sha() function (git commit hash)
+    rc = sha.register(db);
+    if (rc != api.SQLITE_OK) return rc;
+
     return api.SQLITE_OK;
 }
 
@@ -217,6 +222,33 @@ pub export fn sqlite3_crsqlite_init(
     const write_version_rc = writeVersionToMaster(db);
     if (write_version_rc != api.SQLITE_OK) {
         return write_version_rc;
+    }
+
+    // Create crsql_tracked_peers table for tracking peer sync state.
+    // Reference: core/rs/core/src/bootstrap.rs
+    // This table stores sync cursors for resumable sync with peers.
+    // - site_id: The peer's site identifier
+    // - version: The last synced version from/to this peer
+    // - seq: The sequence number within that version
+    // - tag: Identifies the sync direction or type
+    // - event: Identifies the event type
+    const create_tracked_peers_rc = api.exec(
+        db,
+        \\CREATE TABLE IF NOT EXISTS "crsql_tracked_peers" (
+        \\  "site_id" BLOB NOT NULL,
+        \\  "version" INTEGER NOT NULL,
+        \\  "seq" INTEGER DEFAULT 0,
+        \\  "tag" INTEGER,
+        \\  "event" INTEGER,
+        \\  PRIMARY KEY ("site_id", "tag", "event")
+        \\) STRICT;
+        ,
+        null,
+        null,
+        null,
+    );
+    if (create_tracked_peers_rc != api.SQLITE_OK) {
+        return create_tracked_peers_rc;
     }
 
     // Initialize site_id (creates table if needed, loads or generates site_id)

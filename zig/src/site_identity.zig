@@ -549,6 +549,24 @@ pub fn resetForTesting() void {
     @memset(&global_site_id, 0);
 }
 
+/// Implementation of crsql_get_seq() SQL function
+/// Returns the current seq value WITHOUT incrementing.
+/// Used by sync clients to observe seq without side effects.
+fn crsqlGetSeqFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    _ = argv;
+    if (argc != 0) {
+        api.result_error(pCtx, "crsql_get_seq takes no arguments", -1);
+        return;
+    }
+
+    // Return current seq value without incrementing
+    api.result_int64(pCtx, pending_seq);
+}
+
 /// Implementation of crsql_increment_and_get_seq() SQL function
 /// Returns the current seq value and increments the counter for the next call.
 /// Used by triggers to assign unique seq values within a transaction.
@@ -619,6 +637,20 @@ pub fn register(db: ?*api.sqlite3) c_int {
         api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
         null,
         &crsqlIncrementAndGetSeqFunc,
+        null,
+        null,
+        null,
+    );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register crsql_get_seq for reading seq without side effects
+    rc = api.create_function_v2(
+        db,
+        "crsql_get_seq",
+        0, // nArg: 0 arguments
+        api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
+        null,
+        &crsqlGetSeqFunc,
         null,
         null,
         null,
