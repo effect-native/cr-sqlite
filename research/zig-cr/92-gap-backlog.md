@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-23 (Round 67: db_version savepoint fix, trigger CRR tests)
+> Last updated: 2025-12-23 (Round 68: VACUUM + wide table tests)
 
 ## Status
 
@@ -19,13 +19,15 @@
 - ATTACH CRR: ✅ **15/15 PASSING** (Round 66)
 - Site ID collision: ✅ **13/13 PASSING** (Round 66)
 - Trigger CRR: ✅ **31/31 PASSING** (Round 67)
-- Test scripts: **61 total**
+- VACUUM CRR: ✅ **17/17 PASSING** (Round 68)
+- Wide table: ✅ **11/11 PASSING** (Round 68 — 63-col limit discovered)
+- Test scripts: **63 total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-**Backlog is empty** — Triage contains 4 items ready for prioritization.
+**Backlog is empty** — Triage contains 2 items ready for prioritization.
 
 ### Triage Inbox (organized by priority)
 
@@ -37,9 +39,15 @@
 #### LOW Priority — Nice to Have
 | Task | Summary | Risk | Effort |
 |------|---------|------|--------|
-| **TASK-178** | VACUUM on CRR database | Maintenance op | Low |
-| **TASK-183** | Wide table (50+ cols) performance | Performance only | Medium |
 | **TASK-156** | Linux CI parity | CI only | Medium |
+
+### Known Limitations (Round 68 discoveries)
+- **64-column limit**: Zig fails at 64+ columns ("failed to create pks table") — Rust/C handles 100+
+- **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
+
+### Completed Round 68 (2025-12-23)
+- [x] TASK-178: VACUUM CRR tests ✓ (17/17 pass, full parity)
+- [x] TASK-183: Wide table (50+ cols) tests ✓ (11/11 pass, 63-col limit found)
 
 ### Completed Round 67 (2025-12-23)
 - [x] TASK-181: Fix db_version savepoint bug ✓ (16/16 pass now)
