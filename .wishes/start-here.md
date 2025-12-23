@@ -9,17 +9,28 @@ If you're asking "what's left?" start here:
   - Specs: `effect-native/.specs/`
   - Packages: `effect-native/packages-native/`
 
-## Current Status (2025-12-22)
+## Current Status (2025-12-23)
 
-**MVP is complete:**
+**Zig parity is essentially complete:**
 - Oracle parity: 18/18 passing
 - Cross-open parity: 24/24 passing
 - rows_impacted: 18/18 passing
 - ALTER tests: 6/6 passing
 - Cross-platform compat: ALL passing
+- Resurrection parity: 25/25 passing
+- Sentinel parity: 6/6 passing
+- Multinode sync: 6/6 passing
+- Savepoint sync: 16/16 passing
+- ATTACH CRR: 15/15 passing
+- Site ID collision: 13/13 passing
+- Trigger CRR: 31/31 passing
+- VACUUM CRR: 17/17 passing
+- Wide table: 13/13 passing (64-col limit fixed, now 2000)
+- Schema mismatch: 11/12 passing (1 intentional divergence)
 - Browser tests: 30/30 passing (includes sqlite-vec, FTS5, JSONB)
 - Mesh tests: 81/81 passing
 - TypeScript: clean
+- **Test scripts: 63 total**
 
 **Scratchpad demos work:**
 - `bun run scratch/bun-scratchpad/index.ts` — CR-SQLite with bun:sqlite
@@ -30,28 +41,34 @@ If you're asking "what's left?" start here:
 
 ## Remaining Backlog
 
-**8 parallelizable test tasks** ready for pickup (gap analysis 2025-12-22):
+### Needs Decision (1 item)
 
-| Task | Test File | Priority |
-|------|-----------|----------|
-| TASK-161 | `test-resurrection-parity.sh` | HIGH |
-| TASK-166 | `test-sentinel-parity.sh` | HIGH |
-| TASK-170 | `test-fk-crr.sh` | HIGH |
-| TASK-172 | `test-error-handling.sh` | HIGH |
-| TASK-173 | `test-schema-mismatch.sh` | MEDIUM |
-| TASK-174 | `test-partial-sync.sh` | HIGH |
-| TASK-177 | `test-default-merge.sh` | HIGH |
-| TASK-179 | `test-multinode-sync.sh` | HIGH |
+| Task | Summary | Blocker |
+|------|---------|---------|
+| **TASK-186** | Schema mismatch: unknown column behavior | Design decision: error vs ignore |
 
-All 8 can run simultaneously (no file conflicts).
+Current divergence: When source has column destination doesn't know:
+- Zig: ERROR (strict)
+- Rust/C: IGNORED (lenient)
 
-Plus 8 lower-priority items in triage:
-- TASK-175: Savepoints, TASK-176: ATTACH, TASK-178: VACUUM
-- TASK-180: Site ID collision, TASK-181: crsql_sha(), TASK-182: Triggers
-- TASK-183: Wide tables, TASK-156: Linux CI
+Options:
+1. Align with Rust/C (ignore) — maximizes compatibility
+2. Keep strict (error) — catches schema drift early
+3. Make configurable — `crsql_config_set('ignore-unknown-columns', 1)`
 
-Other:
-- Effect-TS scratchpad (spec-gated) — see `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
+### Low Priority (1 item)
+
+| Task | Summary | Notes |
+|------|---------|-------|
+| **TASK-156** | Linux CI parity | CI-only, not blocking local dev |
+
+### Blocked on Tom (TypeScript)
+
+See `.wishes/blocked-on-tom/`:
+- Effect-TS scratchpad (spec-gated)
+- Implementation-agnostic spec suite
+- Browser spec naming
+- Upstream feedback scope
 
 ## Rules of the game (thing-golf)
 

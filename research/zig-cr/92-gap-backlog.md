@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-23 (Round 69: Fix 64-column limit bug)
+> Last updated: 2025-12-23 (Post-Round 69: Backlog organized, parity complete)
 
 ## Status
 
@@ -27,10 +27,23 @@
 
 ## Now (next parallel assignments)
 
-### Backlog (ready to assign)
-| Task | Summary | Risk | Effort |
-|------|---------|------|--------|
-| **TASK-186** | Schema mismatch: unknown column behavior | Design decision | Low |
+### Backlog: Empty (all parity work complete)
+
+No tasks ready to delegate. The Zig implementation has reached functional parity with the Rust/C oracle.
+
+### Pending Decisions (1 item)
+| Task | Summary | Blocker |
+|------|---------|---------|
+| **TASK-186** | Schema mismatch: unknown column behavior | Design decision needed |
+
+Current divergence (intentional, not a bug):
+- **Zig**: ERROR on unknown columns (strict)
+- **Rust/C**: IGNORE unknown columns (lenient)
+
+Options:
+1. Align with Rust/C (ignore) — maximizes forward compatibility
+2. Keep strict (error) — catches schema drift early  
+3. Make configurable — `crsql_config_set('ignore-unknown-columns', 1)`
 
 ### Triage Inbox (organized by priority)
 

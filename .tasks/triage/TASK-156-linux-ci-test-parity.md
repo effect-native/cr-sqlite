@@ -5,7 +5,7 @@ Make sure our build + test workflows run on Linux (CI + local), not only Darwin.
 
 ## Status
 - State: triage
-- Priority: high
+- Priority: LOW (CI-only, not blocking local dev or parity work)
 
 ## Context
 We have strong Darwin coverage (local dev + artifacts), but Linux can silently rot unless we exercise it regularly.
