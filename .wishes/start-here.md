@@ -30,11 +30,28 @@ If you're asking "what's left?" start here:
 
 ## Remaining Backlog
 
-**Nearly empty.** All functional work complete.
+**8 parallelizable test tasks** ready for pickup (gap analysis 2025-12-22):
 
-Only remaining items:
+| Task | Test File | Priority |
+|------|-----------|----------|
+| TASK-161 | `test-resurrection-parity.sh` | HIGH |
+| TASK-166 | `test-sentinel-parity.sh` | HIGH |
+| TASK-170 | `test-fk-crr.sh` | HIGH |
+| TASK-172 | `test-error-handling.sh` | HIGH |
+| TASK-173 | `test-schema-mismatch.sh` | MEDIUM |
+| TASK-174 | `test-partial-sync.sh` | HIGH |
+| TASK-177 | `test-default-merge.sh` | HIGH |
+| TASK-179 | `test-multinode-sync.sh` | HIGH |
+
+All 8 can run simultaneously (no file conflicts).
+
+Plus 8 lower-priority items in triage:
+- TASK-175: Savepoints, TASK-176: ATTACH, TASK-178: VACUUM
+- TASK-180: Site ID collision, TASK-181: crsql_sha(), TASK-182: Triggers
+- TASK-183: Wide tables, TASK-156: Linux CI
+
+Other:
 - Effect-TS scratchpad (spec-gated) — see `.wishes/blocked-on-tom/effect-bun-scratchpad.md`
-- Linux CI parity (TASK-156) — waiting on Tom for CI priorities
 
 ## Rules of the game (thing-golf)
 

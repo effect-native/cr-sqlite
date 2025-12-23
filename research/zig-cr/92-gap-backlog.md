@@ -16,47 +16,38 @@
 
 ## Now (next parallel assignments)
 
-**23 NEW TRIAGE TASKS** from gap analysis (2025-12-22):
+**8 BACKLOG TASKS ready for parallel execution** (no file conflicts):
 
-### High Priority (Cross-impl parity, data integrity)
-| Task | Summary | Risk |
-|------|---------|------|
-| TASK-161 | Resurrection: live row via sentinel | CL semantics |
-| TASK-162 | Resurrection: dead row via sentinel | CL semantics |
-| TASK-163 | Resurrection: live row via column | CL semantics |
-| TASK-164 | Resurrection: dead row via column | CL semantics |
-| TASK-165 | Out-of-order delete/resurrect sync | Production bug |
-| TASK-166 | Sentinel omission on INSERT | Wire format |
-| TASK-167 | Sentinel created on DELETE | Wire format |
-| TASK-169 | Sentinel NOT created on merge | Sync correctness |
-| TASK-170 | FK between CRR tables | Real-world apps |
-| TASK-171 | ON DELETE CASCADE between CRRs | Data integrity |
-| TASK-172 | Malformed PK blob handling | Security |
-| TASK-174 | Partial sync / interruption | Production |
-| TASK-177 | DEFAULT value merge semantics | Schema evolution |
-| TASK-179 | "Discord corrosion" 4-node scenario | Complex sync |
+| Task | File to Create | Priority | Can Run With |
+|------|----------------|----------|--------------|
+| TASK-161 | `test-resurrection-parity.sh` | HIGH | All others |
+| TASK-166 | `test-sentinel-parity.sh` | HIGH | All others |
+| TASK-170 | `test-fk-crr.sh` | HIGH | All others |
+| TASK-172 | `test-error-handling.sh` | HIGH | All others |
+| TASK-173 | `test-schema-mismatch.sh` | MEDIUM | All others |
+| TASK-174 | `test-partial-sync.sh` | HIGH | All others |
+| TASK-177 | `test-default-merge.sh` | HIGH | All others |
+| TASK-179 | `test-multinode-sync.sh` | HIGH | All others |
 
-### Medium Priority (Robustness, edge cases)
-| Task | Summary | Risk |
-|------|---------|------|
-| TASK-168 | Sentinel NOT on INSERT OR REPLACE | Edge case |
-| TASK-173 | Schema mismatch during sync | Error handling |
-| TASK-175 | Savepoints during sync | Transaction |
-| TASK-176 | ATTACH database with CRRs | Multi-DB |
-| TASK-180 | Site ID collision | Security |
-| TASK-182 | User triggers modify other CRRs | Real-world |
+**All 8 tasks can run in parallel** — each creates a unique test file.
 
-### Low Priority (Performance, debug)
-| Task | Summary | Risk |
-|------|---------|------|
-| TASK-156 | Linux CI parity | Infrastructure |
-| TASK-178 | VACUUM on CRR database | Maintenance |
-| TASK-181 | crsql_sha() function | Debug info |
-| TASK-183 | Wide table (100 cols) performance | Performance |
+### Consolidated Tasks (in backlog)
+- TASK-161: Resurrection suite (was 161-165)
+- TASK-166: Sentinel suite (was 166-169)
+- TASK-170: FK/Cascade suite (was 170-171)
 
-## Triage Inbox Status
+## Triage Inbox (lower priority, not blocking)
 
-**23 items** in `.tasks/triage/` (see table above)
+| Task | Summary | Priority |
+|------|---------|----------|
+| TASK-156 | Linux CI parity | Low |
+| TASK-175 | Savepoints during sync | Medium |
+| TASK-176 | ATTACH database with CRRs | Medium |
+| TASK-178 | VACUUM on CRR database | Low |
+| TASK-180 | Site ID collision | Medium |
+| TASK-181 | crsql_sha() function | Low |
+| TASK-182 | User triggers modify other CRRs | Medium |
+| TASK-183 | Wide table performance | Low |
 
 **Completed Round 61 (2025-12-21):**
 - [x] TASK-148: Fix cross-platform compat failures (resurrection + text newlines) ✓
