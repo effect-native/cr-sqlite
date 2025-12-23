@@ -96,9 +96,11 @@ fn toApiDb(db: ?*vtab.sqlite3) ?*api.sqlite3 {
 // =============================================================================
 
 /// Check if table name ends with _schema suffix
+/// Returns false for "_schema" alone (must have base table name)
 fn endsWithSchema(name: []const u8) bool {
     const suffix = "_schema";
-    if (name.len < suffix.len) return false;
+    // Must be longer than suffix to have a base name
+    if (name.len <= suffix.len) return false;
     return std.mem.endsWith(u8, name, suffix);
 }
 

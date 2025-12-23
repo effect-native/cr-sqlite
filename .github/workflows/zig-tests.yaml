@@ -21,10 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
         with:
-          version: 0.14.0
+          nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Cache Zig
         uses: actions/cache@v4
@@ -32,13 +32,13 @@ jobs:
           path: |
             zig/.zig-cache
             ~/.cache/zig
-          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          key: zig-nix-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
           restore-keys: |
-            zig-${{ runner.os }}-
+            zig-nix-${{ runner.os }}-
 
       - name: Build
         working-directory: zig
-        run: zig build
+        run: nix run nixpkgs#zig -- build
 
       - name: Size Report
         working-directory: zig
@@ -70,10 +70,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
         with:
-          version: 0.14.0
+          nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Cache Zig
         uses: actions/cache@v4
@@ -81,13 +81,13 @@ jobs:
           path: |
             zig/.zig-cache
             ~/.cache/zig
-          key: zig-wasm-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          key: zig-wasm-nix-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
           restore-keys: |
-            zig-wasm-
+            zig-wasm-nix-
 
       - name: Build WASM
         working-directory: zig
-        run: zig build wasm
+        run: nix run nixpkgs#zig -- build wasm
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -102,10 +102,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
         with:
-          version: 0.14.0
+          nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Cache Zig
         uses: actions/cache@v4
@@ -113,24 +113,19 @@ jobs:
           path: |
             zig/.zig-cache
             ~/.cache/zig
-          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          key: zig-nix-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
           restore-keys: |
-            zig-${{ runner.os }}-
+            zig-nix-${{ runner.os }}-
 
       - name: Run unit tests
         working-directory: zig
-        run: zig build test
+        run: nix run nixpkgs#zig -- build test
 
   test-parity:
     name: Parity Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.14.0
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
@@ -143,13 +138,13 @@ jobs:
           path: |
             zig/.zig-cache
             ~/.cache/zig
-          key: zig-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          key: zig-nix-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
           restore-keys: |
-            zig-${{ runner.os }}-
+            zig-nix-${{ runner.os }}-
 
       - name: Build extension
         working-directory: zig
-        run: zig build
+        run: nix run nixpkgs#zig -- build
 
       - name: Run parity tests
         working-directory: zig
@@ -162,10 +157,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
         with:
-          version: 0.14.0
+          nix_path: nixpkgs=channel:nixos-unstable
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -178,13 +173,13 @@ jobs:
           path: |
             zig/.zig-cache
             ~/.cache/zig
-          key: zig-wasm-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          key: zig-wasm-nix-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
           restore-keys: |
-            zig-wasm-
+            zig-wasm-nix-
 
       - name: Build WASM
         working-directory: zig
-        run: zig build wasm
+        run: nix run nixpkgs#zig -- build wasm
 
       - name: Install dependencies
         working-directory: zig/browser-test

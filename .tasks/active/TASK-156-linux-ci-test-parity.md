@@ -4,8 +4,8 @@
 Make sure our build + test workflows run on Linux (CI + local), not only Darwin.
 
 ## Status
-- State: triage
-- Priority: LOW (CI-only, not blocking local dev or parity work)
+- State: active
+- Priority: HIGH (CI is broken)
 
 ## Context
 We have strong Darwin coverage (local dev + artifacts), but Linux can silently rot unless we exercise it regularly.
@@ -48,12 +48,22 @@ This task adds/strengthens Linux execution for the same “canonical” test ent
 ## Progress Log
 - 2025-12-21: Created from request to ensure Linux coverage.
 - 2025-12-22: Update tasks evaluation — waiting for Tom direction on CI priorities.
+- 2025-12-23: Tom requested Linux CI support. Analyzed CI failures:
+  - CI uses `setup-zig@v2` with Zig 0.14.0
+  - Makefile uses `nix run nixpkgs#zig` which is Zig 0.15.2
+  - Version mismatch causes extension to load but functions return empty
+  - Also 2 failing unit tests in `clset_vtab.zig` (edge case: "_schema" alone)
+  - WASM build fails due to Zig 0.14 incompatibility
+
+## Fixes Applied
+1. **CI Workflow**: Updated `.github/workflows/zig-tests.yaml` to use nix for zig consistently
+   - All jobs now use `nix run nixpkgs#zig --` instead of raw `zig`
+   - Ensures same Zig version (0.15.2) across CI and local dev
+   - Updated cache keys to `zig-nix-*`
+
+2. **Unit Test Fix**: Fixed `endsWithSchema()` in `zig/src/clset_vtab.zig`
+   - Changed `name.len < suffix.len` to `name.len <= suffix.len`
+   - Prevents "_schema" alone from being considered valid (empty base name)
 
 ## Completion Notes
-(Empty until done.)
-
-**Waiting on**: Tom to confirm CI priorities. Current state:
-- Darwin (macOS) coverage: excellent (local dev)
-- Linux coverage: unknown (need CI setup)
-- All harness scripts use portable bash (should work on Linux)
-- `.github/workflows/` has existing c-tests.yaml for C code but no Zig CI yet
+(Pending CI verification)
