@@ -1,32 +1,62 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-22 (Update Tasks: verified Round 61 claims, cleaned test output)
+> Last updated: 2025-12-22 (Gap analysis: 23 new triage tasks from skeptical review)
 
 ## Status
 
 - **BUILD: ✅ PASSING** — compiles successfully
 - **MVP: ✅ PASSING** — all core tests pass
 - Oracle parity: ✅ **18/18 PASSING**
-- Cross-open parity: ✅ **24/24 PASSING** — `.tasks/done/TASK-147-cross-open-modification-interoperability.md`
-- rows_impacted: ✅ **18/18 PASSING** — `.tasks/done/TASK-157-rows-impacted-returns-empty.md`
-- ALTER tests: ✅ **6/6 PASSING** — `.tasks/done/TASK-159-fix-alter-compact-clock-table-failure.md`
-- Cross-platform compat: ✅ **ALL PASSING** — `.tasks/done/TASK-148-cross-platform-compat-failures.md`
+- Cross-open parity: ✅ **24/24 PASSING**
+- rows_impacted: ✅ **18/18 PASSING**
+- ALTER tests: ✅ **6/6 PASSING**
+- Cross-platform compat: ✅ **ALL PASSING**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-Priority order:
-1. Address Linux CI parity (TASK-156)
-2. Implement fail-fast harness policy (TASK-146)
+**23 NEW TRIAGE TASKS** from gap analysis (2025-12-22):
+
+### High Priority (Cross-impl parity, data integrity)
+| Task | Summary | Risk |
+|------|---------|------|
+| TASK-161 | Resurrection: live row via sentinel | CL semantics |
+| TASK-162 | Resurrection: dead row via sentinel | CL semantics |
+| TASK-163 | Resurrection: live row via column | CL semantics |
+| TASK-164 | Resurrection: dead row via column | CL semantics |
+| TASK-165 | Out-of-order delete/resurrect sync | Production bug |
+| TASK-166 | Sentinel omission on INSERT | Wire format |
+| TASK-167 | Sentinel created on DELETE | Wire format |
+| TASK-169 | Sentinel NOT created on merge | Sync correctness |
+| TASK-170 | FK between CRR tables | Real-world apps |
+| TASK-171 | ON DELETE CASCADE between CRRs | Data integrity |
+| TASK-172 | Malformed PK blob handling | Security |
+| TASK-174 | Partial sync / interruption | Production |
+| TASK-177 | DEFAULT value merge semantics | Schema evolution |
+| TASK-179 | "Discord corrosion" 4-node scenario | Complex sync |
+
+### Medium Priority (Robustness, edge cases)
+| Task | Summary | Risk |
+|------|---------|------|
+| TASK-168 | Sentinel NOT on INSERT OR REPLACE | Edge case |
+| TASK-173 | Schema mismatch during sync | Error handling |
+| TASK-175 | Savepoints during sync | Transaction |
+| TASK-176 | ATTACH database with CRRs | Multi-DB |
+| TASK-180 | Site ID collision | Security |
+| TASK-182 | User triggers modify other CRRs | Real-world |
+
+### Low Priority (Performance, debug)
+| Task | Summary | Risk |
+|------|---------|------|
+| TASK-156 | Linux CI parity | Infrastructure |
+| TASK-178 | VACUUM on CRR database | Maintenance |
+| TASK-181 | crsql_sha() function | Debug info |
+| TASK-183 | Wide table (100 cols) performance | Performance |
 
 ## Triage Inbox Status
 
-**Inbox is empty** — both triage items evaluated and processed (see below).
-
-### Evaluated (from triage):
-- **TASK-146** (Fail-fast/loud harness): Deprioritized — all KNOWN_FAIL issues are now fixed (24/24 cross-open pass). Remaining SKIPs are defensive for optional oracle comparisons. Not blocking.
-- **TASK-156** (Linux CI parity): Infrastructure task — waiting for Tom direction on CI priorities.
+**23 items** in `.tasks/triage/` (see table above)
 
 **Completed Round 61 (2025-12-21):**
 - [x] TASK-148: Fix cross-platform compat failures (resurrection + text newlines) ✓
