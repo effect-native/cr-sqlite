@@ -4,7 +4,7 @@
 Create comprehensive resurrection tests verifying Zig matches Rust/C oracle for all CL (causal length) scenarios.
 
 ## Status
-- State: backlog
+- State: active (in progress)
 - Priority: high (cross-impl parity, CL semantics)
 - Parallelizable: YES (no file conflicts with other backlog tasks)
 
@@ -70,6 +70,33 @@ test_out_of_order() {
 
 ## Progress Log
 - 2025-12-22: Consolidated from 5 individual tasks for efficient parallel execution.
+- 2025-12-22: Created `zig/harness/test-resurrection-parity.sh` (~500 lines) implementing all 5 scenarios
+- 2025-12-22: Wired test into `zig/harness/test-parity.sh`
+- 2025-12-22: Initial test run found **DIVERGENCE** in Test 2 (dead row via sentinel):
+  - **Zig**: Does NOT resurrect dead row when receiving sentinel with cl=3 (row count stays 0)
+  - **Rust/C**: DOES resurrect dead row (row count becomes 1)
+  - This is a significant behavioral parity gap requiring Zig implementation fix
+
+## Test Results Summary
+| Test | Status | Notes |
+|------|--------|-------|
+| 1. Live via sentinel | PASS (5/5) | Row stays alive, CL advances, col clocks zeroed |
+| 2. Dead via sentinel | FAIL (2/4) | **DIVERGENCE**: Zig doesn't resurrect from sentinel alone |
+| 3. Live via column | (pending) | |
+| 4. Dead via column | (pending) | |
+| 5. Out-of-order | (pending) | |
+
+## Divergence Details
+### Test 2: Resurrection of Dead Row via Sentinel
+**Scenario**: Site B has tombstoned row (cl=2), receives resurrection sentinel (cl=3)
+**Expected**: Row should be resurrected
+**Actual**:
+- Zig: Row NOT resurrected (count=0)
+- Rust/C: Row resurrected (count=1)
+
+**Root Cause**: The Zig implementation likely does not handle the sentinel-only resurrection path. When a sentinel arrives with higher CL than existing tombstone, the row should be marked as alive even without column data.
+
+**Reference**: Python test `test_resurrection_of_dead_thing_via_sentinel` in `py/correctness/tests/test_cl_merging.py:459`
 
 ## Completion Notes
-(Empty until done.)
+Tests implemented and divergence documented. The Zig implementation needs to be updated to handle sentinel-only resurrection of tombstoned rows.

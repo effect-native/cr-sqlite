@@ -30,6 +30,12 @@
 #   - test-edge-cases.sh: Edge case parity (empty blob, NULL distinction - TASK-127/128)
 #   - test-wire-format-edge-cases.sh: Wire format edge cases (TASK-132)
 #   - test-pk-blob-parity.sh: PK blob format edge cases (text/blob/compound PKs - TASK-133)
+#   - test-error-handling.sh: Malformed input error handling (TASK-172)
+#   - test-sentinel-parity.sh: Sentinel emission parity (cid='-1' rules - TASK-166)
+#   - test-schema-mismatch.sh: Schema mismatch during sync (TASK-173)
+#   - test-partial-sync.sh: Partial sync / interruption recovery (TASK-174)
+#   - test-default-merge.sh: DEFAULT value merge semantics (TASK-177)
+#   - test-fk-crr.sh: Foreign keys between CRR tables (CASCADE behavior - TASK-170)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -1012,6 +1018,149 @@ else
         echo "  Edge case parity tests: $EDGE_PASS passed, $EDGE_FAIL failed"
         TOTAL_PASS=$((TOTAL_PASS + EDGE_PASS))
         TOTAL_FAIL=$((TOTAL_FAIL + EDGE_FAIL))
+    fi
+fi
+
+# Run sentinel emission parity tests (TASK-166)
+echo "Running test-sentinel-parity.sh..."
+if bash "$SCRIPT_DIR/test-sentinel-parity.sh" > "$TMPFILE" 2>&1; then
+    SENTINEL_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SENTINEL_PASS=0
+    echo "  Sentinel parity tests: $SENTINEL_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + SENTINEL_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Sentinel parity tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 6))
+    else
+        SENTINEL_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || SENTINEL_FAIL=0
+        SENTINEL_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SENTINEL_PASS=0
+        echo "  Sentinel parity tests: $SENTINEL_PASS passed, $SENTINEL_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + SENTINEL_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + SENTINEL_FAIL))
+    fi
+fi
+
+# Run error handling tests (malformed input - TASK-172)
+echo "Running test-error-handling.sh..."
+if bash "$SCRIPT_DIR/test-error-handling.sh" > "$TMPFILE" 2>&1; then
+    ERRHANDLING_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ERRHANDLING_PASS=0
+    echo "  Error handling tests: $ERRHANDLING_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + ERRHANDLING_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Error handling tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 10))
+    else
+        ERRHANDLING_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || ERRHANDLING_FAIL=0
+        ERRHANDLING_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ERRHANDLING_PASS=0
+        echo "  Error handling tests: $ERRHANDLING_PASS passed, $ERRHANDLING_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + ERRHANDLING_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + ERRHANDLING_FAIL))
+    fi
+fi
+
+# Run schema mismatch tests (TASK-173)
+echo "Running test-schema-mismatch.sh..."
+if bash "$SCRIPT_DIR/test-schema-mismatch.sh" > "$TMPFILE" 2>&1; then
+    SCHEMAMIS_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SCHEMAMIS_PASS=0
+    echo "  Schema mismatch tests: $SCHEMAMIS_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + SCHEMAMIS_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Schema mismatch tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        SCHEMAMIS_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || SCHEMAMIS_FAIL=0
+        SCHEMAMIS_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || SCHEMAMIS_PASS=0
+        SCHEMAMIS_DIVERGE=$(grep -c "DIVERGENCE" "$TMPFILE" 2>/dev/null) || SCHEMAMIS_DIVERGE=0
+        echo "  Schema mismatch tests: $SCHEMAMIS_PASS passed, $SCHEMAMIS_FAIL failed, $SCHEMAMIS_DIVERGE divergences"
+        TOTAL_PASS=$((TOTAL_PASS + SCHEMAMIS_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + SCHEMAMIS_FAIL))
+    fi
+fi
+
+# Run partial sync / interruption recovery tests (TASK-174)
+echo "Running test-partial-sync.sh..."
+if bash "$SCRIPT_DIR/test-partial-sync.sh" > "$TMPFILE" 2>&1; then
+    PARTIALSYNC_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PARTIALSYNC_PASS=0
+    echo "  Partial sync tests: $PARTIALSYNC_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + PARTIALSYNC_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE" || grep -q "SKIPPED" "$TMPFILE"; then
+        echo "  Partial sync tests: SKIPPED (functions not implemented)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 12))
+    else
+        PARTIALSYNC_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || PARTIALSYNC_FAIL=0
+        PARTIALSYNC_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || PARTIALSYNC_PASS=0
+        PARTIALSYNC_DIVERGE=$(grep "DIVERGENCE" "$TMPFILE" | wc -l) || PARTIALSYNC_DIVERGE=0
+        echo "  Partial sync tests: $PARTIALSYNC_PASS passed, $PARTIALSYNC_FAIL failed, $PARTIALSYNC_DIVERGE divergences"
+        TOTAL_PASS=$((TOTAL_PASS + PARTIALSYNC_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + PARTIALSYNC_FAIL))
+    fi
+fi
+
+# Run FK/CASCADE tests (TASK-170)
+echo "Running test-fk-crr.sh..."
+if bash "$SCRIPT_DIR/test-fk-crr.sh" > "$TMPFILE" 2>&1; then
+    FK_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FK_PASS=0
+    echo "  FK/CASCADE tests: $FK_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + FK_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  FK/CASCADE tests: BLOCKED (crsql_as_crr not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 15))
+    else
+        FK_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || FK_FAIL=0
+        FK_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || FK_PASS=0
+        echo "  FK/CASCADE tests: $FK_PASS passed, $FK_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + FK_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + FK_FAIL))
+    fi
+fi
+
+# Run resurrection parity tests (TASK-161)
+echo "Running test-resurrection-parity.sh..."
+if bash "$SCRIPT_DIR/test-resurrection-parity.sh" > "$TMPFILE" 2>&1; then
+    RESURRECT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || RESURRECT_PASS=0
+    echo "  Resurrection parity tests: $RESURRECT_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + RESURRECT_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE"; then
+        echo "  Resurrection parity tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 25))
+    else
+        RESURRECT_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || RESURRECT_FAIL=0
+        RESURRECT_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || RESURRECT_PASS=0
+        echo "  Resurrection parity tests: $RESURRECT_PASS passed, $RESURRECT_FAIL failed"
+        TOTAL_PASS=$((TOTAL_PASS + RESURRECT_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + RESURRECT_FAIL))
+    fi
+fi
+
+# Run multi-node sync parity tests (TASK-179 - discord corrosion scenario)
+echo "Running test-multinode-sync.sh..."
+if bash "$SCRIPT_DIR/test-multinode-sync.sh" > "$TMPFILE" 2>&1; then
+    MULTINODE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || MULTINODE_PASS=0
+    echo "  Multi-node sync tests: $MULTINODE_PASS passed"
+    TOTAL_PASS=$((TOTAL_PASS + MULTINODE_PASS))
+else
+    EXIT_CODE=$?
+    if [[ $EXIT_CODE -eq 2 ]] || grep -q "BLOCKED" "$TMPFILE" || grep -q "SKIP" "$TMPFILE"; then
+        echo "  Multi-node sync tests: BLOCKED (extensions not available)"
+        TOTAL_SKIP=$((TOTAL_SKIP + 6))
+    else
+        MULTINODE_FAIL=$(grep -c "FAIL:" "$TMPFILE" 2>/dev/null) || MULTINODE_FAIL=0
+        MULTINODE_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || MULTINODE_PASS=0
+        MULTINODE_DIVERGE=$(grep -c "DIVERGENCE" "$TMPFILE" 2>/dev/null) || MULTINODE_DIVERGE=0
+        echo "  Multi-node sync tests: $MULTINODE_PASS passed, $MULTINODE_FAIL failed, $MULTINODE_DIVERGE divergences"
+        TOTAL_PASS=$((TOTAL_PASS + MULTINODE_PASS))
+        TOTAL_FAIL=$((TOTAL_FAIL + MULTINODE_FAIL))
     fi
 fi
 

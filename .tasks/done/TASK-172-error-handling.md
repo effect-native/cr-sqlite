@@ -4,7 +4,7 @@
 Verify Zig handles malformed inputs gracefully (error, not crash).
 
 ## Status
-- State: backlog
+- State: done
 - Priority: high (security/robustness)
 - Parallelizable: YES (no file conflicts with other backlog tasks)
 
@@ -58,6 +58,38 @@ test_db_uncorrupted_after_error() {
 
 ## Progress Log
 - 2025-12-22: Created from gap analysis.
+- 2025-12-22: Implemented test-error-handling.sh with 10 test cases.
 
 ## Completion Notes
-(Empty until done.)
+- Implemented: `zig/harness/test-error-handling.sh` (~350 lines)
+- Wired into: `zig/harness/test-parity.sh`
+- Test results: 10/10 PASS, 0 FAIL, 0 SKIP
+
+### Tests Implemented
+1. **test_truncated_pk** - Truncated PK blob (X'0109') → error, not crash ✓
+2. **test_wrong_column_count** - Wrong column count header (X'03090102') → error ✓
+3. **test_invalid_type_marker** - Invalid type markers (0xFF) → error ✓
+4. **test_corrupted_length_prefixes** - Corrupted length prefixes (X'010DFFFF') → error ✓
+5. **test_zero_column_count** - Zero column count (X'00') → error ✓
+6. **test_empty_pk_blob** - Empty PK blob (X'') → error ✓
+7. **test_db_uncorrupted_after_error** - Database remains intact after each error ✓
+8. **test_invalid_table_name** - Non-existent table reference → error ✓
+9. **test_invalid_column_name** - Non-existent column reference → error ✓
+10. **test_integer_overflow** - Int64 max value in PK → handled gracefully ✓
+
+### Divergences Documented
+- Tests 1, 2, 10: Rust/C oracle shows "crashed=1" detection (likely abort on malformed input)
+- Zig handles all cases gracefully with errors, not crashes
+- Both implementations remain functional and databases stay uncorrupted
+
+### Commands to Reproduce
+```bash
+# Run error handling tests only
+cd /Users/tom/Developer/effect-native/cr-sqlite/zig/harness
+bash test-error-handling.sh
+
+# Run full parity suite (includes error handling)
+bash test-parity.sh
+```
+
+### Date: 2025-12-22

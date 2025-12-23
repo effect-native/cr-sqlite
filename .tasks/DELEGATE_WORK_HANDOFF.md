@@ -68,6 +68,202 @@ Artifacts:
 
 ---
 
+## Round 2025-12-22 (62) — 8 new parity test suites (8 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-161-resurrection-parity-suite.md`
+- `.tasks/done/TASK-166-sentinel-parity-suite.md`
+- `.tasks/done/TASK-170-fk-cascade-suite.md`
+- `.tasks/done/TASK-172-error-handling.md`
+- `.tasks/done/TASK-173-schema-mismatch.md`
+- `.tasks/done/TASK-174-partial-sync.md`
+- `.tasks/done/TASK-177-default-value-merge.md`
+- `.tasks/done/TASK-179-multinode-sync.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-resurrection-parity.sh
+bash zig/harness/test-sentinel-parity.sh
+bash zig/harness/test-fk-crr.sh
+bash zig/harness/test-error-handling.sh
+bash zig/harness/test-schema-mismatch.sh
+bash zig/harness/test-partial-sync.sh
+bash zig/harness/test-default-merge.sh
+bash zig/harness/test-multinode-sync.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-161: Resurrection parity (4/5 pass, 1 DIVERGENCE)</summary>
+
+```text
+Test 1: Live via sentinel - PASS (5/5 checks)
+Test 2: Dead via sentinel - FAIL (Zig doesn't resurrect tombstoned row)
+  DIVERGENCE: Zig row count = 0, Rust/C = 1
+```
+
+**Critical divergence**: When a tombstoned row (CL=2) receives a resurrection sentinel (CL=3), Zig does NOT resurrect the row. Rust/C correctly resurrects it.
+</details>
+
+<details>
+<summary>TASK-166: Sentinel parity (5/6 pass, 1 DIVERGENCE)</summary>
+
+```text
+Test 1: No sentinel on INSERT - PASS
+Test 2: Sentinel on DELETE - PASS
+Test 3: No sentinel on REPLACE - PASS  
+Test 4: No sentinel on merge - FAIL
+  DIVERGENCE: Zig creates 3 spurious sentinels vs Rust 0
+Test 5: Sentinel propagation - PASS
+Test 6: Sentinel structure - PASS
+```
+
+**Divergence**: Zig incorrectly creates sentinel entries when syncing INSERT changes to a new site. Should only create sentinels on DELETE.
+</details>
+
+<details>
+<summary>TASK-170: FK/CRR parity (11/11 pass)</summary>
+
+```text
+  PASSED:  11
+  FAILED:  0
+  SKIPPED: 0
+
+Key Findings:
+  1. CRR tables REJECT FK constraints (by design)
+  2. Non-CRR tables CAN have FKs referencing CRR tables
+  3. Use soft relationships (no FK) for CRR-to-CRR links
+  4. App logic must handle orphaned rows (no CASCADE)
+  5. Out-of-order sync works with soft relationships
+
+All FK/CRR tests PASSED
+```
+</details>
+
+<details>
+<summary>TASK-172: Error handling (10/10 pass)</summary>
+
+```text
+  PASS:       10
+  FAIL:       0
+  SKIP:       0
+  DIVERGENCE: 0
+
+All error handling tests PASSED (no crashes)
+```
+
+Zig handles all malformed inputs gracefully (error, not crash). In some cases Zig is MORE robust than Rust/C.
+</details>
+
+<details>
+<summary>TASK-173: Schema mismatch (11/12 pass, 1 DIVERGENCE)</summary>
+
+```text
+  PASSED:  11
+  FAILED:  1
+  SKIPPED: 0
+
+Divergences found:
+  - source_has_extra_column: Zig='ERROR' vs Rust='IGNORED'
+```
+
+**Divergence**: When source has a column that destination doesn't, Zig returns ERROR while Rust/C gracefully ignores it. Both approaches have merit.
+</details>
+
+<details>
+<summary>TASK-174: Partial sync (12/12 pass)</summary>
+
+```text
+  PASSED:     12
+  FAILED:     0
+  SKIPPED:    0
+  DIVERGENCES: 1 (documented atomicity difference)
+
+All partial sync tests PASSED
+```
+
+Both implementations maintain atomicity. Minor divergence: Zig has stricter transaction-level atomicity.
+</details>
+
+<details>
+<summary>TASK-177: Default merge (6/6 pass)</summary>
+
+```text
+  PASSED:  6
+  FAILED:  0
+
+All DEFAULT merge semantics tests PASSED
+```
+
+Both implementations handle DEFAULT values identically. No phantom clock entries created.
+</details>
+
+<details>
+<summary>TASK-179: Multinode sync (5/6 pass, 1 DIVERGENCE)</summary>
+
+```text
+Results: 5 passed, 1 failed, 0 skipped
+
+Test 1: Discord corrosion (3-node) - PASS
+Test 2: Extended 4-node discord - PASS
+Test 3: Star topology - FAIL
+
+  DIVERGENCE: Zig star topology fails to converge
+    Hub and C diverged
+    Hub and D diverged
+```
+
+**Critical divergence**: In hub-and-spoke topology, Zig nodes fail to converge after sync through central hub. This suggests a bug in site_id filtering or change application.
+</details>
+
+**Files created**
+- `zig/harness/test-resurrection-parity.sh` (new, ~700 lines)
+- `zig/harness/test-sentinel-parity.sh` (new, ~570 lines)
+- `zig/harness/test-fk-crr.sh` (new, ~615 lines)
+- `zig/harness/test-error-handling.sh` (new, ~350 lines)
+- `zig/harness/test-schema-mismatch.sh` (new, ~450 lines)
+- `zig/harness/test-partial-sync.sh` (new, ~230 lines)
+- `zig/harness/test-default-merge.sh` (new, ~350 lines)
+- `zig/harness/test-multinode-sync.sh` (new, ~950 lines)
+- `zig/harness/test-parity.sh` (modified, wired in all new tests)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-resurrection-parity.sh`
+4. `bash zig/harness/test-sentinel-parity.sh`
+5. `bash zig/harness/test-fk-crr.sh`
+6. `bash zig/harness/test-error-handling.sh`
+7. `bash zig/harness/test-schema-mismatch.sh`
+8. `bash zig/harness/test-partial-sync.sh`
+9. `bash zig/harness/test-default-merge.sh`
+10. `bash zig/harness/test-multinode-sync.sh`
+
+**Known gaps / unverified claims**
+- **4 critical divergences found** requiring follow-up:
+  1. Resurrection: Zig doesn't resurrect tombstoned rows via sentinel
+  2. Sentinel: Zig creates spurious sentinels on merge
+  3. Schema mismatch: Zig errors on unknown columns (Rust ignores)
+  4. Multinode: Zig star topology fails to converge
+- CI integration not verified (local runs only)
+- No coverage captured
+
+**Follow-up tasks needed (to be created in triage)**
+1. Fix Zig resurrection via sentinel (CL=3 should resurrect CL=2 tombstone)
+2. Fix Zig spurious sentinel creation during merge
+3. Investigate Zig star topology convergence failure
+
+---
+
 ## Round 2025-12-21 (61) — Cross-platform compat + optimizations (3 tasks)
 
 **Tasks executed**

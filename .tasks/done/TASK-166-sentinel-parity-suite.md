@@ -4,7 +4,7 @@
 Create comprehensive sentinel tests verifying Zig matches Rust/C oracle for sentinel (cid='-1') emission rules.
 
 ## Status
-- State: backlog
+- State: active
 - Priority: high (wire format parity)
 - Parallelizable: YES (no file conflicts with other backlog tasks)
 
@@ -66,6 +66,39 @@ test_no_sentinel_on_merge() {
 
 ## Progress Log
 - 2025-12-22: Consolidated from 4 individual tasks for efficient parallel execution.
+- 2025-12-22: Implemented `zig/harness/test-sentinel-parity.sh` (300+ lines) with 6 test scenarios.
+- 2025-12-22: Wired test into `zig/harness/test-parity.sh`.
+- 2025-12-22: Test results: **5 passed, 1 failed**
+  - PASS: Test 1 - No sentinel on INSERT (both = 0)
+  - PASS: Test 2 - Sentinel on DELETE (both = 800)
+  - PASS: Test 3 - No sentinel on INSERT OR REPLACE (both = 0)
+  - FAIL: Test 4 - No sentinel on merge (Zig creates spurious sentinels)
+  - PASS: Test 5 - Sentinel propagation on sync (both = 3)
+  - PASS: Test 6 - Sentinel structure parity (counts match)
+
+## Divergence Found
+**Test 4 failure reveals a Zig implementation bug:**
+
+When syncing INSERT changes to a site that doesn't have the row, the Zig 
+implementation incorrectly creates a sentinel entry (`cid='-1'`) alongside 
+the column changes. The Rust/C oracle correctly omits sentinels since no 
+DELETE operation occurred.
+
+**Root cause:** The `changesUpdate` path in the Zig changes vtab creates 
+sentinels when inserting new rows during merge, but it should only create 
+sentinels on actual DELETE operations.
+
+**Evidence:**
+```
+Zig Site B after sync: sentinel_count=1 (WRONG)
+Rust Site B after sync: sentinel_count=0 (CORRECT)
+```
 
 ## Completion Notes
-(Empty until done.)
+Test suite implementation complete. Files created/modified:
+- `zig/harness/test-sentinel-parity.sh` (new, 568 lines)
+- `zig/harness/test-parity.sh` (added test runner entry)
+
+The test successfully validates 5/6 scenarios and detected a real divergence 
+in scenario 4 (no sentinel on merge). A follow-up task should be created to 
+fix the Zig implementation bug in the changesUpdate merge path.
