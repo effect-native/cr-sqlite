@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-22 (Gap analysis: 23 new triage tasks from skeptical review)
+> Last updated: 2025-12-22 (Round 63: Fixed 3 critical divergences)
 
 ## Status
 
@@ -11,32 +11,17 @@
 - rows_impacted: ✅ **18/18 PASSING**
 - ALTER tests: ✅ **6/6 PASSING**
 - Cross-platform compat: ✅ **ALL PASSING**
+- Resurrection parity: ✅ **25/25 PASSING** (Round 63)
+- Sentinel parity: ✅ **6/6 PASSING** (Round 63)
+- Multinode sync: ✅ **6/6 PASSING** (Round 63)
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-**8 BACKLOG TASKS ready for parallel execution** (no file conflicts):
+**Backlog is empty** — Round 62 test suites completed, Round 63 divergence fixes completed.
 
-| Task | File to Create | Priority | Can Run With |
-|------|----------------|----------|--------------|
-| TASK-161 | `test-resurrection-parity.sh` | HIGH | All others |
-| TASK-166 | `test-sentinel-parity.sh` | HIGH | All others |
-| TASK-170 | `test-fk-crr.sh` | HIGH | All others |
-| TASK-172 | `test-error-handling.sh` | HIGH | All others |
-| TASK-173 | `test-schema-mismatch.sh` | MEDIUM | All others |
-| TASK-174 | `test-partial-sync.sh` | HIGH | All others |
-| TASK-177 | `test-default-merge.sh` | HIGH | All others |
-| TASK-179 | `test-multinode-sync.sh` | HIGH | All others |
-
-**All 8 tasks can run in parallel** — each creates a unique test file.
-
-### Consolidated Tasks (in backlog)
-- TASK-161: Resurrection suite (was 161-165)
-- TASK-166: Sentinel suite (was 166-169)
-- TASK-170: FK/Cascade suite (was 170-171)
-
-## Triage Inbox (lower priority, not blocking)
+### Triage Inbox (lower priority, not blocking)
 
 | Task | Summary | Priority |
 |------|---------|----------|
@@ -48,6 +33,22 @@
 | TASK-181 | crsql_sha() function | Low |
 | TASK-182 | User triggers modify other CRRs | Medium |
 | TASK-183 | Wide table performance | Low |
+| TASK-186 | Schema mismatch: unknown column behavior | Medium (design decision) |
+
+**Completed Round 63 (2025-12-22):**
+- [x] TASK-184: Fix resurrection via sentinel (tombstoned rows now resurrect) ✓
+- [x] TASK-185: Fix spurious sentinel creation during merge ✓
+- [x] TASK-187: Fix star topology sync convergence ✓
+
+**Completed Round 62 (2025-12-22):**
+- [x] TASK-161: Resurrection parity test suite ✓
+- [x] TASK-166: Sentinel parity test suite ✓
+- [x] TASK-170: FK/cascade test suite ✓
+- [x] TASK-172: Error handling tests ✓
+- [x] TASK-173: Schema mismatch tests ✓
+- [x] TASK-174: Partial sync tests ✓
+- [x] TASK-177: DEFAULT value merge tests ✓
+- [x] TASK-179: Multinode sync tests ✓
 
 **Completed Round 61 (2025-12-21):**
 - [x] TASK-148: Fix cross-platform compat failures (resurrection + text newlines) ✓

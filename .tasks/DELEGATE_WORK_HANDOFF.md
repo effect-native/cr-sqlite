@@ -68,6 +68,105 @@ Artifacts:
 
 ---
 
+## Round 2025-12-22 (63) — Fix 3 critical divergences from Round 62 (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-184-fix-resurrection-via-sentinel.md`
+- `.tasks/done/TASK-185-fix-spurious-sentinel-on-merge.md`
+- `.tasks/done/TASK-187-fix-star-topology-convergence.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-resurrection-parity.sh
+bash zig/harness/test-sentinel-parity.sh
+bash zig/harness/test-multinode-sync.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-184: Resurrection via sentinel (25/25 pass, was 11/12)</summary>
+
+```text
+Test 1: Resurrection of Live Row via Sentinel - 5/5 PASS
+Test 2: Resurrection of Dead Row via Sentinel - 4/4 PASS (was failing)
+Test 3: Update on Live Row via Column - 6/6 PASS (was failing)
+...
+Results: 25 passed, 0 failed, 0 skipped
+All resurrection parity tests PASSED
+```
+
+**Root Cause**: The sentinel merge path in `changes_vtab.zig` handled resurrection (odd CL) by only zeroing column clocks, but didn't check if the base table row actually existed. For tombstoned rows, the base table row was deleted.
+
+**Fix**: Added `insertRowForSentinelResurrection()` in `merge_insert.zig`. Modified sentinel handling in `changes_vtab.zig` to check `rowExistsInBaseTable()` before zeroing clocks, and if row doesn't exist, call `insertRowForSentinelResurrection()` first.
+</details>
+
+<details>
+<summary>TASK-185: Spurious sentinel on merge (6/6 pass, was 5/6)</summary>
+
+```text
+PASS: No sentinels created on INSERT (both = 0)
+PASS: Sentinels created on DELETE (both = 800)
+PASS: No sentinels created on INSERT OR REPLACE (both = 0)
+PASS: No sentinels created on merge (all sites = 0)  <-- was failing
+PASS: Sentinels propagated correctly (Site B matches Site A = 3)
+PASS: Sentinel structure matches (sampled first 5 entries)
+Sentinel Parity Summary: 6 passed, 0 failed
+All sentinel parity tests PASSED!
+```
+
+**Root Cause**: In `changes_vtab.zig`, the `changesUpdate` function unconditionally created sentinel entries when inserting new rows during merge. Should only create sentinels when merging an actual sentinel (cid='-1').
+
+**Fix**: Removed unconditional sentinel creation for new rows in `changes_vtab.zig`. Added sentinel CL update for existing row column merges when cl > local_cl.
+</details>
+
+<details>
+<summary>TASK-187: Star topology convergence (6/6 pass, was 5/6)</summary>
+
+```text
+Test 1: Discord corrosion (3-node) - PASS
+Test 2: Extended 4-node discord - PASS  
+Test 3: Star topology - PASS  <-- was failing
+
+Results: 6 passed, 0 failed, 0 skipped
+All multi-node sync parity tests PASSED
+```
+
+**Root Cause**: Three bugs in `merge_insert.zig`:
+1. `setWinnerClock` and `setWinnerClockCached` always stored `site_id = 0` instead of preserving remote site_id
+2. `getLocalColVersion` filtered `WHERE site_id = 0` which ignored remote changes
+3. For tables with `a PRIMARY KEY NOT NULL` (not `INTEGER PRIMARY KEY`), operations used `WHERE rowid = ?` but rowid ≠ PK value
+
+**Fix**: Fixed all three issues in `merge_insert.zig` - preserve site_id, remove incorrect filter, use PK column instead of rowid.
+</details>
+
+**Files modified**
+- `zig/src/merge_insert.zig` — Added `insertRowForSentinelResurrection()`, fixed site_id handling, fixed PK vs rowid confusion
+- `zig/src/changes_vtab.zig` — Fixed sentinel creation logic, added row existence check for resurrection
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-resurrection-parity.sh` — verify 25/25 pass
+4. `bash zig/harness/test-sentinel-parity.sh` — verify 6/6 pass
+5. `bash zig/harness/test-multinode-sync.sh` — verify 6/6 pass
+
+**Known gaps / unverified claims**
+- All 3 Round 62 divergences fixed: resurrection, spurious sentinel, star topology
+- TASK-186 (schema mismatch unknown column behavior) remains in triage — this is a design decision, not a bug
+- CI integration not verified (local runs only)
+- No coverage captured
+
+---
+
 ## Round 2025-12-22 (62) — 8 new parity test suites (8 tasks)
 
 **Tasks executed**

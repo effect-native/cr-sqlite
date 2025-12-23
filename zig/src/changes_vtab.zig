@@ -1764,18 +1764,13 @@ fn changesUpdate(
                 };
             }
 
-            // Step 1d: Insert sentinel clock entry with the incoming cl using pks_pk
-            if (merge_stmts) |stmts| {
-                merge_insert.setWinnerClockCached(stmts, pks_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
-                    log.debug("changesUpdate: setWinnerClockCached for sentinel failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
-            } else {
-                merge_insert.setWinnerClock(api_db, table_slice, pks_pk, "-1", cl, db_version, site_id_ptr_insert, @intCast(site_id_len), seq) catch {
-                    log.debug("changesUpdate: setWinnerClock for sentinel failed", .{});
-                    return vtab.SQLITE_ERROR;
-                };
-            }
+            // Step 1d: DO NOT insert sentinel clock entry for regular column changes
+            // Sentinels should ONLY be created when:
+            //   1. A DELETE operation is being merged (incoming cid='-1'), OR
+            //   2. Passing through an existing sentinel from source
+            // The incoming change here is a regular column change (cid != '-1'),
+            // so we should NOT create a sentinel. This matches Rust/C behavior.
+            // (Sentinel propagation is handled in the is_sentinel_for_new block above)
 
             // Increment rows impacted
             rows_impacted.incrementRowsImpacted();
@@ -1899,7 +1894,28 @@ fn changesUpdate(
                     };
                 }
             } else {
-                // For resurrection (odd CL), zero column clocks so subsequent column changes win.
+                // For resurrection (odd CL), first check if row needs to be re-inserted.
+                // This handles the case where the local row is tombstoned (base table row deleted)
+                // but we receive a resurrection sentinel from a remote site.
+                const sentinel_row_exists = blk: {
+                    if (merge_stmts) |stmts| {
+                        break :blk merge_insert.rowExistsInBaseTableCached(stmts, pk_rowid) catch false;
+                    } else {
+                        break :blk merge_insert.rowExistsInBaseTable(api_db, table_slice, pk_rowid) catch false;
+                    }
+                };
+
+                if (!sentinel_row_exists) {
+                    // Row doesn't exist in base table - need to re-insert it
+                    // This is resurrection via sentinel for a tombstoned row
+                    log.debug("changesUpdate: resurrection via sentinel - inserting row for pk_rowid={}", .{pk_rowid});
+                    merge_insert.insertRowForSentinelResurrection(api_db, table_slice, pk_rowid) catch {
+                        log.debug("changesUpdate: insertRowForSentinelResurrection failed", .{});
+                        return vtab.SQLITE_ERROR;
+                    };
+                }
+
+                // Zero column clocks so subsequent column changes win.
                 // This matches Rust's zero_clocks_on_resurrect behavior.
                 if (merge_stmts) |stmts| {
                     merge_insert.zeroClockOnResurrectCached(stmts, pk_rowid) catch {
@@ -1975,6 +1991,21 @@ fn changesUpdate(
         } else {
             merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, cid_slice, col_version, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
                 log.debug("changesUpdate: setWinnerClock for resurrection failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
+
+        // Update sentinel CL to track the incoming causal length.
+        // The incoming cl represents the source row's lifecycle state (3 = INSERT->DELETE->INSERT).
+        // We need to track this so future syncs know the row is at cl=3.
+        if (merge_stmts) |stmts| {
+            merge_insert.setWinnerClockCached(stmts, pk_rowid, "-1", cl, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClockCached for resurrection sentinel failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, "-1", cl, db_version, site_id_ptr_res, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock for resurrection sentinel failed", .{});
                 return vtab.SQLITE_ERROR;
             };
         }
@@ -2125,6 +2156,25 @@ fn changesUpdate(
             log.debug("changesUpdate: setWinnerClock failed", .{});
             return vtab.SQLITE_ERROR;
         };
+    }
+
+    // If the incoming CL is higher than local CL, update the sentinel to track the new CL.
+    // This happens when receiving column updates from a row that has been through more
+    // lifecycle changes (insert/delete cycles) than the local row.
+    // Note: This is for EXISTING rows only. For NEW rows, we don't create sentinels
+    // (handled above) - that would cause Test 4 to fail.
+    if (cl > local_cl) {
+        if (merge_stmts) |stmts| {
+            merge_insert.setWinnerClockCached(stmts, pk_rowid, "-1", cl, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClockCached for sentinel CL update failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        } else {
+            merge_insert.setWinnerClock(api_db, table_slice, pk_rowid, "-1", cl, db_version, site_id_ptr, @intCast(site_id_len), seq) catch {
+                log.debug("changesUpdate: setWinnerClock for sentinel CL update failed", .{});
+                return vtab.SQLITE_ERROR;
+            };
+        }
     }
 
     // Advance db_version to at least the incoming db_version when remote wins

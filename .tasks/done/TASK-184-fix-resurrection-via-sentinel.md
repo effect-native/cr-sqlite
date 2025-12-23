@@ -4,7 +4,7 @@
 Fix Zig implementation to resurrect tombstoned rows when receiving a sentinel with higher CL.
 
 ## Status
-- State: triage
+- State: done
 - Priority: HIGH (sync incompatibility)
 - Discovered: Round 62 (TASK-161 test suite)
 
@@ -49,6 +49,27 @@ The sentinel merge path in `zig/src/merge_insert.zig` likely doesn't handle the 
 
 ## Progress Log
 - 2025-12-22: Created from Round 62 divergence discovery.
+- 2025-12-22: Implemented fix - resurrection via sentinel now works.
 
 ## Completion Notes
-(Empty until done.)
+**Root Cause**: The sentinel merge path in `changes_vtab.zig` (lines 1901-1914) handled resurrection (odd CL) by only zeroing column clocks, but didn't check if the base table row actually existed. For tombstoned rows, the base table row was deleted, so `zeroClockOnResurrect` ran on a non-existent row.
+
+**Fix Applied**:
+1. Added `insertRowForSentinelResurrection()` function in `merge_insert.zig` - inserts a row with just the PK value (non-PK columns NULL) using the `__crsql_key` lookup.
+2. Modified sentinel handling in `changes_vtab.zig` to check `rowExistsInBaseTable()` before zeroing clocks. If row doesn't exist, calls `insertRowForSentinelResurrection()` first.
+
+**Files Modified**:
+- `zig/src/merge_insert.zig`: Added `insertRowForSentinelResurrection()` function (lines 659-703)
+- `zig/src/changes_vtab.zig`: Added row existence check + resurrection insert in sentinel handler (lines 1901-1920)
+
+**Test Results**:
+- `test-resurrection-parity.sh` Test 2 (dead via sentinel): **PASS** ✅
+- `test-resurrection-parity.sh` Tests 1a-1e: **PASS** ✅
+- `test-cl-parity.sh`: **17 passed, 0 failed** ✅
+- `test-rows-impacted-parity.sh`: **18 passed, 0 failed** ✅
+- `test-merge-value-parity.sh`: **7 passed, 0 failed** ✅
+- `test-oracle-parity.sh`: **18 passed, 0 failed** ✅
+
+**Note**: Test 3c (`test-resurrection-parity.sh`) fails - this is a separate issue where column updates don't create/update the sentinel clock. This is out of scope for TASK-184.
+
+**Date**: 2025-12-22
