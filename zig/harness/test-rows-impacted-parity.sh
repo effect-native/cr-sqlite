@@ -557,9 +557,7 @@ echo "  - Counter only increments when a row is ACTUALLY changed (not for no-ops
 echo "  - Losing merges (lower col_version) do NOT increment counter"
 echo "  - Winning merges (higher col_version) DO increment counter"
 echo ""
-echo "KNOWN DIVERGENCE:"
-echo "  Zig incorrectly resets rows_impacted on ROLLBACK via rollback_hook."
-echo "  This should be removed to match Rust/C behavior (xRollback=NULL)."
+echo "(No known divergences - Zig matches Rust/C oracle behavior)"
 echo ""
 
 if [[ $DIVERGE -gt 0 ]]; then

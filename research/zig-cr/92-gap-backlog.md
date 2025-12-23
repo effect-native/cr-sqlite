@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-21 (Round 61: Cross-platform compat + optimizations)
+> Last updated: 2025-12-22 (Update Tasks: verified Round 61 claims, cleaned test output)
 
 ## Status
 
@@ -22,10 +22,11 @@ Priority order:
 
 ## Triage Inbox Status
 
-| Task ID | Summary | Priority | Notes |
-|---------|---------|----------|-------|
-| TASK-146 | Fail-fast/loud harness policy | Low | Policy task |
-| TASK-156 | Linux CI parity | Medium | CI setup |
+**Inbox is empty** — both triage items evaluated and processed (see below).
+
+### Evaluated (from triage):
+- **TASK-146** (Fail-fast/loud harness): Deprioritized — all KNOWN_FAIL issues are now fixed (24/24 cross-open pass). Remaining SKIPs are defensive for optional oracle comparisons. Not blocking.
+- **TASK-156** (Linux CI parity): Infrastructure task — waiting for Tom direction on CI priorities.
 
 **Completed Round 61 (2025-12-21):**
 - [x] TASK-148: Fix cross-platform compat failures (resurrection + text newlines) ✓

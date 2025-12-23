@@ -47,6 +47,13 @@ This task adds/strengthens Linux execution for the same “canonical” test ent
 
 ## Progress Log
 - 2025-12-21: Created from request to ensure Linux coverage.
+- 2025-12-22: Update tasks evaluation — waiting for Tom direction on CI priorities.
 
 ## Completion Notes
 (Empty until done.)
+
+**Waiting on**: Tom to confirm CI priorities. Current state:
+- Darwin (macOS) coverage: excellent (local dev)
+- Linux coverage: unknown (need CI setup)
+- All harness scripts use portable bash (should work on Linux)
+- `.github/workflows/` has existing c-tests.yaml for C code but no Zig CI yet
