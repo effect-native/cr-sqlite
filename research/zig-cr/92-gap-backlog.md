@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-22 (Round 63: Fixed 3 critical divergences)
+> Last updated: 2025-12-22 (Round 64: Gap discovery and triage organization)
 
 ## Status
 
@@ -14,26 +14,81 @@
 - Resurrection parity: ✅ **25/25 PASSING** (Round 63)
 - Sentinel parity: ✅ **6/6 PASSING** (Round 63)
 - Multinode sync: ✅ **6/6 PASSING** (Round 63)
+- Schema mismatch: ⚠️ **11/12 PASSING** (1 divergence: unknown column behavior)
+- Test scripts: **57 total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-**Backlog is empty** — Round 62 test suites completed, Round 63 divergence fixes completed.
+**Backlog is empty** — Triage contains 11 items ready for prioritization.
 
-### Triage Inbox (lower priority, not blocking)
+### Triage Inbox (organized by priority)
 
-| Task | Summary | Priority |
-|------|---------|----------|
-| TASK-156 | Linux CI parity | Low |
-| TASK-175 | Savepoints during sync | Medium |
-| TASK-176 | ATTACH database with CRRs | Medium |
-| TASK-178 | VACUUM on CRR database | Low |
-| TASK-180 | Site ID collision | Medium |
-| TASK-181 | crsql_sha() function | Low |
-| TASK-182 | User triggers modify other CRRs | Medium |
-| TASK-183 | Wide table performance | Low |
-| TASK-186 | Schema mismatch: unknown column behavior | Medium (design decision) |
+#### HIGH Priority — Missing Core Features
+| Task | Summary | Risk | Effort |
+|------|---------|------|--------|
+| **TASK-189** | crsql_tracked_peers table missing | Sync clients need this for cursors | Low |
+| **TASK-188** | crsql_get_seq() function missing | API completeness | Low |
+
+#### MEDIUM Priority — Behavioral Parity
+| Task | Summary | Risk | Effort |
+|------|---------|------|--------|
+| **TASK-186** | Schema mismatch: unknown column behavior | Design decision | Low |
+| **TASK-175** | Savepoints during sync | Transaction correctness | Medium |
+| **TASK-176** | ATTACH database with CRRs | Multi-db patterns | Medium |
+| **TASK-180** | Site ID collision handling | Security edge case | Medium |
+| **TASK-182** | User triggers modify other CRRs | Real-world pattern | Medium |
+
+#### LOW Priority — Nice to Have
+| Task | Summary | Risk | Effort |
+|------|---------|------|--------|
+| **TASK-181** | crsql_sha() function | Debug only | Low |
+| **TASK-178** | VACUUM on CRR database | Maintenance op | Low |
+| **TASK-183** | Wide table (50+ cols) performance | Performance only | Medium |
+| **TASK-156** | Linux CI parity | CI only | Medium |
+
+### Function Comparison (Round 64 Discovery)
+
+**Rust/C Functions (22 total):**
+```
+crsql_after_delete, crsql_after_insert, crsql_after_update
+crsql_as_crr, crsql_as_table, crsql_automigrate
+crsql_begin_alter, crsql_commit_alter
+crsql_config_get, crsql_config_set
+crsql_db_version, crsql_finalize
+crsql_fract_as_ordered, crsql_fract_fix_conflict_return_old_key, crsql_fract_key_between
+crsql_get_seq, crsql_increment_and_get_seq
+crsql_internal_sync_bit, crsql_next_db_version
+crsql_pack_columns, crsql_rows_impacted
+crsql_sha, crsql_site_id
+```
+
+**Zig Functions (24 total):**
+```
+crsql_after_delete, crsql_after_insert, crsql_after_update
+crsql_as_crr, crsql_as_table, crsql_automigrate (x2)
+crsql_begin_alter (x2), crsql_commit_alter (x2)
+crsql_config_get, crsql_config_set
+crsql_db_version, crsql_finalize
+crsql_fract_as_ordered, crsql_fract_fix_conflict_return_old_key, crsql_fract_key_between
+crsql_increment_and_get_seq
+crsql_internal_sync_bit, crsql_is_crr, crsql_next_db_version
+crsql_pack_columns, crsql_rows_impacted
+crsql_site_id, crsql_version, crsql_zig_version
+```
+
+**Missing from Zig:**
+- `crsql_get_seq` — TASK-188
+- `crsql_sha` — TASK-181
+
+**Extra in Zig (OK):**
+- `crsql_is_crr` — useful debug function
+- `crsql_version`, `crsql_zig_version` — version info
+
+**Table Comparison:**
+- Rust/C: `crsql_master`, `crsql_site_id`, `crsql_tracked_peers`
+- Zig: `crsql_master`, `crsql_site_id` ← **missing `crsql_tracked_peers`**
 
 **Completed Round 63 (2025-12-22):**
 - [x] TASK-184: Fix resurrection via sentinel (tombstoned rows now resurrect) ✓
