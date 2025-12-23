@@ -68,6 +68,140 @@ Artifacts:
 
 ---
 
+## Round 2025-12-23 (66) — Savepoint, ATTACH, site_id collision test suites (3 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-175-savepoint-during-sync.md`
+- `.tasks/done/TASK-176-attach-database-crr.md`
+- `.tasks/done/TASK-180-site-id-collision.md`
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-savepoint-sync.sh
+bash zig/harness/test-attach-crr.sh
+bash zig/harness/test-site-id-collision.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-175: Savepoint sync tests (15/16 pass, 1 divergence)</summary>
+
+```text
+==================================================================
+           SAVEPOINT SYNC TEST SUMMARY
+==================================================================
+  PASSED:     15
+  FAILED:     1
+  SKIPPED:    0
+  DIVERGENCES: 1
+==================================================================
+
+WARNING: 1 divergence(s) between Zig and Rust/C oracle
+```
+
+**Tests Created (8 scenarios):**
+1. Basic Savepoint with Rollback — PASS
+2. Nested Savepoints (sp1 -> sp2) — PASS
+3. RELEASE SAVEPOINT (keeps changes) — PASS
+4. Multiple Savepoints with Partial Rollback — PASS
+5. rows_impacted After Partial Rollback — PASS
+6. Clock Entries After Savepoint Rollback — PASS
+7. db_version After Savepoint Rollback — **FAIL (divergence)**
+8. Rollback to Savepoint Then Add More Data — PASS
+
+**Divergence found:** When changes are applied via `crsql_changes` within a transaction that uses savepoints, the Zig implementation fails to advance db_version after COMMIT.
+- Rust/C: db_version advances 0 -> 1
+- Zig: db_version stays at 0 (BUG)
+
+**Follow-up task created:** `.tasks/triage/TASK-181-zig-dbversion-savepoint-bug.md`
+</details>
+
+<details>
+<summary>TASK-176: ATTACH CRR tests (15/15 pass)</summary>
+
+```text
+╔═══════════════════════════════════════════════════════════════════════╗
+║              ATTACH CRR TEST SUMMARY                                 ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║  PASSED:     15                                                      ║
+║  FAILED:     0                                                       ║
+║  SKIPPED:    0                                                       ║
+║  DIVERGENCES: 0                                                      ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+All implemented ATTACH CRR tests PASSED
+```
+
+**Tests Created (10 scenarios):**
+1. Create main.db and other.db with CRR tables
+2. ATTACH other.db and query attached tables
+3. Query crsql_changes from attached database
+4. Verify site_id is per-database (not per-connection)
+5. site_id scope when querying through ATTACH
+6. Sync from other.db to main.db using crsql_changes
+7. Verify main.db has complete merged data
+8. Cross-database INSERT through ATTACH
+9. DETACH and verify data persistence
+10. db_version tracking with attached databases
+
+**Key Findings:**
+- crsql_changes from attached DB works fully
+- site_id is per-database (not per-connection)
+- Cross-database sync is fully supported
+</details>
+
+<details>
+<summary>TASK-180: Site ID collision tests (13/13 pass)</summary>
+
+```text
+Site ID Collision Test Summary: 13 passed, 0 failed, 0 skipped
+Behavior documented: See BEHAVIORAL OBSERVATIONS above
+```
+
+**Tests Created (7 scenarios):**
+1. Basic Setup — copying preserves site_id
+2. Independent Changes — both copies make different changes
+3. Sync Between Colliding Site IDs
+4. Bidirectional Sync
+5. Concurrent Inserts (Same PK)
+6. Delete/Resurrection with collision
+7. Zig vs Rust/C Parity — full collision scenario
+
+**Behavioral Documentation:**
+- cr-sqlite does NOT detect or reject same-site_id changes
+- Changes merge using normal CRDT rules
+- Convergence uses col_version comparison + value tie-breaker
+- Risk: col_version collisions cause unpredictable tie-breaking
+- Zig and Rust/C behave identically under site_id collision
+</details>
+
+**Files created**
+- `zig/harness/test-savepoint-sync.sh` (new, ~38KB)
+- `zig/harness/test-attach-crr.sh` (new, ~32KB)
+- `zig/harness/test-site-id-collision.sh` (new, ~42KB)
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build` — build Zig extension
+3. `bash zig/harness/test-savepoint-sync.sh` — verify 15/16 pass
+4. `bash zig/harness/test-attach-crr.sh` — verify 15/15 pass
+5. `bash zig/harness/test-site-id-collision.sh` — verify 13/13 pass
+
+**Known gaps / unverified claims**
+- **1 divergence discovered**: db_version not advancing with savepoint + crsql_changes (tracked in TASK-181)
+- CI integration not verified (local runs only)
+- No coverage captured
+
+---
+
 ## Round 2025-12-22 (63) — Fix 3 critical divergences from Round 62 (3 tasks)
 
 **Tasks executed**

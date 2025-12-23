@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-22 (Round 64: Gap discovery and triage organization)
+> Last updated: 2025-12-23 (Round 66: Savepoint, ATTACH, site_id collision tests)
 
 ## Status
 
@@ -15,38 +15,41 @@
 - Sentinel parity: ✅ **6/6 PASSING** (Round 63)
 - Multinode sync: ✅ **6/6 PASSING** (Round 63)
 - Schema mismatch: ⚠️ **11/12 PASSING** (1 divergence: unknown column behavior)
-- Test scripts: **57 total**
+- Savepoint sync: ⚠️ **15/16 PASSING** (1 divergence: db_version with savepoints)
+- ATTACH CRR: ✅ **15/15 PASSING** (Round 66)
+- Site ID collision: ✅ **13/13 PASSING** (Round 66)
+- Test scripts: **60 total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-**Backlog is empty** — Triage contains 11 items ready for prioritization.
+**Backlog is empty** — Triage contains 6 items ready for prioritization.
 
 ### Triage Inbox (organized by priority)
 
-#### HIGH Priority — Missing Core Features
+#### HIGH Priority — Bug Fix
 | Task | Summary | Risk | Effort |
 |------|---------|------|--------|
-| **TASK-189** | crsql_tracked_peers table missing | Sync clients need this for cursors | Low |
-| **TASK-188** | crsql_get_seq() function missing | API completeness | Low |
+| **TASK-181** | db_version not advancing with savepoint + crsql_changes | Sync correctness | Medium |
 
 #### MEDIUM Priority — Behavioral Parity
 | Task | Summary | Risk | Effort |
 |------|---------|------|--------|
 | **TASK-186** | Schema mismatch: unknown column behavior | Design decision | Low |
-| **TASK-175** | Savepoints during sync | Transaction correctness | Medium |
-| **TASK-176** | ATTACH database with CRRs | Multi-db patterns | Medium |
-| **TASK-180** | Site ID collision handling | Security edge case | Medium |
 | **TASK-182** | User triggers modify other CRRs | Real-world pattern | Medium |
 
 #### LOW Priority — Nice to Have
 | Task | Summary | Risk | Effort |
 |------|---------|------|--------|
-| **TASK-181** | crsql_sha() function | Debug only | Low |
 | **TASK-178** | VACUUM on CRR database | Maintenance op | Low |
 | **TASK-183** | Wide table (50+ cols) performance | Performance only | Medium |
 | **TASK-156** | Linux CI parity | CI only | Medium |
+
+### Completed Round 66 (2025-12-23)
+- [x] TASK-175: Savepoint sync tests ✓ (15/16 pass, 1 divergence → TASK-181)
+- [x] TASK-176: ATTACH database CRR tests ✓ (15/15 pass, full parity)
+- [x] TASK-180: Site ID collision tests ✓ (13/13 pass, behavior documented)
 
 ### Function Comparison (Round 64 Discovery)
 
