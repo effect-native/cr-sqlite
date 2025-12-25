@@ -40,6 +40,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ZIG_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROOT_DIR="$(cd "$ZIG_DIR/.." && pwd)"
+
+# Helper function to check if the Rust/C oracle is available
+# Works on both macOS (.dylib) and Linux (.so)
+has_oracle() {
+    [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]] || \
+    [[ -f "$ROOT_DIR/lib/crsqlite-linux-x86_64.so" ]] || \
+    [[ -f "$ROOT_DIR/lib/crsqlite-linux-aarch64.so" ]] || \
+    [[ -f "$ROOT_DIR/lib/crsqlite-darwin-aarch64.dylib" ]] || \
+    [[ -f "$ROOT_DIR/lib/crsqlite-darwin-x86_64.dylib" ]]
+}
 
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
 echo "║           Zig CR-SQLite Parity Test Suite                            ║"
@@ -503,7 +514,7 @@ fi
 
 # Run fract parity tests (oracle comparison: Zig vs Rust/C)
 echo "Running test-fract-parity.sh..."
-if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]] 2>/dev/null || ROOT_DIR="$(cd "$ZIG_DIR/.." && pwd)" && [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+if has_oracle; then
     if bash "$SCRIPT_DIR/test-fract-parity.sh" > "$TMPFILE" 2>&1; then
         FRACT_PARITY_PASS=$(grep -c "PASS" "$TMPFILE" 2>/dev/null) || FRACT_PARITY_PASS=0
         echo "  Fract parity tests: $FRACT_PARITY_PASS passed"
@@ -543,8 +554,7 @@ fi
 
 # Run API surface parity test (oracle comparison vs Rust/C)
 echo "Running test-api-surface.sh..."
-ROOT_DIR="$(cd "$ZIG_DIR/.." && pwd)"
-if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+if has_oracle; then
     # Export extension paths using the freshly built Zig extension
     export ZIG_EXT_PATH="$EXT"
     if bash "$SCRIPT_DIR/test-api-surface.sh" > "$TMPFILE" 2>&1; then
@@ -560,13 +570,13 @@ if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
         # Note: gaps are tracked but don't fail the suite - they're expected during development
     fi
 else
-    echo "  API surface tests: SKIPPED (Rust/C extension not found at $ROOT_DIR/lib/crsqlite.dylib)"
+    echo "  API surface tests: SKIPPED (Rust/C extension not found)"
     TOTAL_SKIP=$((TOTAL_SKIP + 2))
 fi
 
 # Run db_version parity tests (oracle comparison: Zig vs Rust/C)
 echo "Running test-db-version-parity.sh..."
-if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+if has_oracle; then
     if bash "$SCRIPT_DIR/test-db-version-parity.sh" > "$TMPFILE" 2>&1; then
         DBVER_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || DBVER_PASS=0
         echo "  db_version parity tests: $DBVER_PASS passed"
@@ -592,7 +602,7 @@ fi
 
 # Run rows_impacted parity tests (oracle comparison: Zig vs Rust/C counter reset timing)
 echo "Running test-rows-impacted-parity.sh..."
-if [[ -f "$ROOT_DIR/lib/crsqlite.dylib" ]]; then
+if has_oracle; then
     if bash "$SCRIPT_DIR/test-rows-impacted-parity.sh" > "$TMPFILE" 2>&1; then
         ROWS_PASS=$(grep -c "PASS:" "$TMPFILE" 2>/dev/null) || ROWS_PASS=0
         echo "  rows_impacted parity tests: $ROWS_PASS passed"
