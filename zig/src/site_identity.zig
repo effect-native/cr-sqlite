@@ -34,6 +34,9 @@ var global_db_version: i64 = 0;
 /// Used by crsql_next_db_version() to return max(dbVersion+1, pendingDbVersion, merging_version)
 var pending_db_version: i64 = 0;
 
+/// Debug counter for nextDbVersion calls (to diagnose off-by-one issues)
+var debug_next_db_version_call_count: i64 = 0;
+
 /// Check if the crsql_site_id table exists
 fn hasTable(db: ?*api.sqlite3, table_name: [*:0]const u8) bool {
     const sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND tbl_name = ?";
@@ -484,6 +487,7 @@ pub fn getDbVersion() i64 {
 /// Returns max(dbVersion+1, pendingDbVersion, merging_version)
 /// This is what triggers should use for db_version
 pub fn nextDbVersion(merging_version: ?i64) i64 {
+    debug_next_db_version_call_count += 1;
     var ret = global_db_version + 1;
     if (ret < pending_db_version) {
         ret = pending_db_version;
@@ -495,6 +499,16 @@ pub fn nextDbVersion(merging_version: ?i64) i64 {
     }
     pending_db_version = ret;
     return ret;
+}
+
+/// Get the debug call count for nextDbVersion
+pub fn getDebugCallCount() i64 {
+    return debug_next_db_version_call_count;
+}
+
+/// Reset the debug call count (for testing)
+pub fn resetDebugCallCount() void {
+    debug_next_db_version_call_count = 0;
 }
 
 /// Initialize db_version from database by querying MAX from all clock tables
@@ -603,6 +617,21 @@ fn crsqlIncrementAndGetSeqFunc(
     api.result_int64(pCtx, seq);
 }
 
+/// Implementation of crsql_debug_next_dbv_calls() SQL function
+/// Returns the number of times nextDbVersion was called (for debugging)
+fn crsqlDebugNextDbvCallsFunc(
+    pCtx: ?*api.sqlite3_context,
+    argc: c_int,
+    argv: [*c]?*api.sqlite3_value,
+) callconv(.c) void {
+    _ = argv;
+    if (argc != 0) {
+        api.result_error(pCtx, "crsql_debug_next_dbv_calls takes no arguments", -1);
+        return;
+    }
+    api.result_int64(pCtx, debug_next_db_version_call_count);
+}
+
 /// Register all UDFs with a database connection
 pub fn register(db: ?*api.sqlite3) c_int {
     var rc = api.create_function_v2(
@@ -669,6 +698,20 @@ pub fn register(db: ?*api.sqlite3) c_int {
         api.SQLITE_UTF8 | api.SQLITE_INNOCUOUS,
         null,
         &crsqlGetSeqFunc,
+        null,
+        null,
+        null,
+    );
+    if (rc != api.SQLITE_OK) return rc;
+
+    // Register debug function for tracking nextDbVersion calls
+    rc = api.create_function_v2(
+        db,
+        "crsql_debug_next_dbv_calls",
+        0, // nArg: 0 arguments
+        api.SQLITE_UTF8,
+        null,
+        &crsqlDebugNextDbvCallsFunc,
         null,
         null,
         null,
