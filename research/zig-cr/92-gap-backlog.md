@@ -60,6 +60,10 @@ No active tasks. Core sync functionality is complete and working.
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
 
+### Blocked on Tom (edge-case parity decisions)
+- `./.wishes/blocked-on-tom/zig-empty-blob-pk-encoding-parity.md` — decide whether to fix empty BLOB PK encoding (recommended: fix parity)
+- `./.wishes/blocked-on-tom/zig-merge-atomicity-vs-lenient-schema-mismatch.md` — decide atomicity semantics under lenient unknown-column policy (recommended: best-effort apply)
+
 ### Completed Round 76 (2025-12-25) — seq divergence + schema mismatch fixes
 - [x] **TASK-199**: Fix seq value divergence (Zig=1, Rust=0) ✓
   - Root cause: `crsqlAfterInsertFunc` called `getNextSeq()` unconditionally for `maybeMarkReinserted`, wasting seq=0
