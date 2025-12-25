@@ -147,12 +147,12 @@ else
 fi
 
 # Check clock table entries
-# Note: clock table uses pks table keys (auto-increment), not packed pk blobs
-# We join through pks table to find clock entries by pk blob
+# Note: clock table uses 'key' column which references __crsql_key from pks table
+# The pks table has columns: __crsql_key (auto-increment), plus the actual PK columns (e.g., "id")
 echo ""
 echo "Test 1d: Clock table state"
-OLD_CLOCK=$(run_sql "$DB" "SELECT COUNT(*) FROM foo__crsql_clock c JOIN foo__crsql_pks p ON c.pk = p.pk WHERE p.pks = X'010901';")
-NEW_CLOCK=$(run_sql "$DB" "SELECT COUNT(*) FROM foo__crsql_clock c JOIN foo__crsql_pks p ON c.pk = p.pk WHERE p.pks = X'010902';")
+OLD_CLOCK=$(run_sql "$DB" "SELECT COUNT(*) FROM foo__crsql_clock WHERE key = (SELECT __crsql_key FROM foo__crsql_pks WHERE id = 1);")
+NEW_CLOCK=$(run_sql "$DB" "SELECT COUNT(*) FROM foo__crsql_clock WHERE key = (SELECT __crsql_key FROM foo__crsql_pks WHERE id = 2);")
 
 # Old PK should have tombstone sentinel entry
 if [[ "$OLD_CLOCK" -ge "1" ]]; then

@@ -4,9 +4,10 @@
 Fix `test-pk-update.sh` Test 1d to use correct pks table schema.
 
 ## Status
-- State: triage
+- State: done
 - Priority: LOW (test bug, not implementation bug)
 - Discovered: 2025-12-25 (Round 73)
+- Completed: 2025-12-25 (Round 74)
 
 ## Problem
 
@@ -42,8 +43,8 @@ SELECT COUNT(*) FROM foo__crsql_clock WHERE key = <expected_key>;
 
 ## Acceptance Criteria
 
-1. [ ] Test 1d passes
-2. [ ] All 16 PK UPDATE tests pass
+1. [x] Test 1d passes
+2. [x] All 16 PK UPDATE tests pass
 
 ## Parent Docs / Cross-links
 
@@ -51,6 +52,10 @@ SELECT COUNT(*) FROM foo__crsql_clock WHERE key = <expected_key>;
 
 ## Progress Log
 - 2025-12-25: Created from Round 73 findings.
+- 2025-12-25: Fixed by Round 74 delegation.
 
 ## Completion Notes
-(Empty until done.)
+- Fixed Test 1d SQL queries in `zig/harness/test-pk-update.sh`
+- Changed `c.pk` and `p.pk` and `p.pks` to use correct columns: `key`, `__crsql_key`, `id`
+- All 16/16 PK UPDATE tests now pass
+- Commit: (pending)
