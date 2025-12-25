@@ -2047,77 +2047,105 @@ fn changesUpdate(
             // Get remote value from argv[5]
             const remote_value = toApiValue(argv[5]);
 
-            // Fetch local value for comparison
-            var local_value_buf: [1024]u8 = undefined;
-            if (std.fmt.bufPrintZ(&local_value_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE rowid = ?", .{ cid_slice, table_slice })) |local_value_sql| {
-                var local_stmt: ?*api.sqlite3_stmt = null;
-                if (api.prepare_v2(api_db, local_value_sql, -1, &local_stmt, null) == api.SQLITE_OK) {
-                    defer _ = api.finalize(local_stmt);
-                    _ = api.bind_int64(local_stmt, 1, pk_rowid);
+            // Fetch local value for comparison using subquery with pks table
+            // This properly handles TEXT and BLOB primary keys
+            var pk_col_buf: [256]u8 = undefined;
+            const pk_col_sql = std.fmt.bufPrintZ(&pk_col_buf, "PRAGMA table_info(\"{s}\")", .{table_slice}) catch {
+                // Buffer overflow - local wins (conservative)
+                // Fall through to end
+                pRowid.* = 0;
+                return vtab.SQLITE_OK;
+            };
 
-                    if (api.step(local_stmt) == api.SQLITE_ROW) {
-                        // Compare using compare_values module
-                        const local_sqlite_value = api.column_value(local_stmt, 0);
-                        const cmp = compare_values.compareSqliteValues(remote_value, local_sqlite_value);
-                        if (cmp > 0) {
-                            // Remote value is larger, remote wins
-                            remote_wins = true;
-                        } else if (cmp == 0) {
-                            // Values are equal - check merge-equal-values config
-                            // If enabled (default), tie-break on site_id (larger site_id wins)
-                            const merge_equal = config.getMergeEqualValues(api_db);
-                            if (merge_equal == 1) {
-                            // Get local site_id from clock table for this column
-                            var sid_buf: [512]u8 = undefined;
-                            if (std.fmt.bufPrintZ(&sid_buf, "SELECT site_id FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ?", .{table_slice})) |sid_sql| {
-                                    var sid_stmt: ?*api.sqlite3_stmt = null;
-                                    if (api.prepare_v2(api_db, sid_sql, -1, &sid_stmt, null) == api.SQLITE_OK) {
-                                        defer _ = api.finalize(sid_stmt);
-                                        _ = api.bind_int64(sid_stmt, 1, pk_rowid);
-                                        _ = api.bind_text(sid_stmt, 2, cid_slice.ptr, @intCast(cid_slice.len), api.getTransientDestructor());
+            var pk_col_stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(api_db, pk_col_sql, -1, &pk_col_stmt, null) == api.SQLITE_OK) {
+                defer _ = api.finalize(pk_col_stmt);
 
-                                        if (api.step(sid_stmt) == api.SQLITE_ROW) {
-                                            const local_site_id_blob = api.column_blob(sid_stmt, 0);
-                                            const local_site_id_len = api.column_bytes(sid_stmt, 0);
-
-                                            // Compare site_ids (larger wins)
-                                            // Remote site_id is in site_id_blob[0..site_id_len]
-                                            if (site_id_blob != null and local_site_id_blob != null) {
-                                                const local_sid: [*]const u8 = @ptrCast(local_site_id_blob);
-                                                const remote_sid: [*]const u8 = @ptrCast(site_id_blob);
-                                                const local_slice = local_sid[0..@intCast(local_site_id_len)];
-                                                const remote_len: usize = @intCast(site_id_len);
-                                                const remote_slice = remote_sid[0..remote_len];
-
-                                                // Use lexicographic comparison (larger site_id wins)
-                                                const sid_cmp = std.mem.order(u8, remote_slice, local_slice);
-                                                if (sid_cmp == .gt) {
-                                                    // Remote site_id is larger, remote wins
-                                                    remote_wins = true;
-                                                }
-                                            } else if (site_id_blob != null and local_site_id_blob == null) {
-                                                // Remote has site_id, local doesn't - remote wins
-                                                remote_wins = true;
-                                            }
-                                            // If local has site_id but remote doesn't, local wins
-                                        }
-                                        // If no clock entry found, local wins (conservative)
-                                    }
-                                } else |_| {
-                                    // Buffer overflow, local wins (conservative)
-                                }
-                            }
-                            // If merge_equal == 0, values equal means no-op (local wins)
+                // Find the PK column name
+                var pk_col_name: ?[128]u8 = null;
+                while (api.step(pk_col_stmt) == api.SQLITE_ROW) {
+                    const pk_pos = api.column_int64(pk_col_stmt, 5);
+                    if (pk_pos > 0) {
+                        const name_ptr = api.column_text(pk_col_stmt, 1);
+                        if (name_ptr) |name| {
+                            var temp: [128]u8 = undefined;
+                            const name_slice = std.mem.span(name);
+                            const len = @min(name_slice.len, 127);
+                            @memcpy(temp[0..len], name_slice[0..len]);
+                            temp[len] = 0;
+                            pk_col_name = temp;
                         }
-                        // If cmp < 0, local wins (remote_wins stays false)
-                    } else {
-                        // No local row, remote wins
-                        remote_wins = true;
+                        break;
                     }
                 }
-                // If prepare failed, local wins (conservative)
-            } else |_| {
-                // Buffer overflow, local wins (conservative)
+
+                // Now query local value using the PK column
+                if (pk_col_name) |pk_col| {
+                    const pk_col_len2 = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+                    const pk_slice = pk_col[0..pk_col_len2];
+
+                    var local_value_buf: [1024]u8 = undefined;
+                    // Build: SELECT "col" FROM "table" WHERE "pk_col" = (SELECT "pk_col" FROM "table__crsql_pks" WHERE __crsql_key = ?)
+                    if (std.fmt.bufPrintZ(&local_value_buf, "SELECT \"{s}\" FROM \"{s}\" WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ cid_slice, table_slice, pk_slice, pk_slice, table_slice })) |local_value_sql| {
+                        var local_stmt: ?*api.sqlite3_stmt = null;
+                        if (api.prepare_v2(api_db, local_value_sql, -1, &local_stmt, null) == api.SQLITE_OK) {
+                            defer _ = api.finalize(local_stmt);
+                            _ = api.bind_int64(local_stmt, 1, pk_rowid);
+
+                            if (api.step(local_stmt) == api.SQLITE_ROW) {
+                                // Compare using compare_values module
+                                const local_sqlite_value = api.column_value(local_stmt, 0);
+                                const cmp = compare_values.compareSqliteValues(remote_value, local_sqlite_value);
+                                if (cmp > 0) {
+                                    // Remote value is larger, remote wins
+                                    remote_wins = true;
+                                } else if (cmp == 0) {
+                                    // Values are equal - check merge-equal-values config
+                                    // If enabled (default), tie-break on site_id (larger site_id wins)
+                                    const merge_equal = config.getMergeEqualValues(api_db);
+                                    if (merge_equal == 1) {
+                                        // Get local site_id from clock table for this column
+                                        var sid_buf: [512]u8 = undefined;
+                                        if (std.fmt.bufPrintZ(&sid_buf, "SELECT site_id FROM \"{s}__crsql_clock\" WHERE key = ? AND col_name = ?", .{table_slice})) |sid_sql| {
+                                            var sid_stmt: ?*api.sqlite3_stmt = null;
+                                            if (api.prepare_v2(api_db, sid_sql, -1, &sid_stmt, null) == api.SQLITE_OK) {
+                                                defer _ = api.finalize(sid_stmt);
+                                                _ = api.bind_int64(sid_stmt, 1, pk_rowid);
+                                                _ = api.bind_text(sid_stmt, 2, cid_slice.ptr, @intCast(cid_slice.len), api.getTransientDestructor());
+
+                                                if (api.step(sid_stmt) == api.SQLITE_ROW) {
+                                                    const local_site_id_blob = api.column_blob(sid_stmt, 0);
+                                                    const local_site_id_len = api.column_bytes(sid_stmt, 0);
+
+                                                    // Compare site_ids (larger wins)
+                                                    if (site_id_blob != null and local_site_id_blob != null) {
+                                                        const local_sid: [*]const u8 = @ptrCast(local_site_id_blob);
+                                                        const remote_sid: [*]const u8 = @ptrCast(site_id_blob);
+                                                        const local_slice_sid = local_sid[0..@intCast(local_site_id_len)];
+                                                        const remote_len_sid: usize = @intCast(site_id_len);
+                                                        const remote_slice_sid = remote_sid[0..remote_len_sid];
+
+                                                        // Use lexicographic comparison (larger site_id wins)
+                                                        const sid_cmp = std.mem.order(u8, remote_slice_sid, local_slice_sid);
+                                                        if (sid_cmp == .gt) {
+                                                            remote_wins = true;
+                                                        }
+                                                    } else if (site_id_blob != null and local_site_id_blob == null) {
+                                                        remote_wins = true;
+                                                    }
+                                                }
+                                            }
+                                        } else |_| {}
+                                    }
+                                }
+                                // If cmp < 0, local wins (remote_wins stays false)
+                            } else {
+                                // No local row, remote wins
+                                remote_wins = true;
+                            }
+                        }
+                    } else |_| {}
+                }
             }
         }
         // If col_version < local_col_version, local wins (remote_wins stays false)

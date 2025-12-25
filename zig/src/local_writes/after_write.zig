@@ -558,6 +558,12 @@ fn crsqlAfterInsertFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     var pk_values: [64]*api.sqlite3_value = undefined;
     for (0..pk_count) |i| pk_values[i] = argv[i + 1].?;
 
+    // If db_version is -1, re-read from storage before computing next version
+    // This matches Rust/C behavior where dbVersion is reset to -1 after commits
+    // that didn't modify any rows, forcing a re-read of the actual persisted value.
+    if (site_identity.getDbVersion() == -1) {
+        site_identity.initDbVersionFromDb(db);
+    }
     const db_version = site_identity.nextDbVersion(null);
 
     // Get or create the key in __crsql_pks.
@@ -638,6 +644,10 @@ fn crsqlAfterUpdateFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
         pk_old_values[i] = argv[pk_old_start + i].?;
     }
 
+    // If db_version is -1, re-read from storage before computing next version
+    if (site_identity.getDbVersion() == -1) {
+        site_identity.initDbVersionFromDb(db);
+    }
     const next_db_version = site_identity.nextDbVersion(null);
 
     const new_key = getOrCreatePkKey(db, table_name, &info, pk_new_values[0..pk_count]) orelse {
@@ -726,6 +736,10 @@ fn crsqlAfterDeleteFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     var pk_values: [64]*api.sqlite3_value = undefined;
     for (0..pk_count) |i| pk_values[i] = argv[i + 1].?;
 
+    // If db_version is -1, re-read from storage before computing next version
+    if (site_identity.getDbVersion() == -1) {
+        site_identity.initDbVersionFromDb(db);
+    }
     const db_version = site_identity.nextDbVersion(null);
     const seq = site_identity.getNextSeq();
 

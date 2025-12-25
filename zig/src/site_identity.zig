@@ -26,13 +26,16 @@ const TBL_SITE_ID = "crsql_site_id";
 var global_site_id: [16]u8 = undefined;
 var site_id_initialized: bool = false;
 
-/// Global db_version counter (MVP: in-memory only)
-/// In production, this would query MAX(db_version) from clock tables
-var global_db_version: i64 = 0;
+/// Global db_version counter
+/// -1 means "not initialized" and will trigger re-reading from storage
+/// This matches Rust/C behavior where dbVersion is reset to -1 on transaction
+/// commit when no rows were affected, forcing a re-read from storage on next access.
+var global_db_version: i64 = -1;
 
 /// Pending db_version for the current transaction
+/// -1 means "no pending version" (no writes in this transaction)
 /// Used by crsql_next_db_version() to return max(dbVersion+1, pendingDbVersion, merging_version)
-var pending_db_version: i64 = 0;
+var pending_db_version: i64 = -1;
 
 /// Debug counter for nextDbVersion calls (to diagnose off-by-one issues)
 var debug_next_db_version_call_count: i64 = 0;
@@ -392,6 +395,16 @@ fn crsqlDbVersionFunc(
         return;
     }
 
+    // If db_version is -1, re-read from storage
+    // This matches Rust/C behavior where dbVersion is reset to -1 after commits
+    // that didn't modify any rows, forcing a re-read of the actual persisted value.
+    if (global_db_version == -1) {
+        const db = api.context_db_handle(pCtx);
+        if (db != null) {
+            initDbVersionFromDb(db);
+        }
+    }
+
     // Return the current db_version from global state
     // Note: We skip checking pre_compact_dbversion here because:
     // 1. It requires a nested SQL query which can cause issues
@@ -430,6 +443,16 @@ fn crsqlNextDbVersionFunc(
         return;
     }
 
+    // If db_version is -1, re-read from storage before computing next version
+    // This matches Rust/C behavior where dbVersion is reset to -1 after commits
+    // that didn't modify any rows, forcing a re-read of the actual persisted value.
+    if (global_db_version == -1) {
+        const db = api.context_db_handle(pCtx);
+        if (db != null) {
+            initDbVersionFromDb(db);
+        }
+    }
+
     var merging_version: ?i64 = null;
     if (argc == 1) {
         const arg_type = api.value_type(argv[0]);
@@ -448,17 +471,21 @@ pub fn incrementDbVersion() void {
 }
 
 /// Promote pending db_version to committed db_version on commit
-/// Called by commit hook when rows were impacted
+/// Called by commit hook.
+///
+/// IMPORTANT: This UNCONDITIONALLY sets global_db_version = pending_db_version
+/// to match Rust/C behavior. When pending_db_version is -1 (no writes in this tx),
+/// global_db_version becomes -1, which triggers re-reading from storage on next access.
+/// This ensures that db_version tracks actual persisted state, not speculative state.
 pub fn commitDbVersion() void {
-    if (pending_db_version > global_db_version) {
-        global_db_version = pending_db_version;
-    }
-    pending_db_version = 0;
+    global_db_version = pending_db_version;
+    pending_db_version = -1;
 }
 
 /// Reset pending db_version on rollback
+/// Sets pending to -1 to indicate "no pending version"
 pub fn rollbackDbVersion() void {
-    pending_db_version = 0;
+    pending_db_version = -1;
 }
 
 /// Pending seq counter for the current transaction
@@ -486,10 +513,18 @@ pub fn getDbVersion() i64 {
 /// Get or create the next db_version for the current transaction
 /// Returns max(dbVersion+1, pendingDbVersion, merging_version)
 /// This is what triggers should use for db_version
+///
+/// NOTE: The caller (crsqlNextDbVersionFunc) must ensure global_db_version is
+/// initialized (not -1) by calling initDbVersionFromDb() first. If global_db_version
+/// is -1, we treat it as 0 for safety.
 pub fn nextDbVersion(merging_version: ?i64) i64 {
     debug_next_db_version_call_count += 1;
-    var ret = global_db_version + 1;
-    if (ret < pending_db_version) {
+    // If global_db_version is -1 (uninitialized), treat as 0
+    // This should not normally happen if callers properly initialize first
+    const base_version = if (global_db_version >= 0) global_db_version else 0;
+    var ret = base_version + 1;
+    // Only use pending_db_version if it's valid (not -1)
+    if (pending_db_version >= 0 and ret < pending_db_version) {
         ret = pending_db_version;
     }
     if (merging_version) |mv| {
@@ -526,7 +561,8 @@ pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
     if (rc != api.SQLITE_OK) {
         // No clock tables or error - check pre_compact_dbversion only
         global_db_version = getPreCompactDbVersion(db);
-        pending_db_version = 0;
+        // NOTE: Do NOT touch pending_db_version here!
+        // pending_db_version is only set by nextDbVersion() when a write happens.
         return;
     }
     defer _ = api.finalize(stmt);
@@ -562,7 +598,10 @@ pub fn initDbVersionFromDb(db: ?*api.sqlite3) void {
     }
 
     global_db_version = max_version;
-    pending_db_version = 0;
+    // NOTE: Do NOT touch pending_db_version here!
+    // pending_db_version is only set by nextDbVersion() when a write happens.
+    // This matches Rust/C behavior where fill_db_version_if_needed() only
+    // updates dbVersion, not pendingDbVersion.
 }
 
 /// Get site ID as slice (must be initialized first via initSiteId)
@@ -724,10 +763,11 @@ test "site_id is 16 bytes" {
     try std.testing.expectEqual(@as(usize, 16), global_site_id.len);
 }
 
-test "db_version starts at 0" {
+test "db_version starts at -1 (uninitialized)" {
     // Note: This test may see non-zero if other tests ran first due to global state
-    // In a fresh process, db_version starts at 0
-    try std.testing.expect(global_db_version >= 0);
+    // In a fresh process, db_version starts at -1 (uninitialized, will be read from storage on first access)
+    // After initialization, it should be >= 0
+    try std.testing.expect(global_db_version >= -1);
 }
 
 test "incrementDbVersion increases counter" {
@@ -746,7 +786,7 @@ test "nextDbVersion returns dbVersion + 1 on first call" {
     }
 
     global_db_version = 5;
-    pending_db_version = 0;
+    pending_db_version = -1; // -1 means "no pending version"
 
     const next = nextDbVersion(null);
     try std.testing.expectEqual(@as(i64, 6), next);
@@ -777,7 +817,7 @@ test "nextDbVersion uses merging_version if highest" {
     }
 
     global_db_version = 5;
-    pending_db_version = 0;
+    pending_db_version = -1; // -1 means "no pending version"
 
     const next = nextDbVersion(20);
     try std.testing.expectEqual(@as(i64, 20), next);
@@ -797,8 +837,28 @@ test "commitDbVersion promotes pending to global" {
 
     commitDbVersion();
 
+    // IMPORTANT: commitDbVersion UNCONDITIONALLY sets global = pending
+    // This matches Rust/C behavior
     try std.testing.expectEqual(@as(i64, 10), global_db_version);
-    try std.testing.expectEqual(@as(i64, 0), pending_db_version);
+    try std.testing.expectEqual(@as(i64, -1), pending_db_version);
+}
+
+test "commitDbVersion with no pending resets global to -1" {
+    const saved_db_version = global_db_version;
+    const saved_pending = pending_db_version;
+    defer {
+        global_db_version = saved_db_version;
+        pending_db_version = saved_pending;
+    }
+
+    global_db_version = 5;
+    pending_db_version = -1; // No pending version (no writes in tx)
+
+    commitDbVersion();
+
+    // When pending is -1, global becomes -1, triggering re-read from storage
+    try std.testing.expectEqual(@as(i64, -1), global_db_version);
+    try std.testing.expectEqual(@as(i64, -1), pending_db_version);
 }
 
 test "rollbackDbVersion resets pending only" {
@@ -815,7 +875,7 @@ test "rollbackDbVersion resets pending only" {
     rollbackDbVersion();
 
     try std.testing.expectEqual(@as(i64, 5), global_db_version);
-    try std.testing.expectEqual(@as(i64, 0), pending_db_version);
+    try std.testing.expectEqual(@as(i64, -1), pending_db_version);
 }
 
 test "getSiteId returns consistent value" {
