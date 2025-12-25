@@ -38,17 +38,15 @@ const sync_bit = @import("sync_bit.zig");
 const site_identity = @import("site_identity.zig");
 const stmt_cache = @import("stmt_cache.zig");
 
-// Platform-aware logging: use std.log on native, no-op on WASM/freestanding
-const log = if (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)
-    struct {
-        // No-op logger for WASM/freestanding
-        pub fn debug(comptime fmt: []const u8, args: anytype) void {
-            _ = fmt;
-            _ = args;
-        }
+// Logging disabled: std.log uses std.io.getStdErr() which crashes when called from
+// a dynamically loaded shared library on Linux. The Zig runtime isn't properly
+// initialized in that context, causing segfaults.
+const log = struct {
+    pub fn debug(comptime fmt: []const u8, args: anytype) void {
+        _ = fmt;
+        _ = args;
     }
-else
-    std.log.scoped(.changes_vtab);
+};
 
 // Type conversion between vtab's opaque types and api's opaque types.
 // Both represent the same underlying SQLite types, just declared separately.
