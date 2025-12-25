@@ -1,12 +1,14 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-25 (Post-Round 76: seq divergence + schema mismatch fixes)
+> Last updated: 2025-12-25 (Post-Round 77: Release infrastructure + 8 tasks completed)
 
 ## Status
 
-- **BUILD: ✅ PASSING** — compiles successfully
+- **BUILD: ✅ PASSING** — Native + WASM both compile successfully
 - **MVP: ✅ PASSING** — all core tests pass
 - **SYNC: ✅ WORKING** — Round 73 fixed critical INSERT INTO crsql_changes bug
+- **WASM: ✅ FIXED** — Round 77 fixed Zig 0.15 compatibility
+- **PK blob parity: ✅ 9/9 PASSING** — Round 77 fixed empty BLOB PK encoding (WF-028)
 - Oracle parity: ✅ **18/18 PASSING**
 - Cross-open parity: ✅ **24/24 PASSING**
 - rows_impacted: ✅ **18/18 PASSING**
@@ -30,38 +32,42 @@
 - **Stress test (60 iterations)**: ✅ **60/60 PASSING, 0 divergences** (Round 73)
 - **CL merge properties**: ✅ **18/18 PASSING** (Round 75)
 - **Sentinel properties**: ✅ **15/15 PASSING** (Round 75)
+- **Browser tests**: ✅ **30/30 PASSING** (Round 77 — local WASM loading)
 - Parity suite: **367 passed, 4 failed (pre-existing edge cases), 22 skipped**
 - Release focus: **Primary goal is `0.16.300-preview` (Native + WASM + Browser)**
-- Test scripts: **67+ total**
+- Test scripts: **72 total** (reviewed Round 77)
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
 ### Active (0 tasks)
-No active tasks. Core sync functionality is complete and working.
+No active tasks.
 
 ### Backlog (Release focus: `0.16.300-preview`)
 | Task | Priority | Summary | Effort |
 |------|----------|---------|--------|
 | **TASK-209** | HIGH | Release tracker: 0.16.300-preview | Large |
-| **TASK-210** | HIGH | Release versioning + tags | Medium |
-| **TASK-211** | HIGH | Native Zig artifacts (darwin + linux) | Medium |
-| **TASK-212** | HIGH | Fix WASM build for release | Medium |
-| **TASK-213** | HIGH | Browser provider uses local WASM (no CDN sql.js) | Medium |
 | **TASK-214** | HIGH | CI oracle strategy | Medium |
 | **TASK-207** | MED | Re-enable CI for release | Medium |
-| **TASK-215** | HIGH | GitHub Release ships Zig artifacts | Medium |
 | **TASK-216** | HIGH | Nix release uses Zig artifacts + preview version | Medium |
 | **TASK-217** | HIGH | effect-native OIDC npm release path | Large |
-| **TASK-218** | HIGH | Upstream 0.16.3 compat checklist | Medium |
 
-### Triage Inbox (3 items)
+### Completed Round 77 (2025-12-25)
+- [x] **TASK-210**: Release versioning + tags ✓ — `0.16.300-preview` across package.json, flake.nix
+- [x] **TASK-211**: Native Zig artifacts ✓ — all 5 platforms build, release script added
+- [x] **TASK-212**: WASM build fix ✓ — Zig 0.15 compat (SQLITE_TRANSIENT + allocator)
+- [x] **TASK-213**: Browser provider local WASM ✓ — no more CDN dependency
+- [x] **TASK-215**: GitHub Release workflow ✓ — complete rewrite for Zig
+- [x] **TASK-218**: 0.16.3 compat checklist ✓ — 19/23 functions, wire format identical
+- [x] **TASK-219**: Test suite review ✓ — 72 tests, blind spots documented
+- [x] **WF-028**: Empty BLOB PK encoding ✓ — fixed in api.zig bind_blob()
+
+### Triage Inbox (2 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
-| **TASK-203** | LOW | Empty blob PK encoding divergence | Edge case |
 
 ### Blocked on Tom
 | Item | Summary |

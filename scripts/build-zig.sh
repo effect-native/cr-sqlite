@@ -6,6 +6,7 @@
 #   ./scripts/build-zig.sh all       # Build for all supported platforms
 #   ./scripts/build-zig.sh darwin    # Build for macOS (universal binary)
 #   ./scripts/build-zig.sh linux     # Build for Linux (x64 and arm64)
+#   ./scripts/build-zig.sh release   # Build all and copy to lib/ with release naming
 
 set -euo pipefail
 
@@ -127,6 +128,43 @@ build_all() {
   echo "  Linux arm64:      $ZIG_DIR/zig-out-linux-arm64/lib/libcrsqlite.so"
 }
 
+# Build release artifacts with GitHub Release naming convention
+# Copies artifacts to lib/ at project root with release naming
+build_release() {
+  log "Building release artifacts..."
+  
+  # Build all platforms first
+  build_all
+  
+  # Create lib directory at project root
+  mkdir -p "$PROJECT_ROOT/lib"
+  
+  log "Copying artifacts with release naming to $PROJECT_ROOT/lib/"
+  
+  # macOS artifacts (following publish.yaml naming)
+  cp "$ZIG_DIR/zig-out-arm64/lib/libcrsqlite.dylib" "$PROJECT_ROOT/lib/crsqlite-zig-darwin-aarch64.dylib"
+  cp "$ZIG_DIR/zig-out-x64/lib/libcrsqlite.dylib" "$PROJECT_ROOT/lib/crsqlite-zig-darwin-x86_64.dylib"
+  cp "$ZIG_DIR/zig-out-universal/lib/libcrsqlite.dylib" "$PROJECT_ROOT/lib/crsqlite-zig-darwin-universal.dylib"
+  
+  # Linux artifacts
+  cp "$ZIG_DIR/zig-out-linux-x64/lib/libcrsqlite.so" "$PROJECT_ROOT/lib/crsqlite-zig-linux-x86_64.so"
+  cp "$ZIG_DIR/zig-out-linux-arm64/lib/libcrsqlite.so" "$PROJECT_ROOT/lib/crsqlite-zig-linux-aarch64.so"
+  
+  success "Release artifacts ready!"
+  echo ""
+  log "Release artifacts in $PROJECT_ROOT/lib/:"
+  ls -lh "$PROJECT_ROOT/lib/"*.dylib "$PROJECT_ROOT/lib/"*.so 2>/dev/null | while read line; do
+    echo "  $line"
+  done
+  echo ""
+  log "GitHub Release naming convention:"
+  echo "  crsqlite-zig-darwin-aarch64.dylib  (Apple Silicon Mac)"
+  echo "  crsqlite-zig-darwin-x86_64.dylib   (Intel Mac)"
+  echo "  crsqlite-zig-darwin-universal.dylib (Universal macOS)"
+  echo "  crsqlite-zig-linux-x86_64.so       (Intel/AMD Linux)"
+  echo "  crsqlite-zig-linux-aarch64.so      (ARM64 Linux)"
+}
+
 # Main
 case "${1:-native}" in
   native|current)
@@ -141,9 +179,12 @@ case "${1:-native}" in
   all)
     build_all
     ;;
+  release)
+    build_release
+    ;;
   *)
     error "Unknown target: $1"
-    echo "Usage: $0 [native|darwin|linux|all]"
+    echo "Usage: $0 [native|darwin|linux|all|release]"
     exit 1
     ;;
 esac

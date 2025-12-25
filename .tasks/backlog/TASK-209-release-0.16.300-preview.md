@@ -58,6 +58,12 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
 - [ ] **Backwards-compat checklist for upstream `0.16.3` is explicit and checked off** (functions, tables, browser runtime expectations).
   - Task: `.tasks/backlog/TASK-218-compat-checklist-0.16.3.md`
 
+### Parity / quality gate
+- [ ] **Empty BLOB PK encoding parity (WF-028)** — time-boxed fix attempt; punt to RC if overflow.
+  - Wish: `.wishes/blocked-on-tom/zig-empty-blob-pk-encoding-parity.md`
+- [ ] **Test suite review and ranking** — identify blind spots, stupid tests, missing coverage.
+  - Task: `.tasks/backlog/TASK-219-test-suite-review-and-ranking.md`
+
 ## Files to Modify
 - `.tasks/backlog/TASK-209-release-0.16.300-preview.md` (this file)
 

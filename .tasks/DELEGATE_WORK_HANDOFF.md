@@ -68,6 +68,85 @@ Artifacts:
 
 ---
 
+## Round 2025-12-25 (77) — Release 0.16.300-preview infrastructure (8 tasks in parallel)
+
+**Tasks executed**
+- `.tasks/done/TASK-210-release-versioning-and-tags.md` — version alignment
+- `.tasks/done/TASK-211-release-native-zig-artifacts.md` — native build verification
+- `.tasks/done/TASK-212-fix-wasm-build-for-release.md` — WASM build fix
+- `.tasks/done/TASK-213-browser-provider-loads-crsqlite-wasm.md` — browser provider local WASM
+- `.tasks/done/TASK-215-github-release-zig-artifacts.md` — GitHub release workflow
+- `.tasks/done/TASK-218-compat-checklist-0.16.3.md` — backwards compat checklist
+- `.tasks/done/TASK-219-test-suite-review-and-ranking.md` — test suite review
+- Empty BLOB PK parity fix (WF-028)
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig 0.15 (via nix), bun, bash
+
+**Key Changes Made**
+
+| Task | Files Changed | Summary |
+|------|---------------|---------|
+| TASK-210 | `package.json`, `flake.nix`, `scripts/sync-version.ts` | Version → `0.16.300-preview` |
+| TASK-211 | `scripts/build-zig.sh` | Added `release` command, verified all targets build |
+| TASK-212 | `zig/src/ffi/api.zig`, `zig/src/fract_index.zig` | Fixed SQLITE_TRANSIENT + WASM allocator |
+| TASK-213 | `zig/browser-test/src/provider/worker.ts`, `zig/browser-dist/provider.js` | Removed CDN, local WASM loading |
+| TASK-215 | `.github/workflows/publish.yaml` | Complete rewrite for Zig artifacts |
+| TASK-218 | Task card | Full compat checklist documented |
+| TASK-219 | Task card | 72 tests reviewed, blind spots identified |
+| WF-028 | `zig/src/ffi/api.zig` | Fixed empty BLOB PK encoding |
+
+**Commands run (exact)**
+```bash
+cd zig && nix run nixpkgs#zig -- build -Doptimize=ReleaseFast
+cd zig && nix run nixpkgs#zig -- build wasm
+bash zig/harness/test-pk-blob-parity.sh
+```
+
+<details>
+<summary>Build verification</summary>
+
+```text
+Native build: SUCCESS
+WASM build: SUCCESS
+PK blob parity: 9/9 PASS (WF-028 fixed)
+```
+</details>
+
+<details>
+<summary>Native artifacts produced</summary>
+
+```text
+lib/crsqlite-zig-darwin-aarch64.dylib   2.7M
+lib/crsqlite-zig-darwin-x86_64.dylib    2.6M
+lib/crsqlite-zig-darwin-universal.dylib 5.3M
+lib/crsqlite-zig-linux-x86_64.so        4.8M
+lib/crsqlite-zig-linux-aarch64.so       4.9M
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `cd zig && nix run nixpkgs#zig -- build -Doptimize=ReleaseFast`
+3. `cd zig && nix run nixpkgs#zig -- build wasm`
+4. `bash zig/harness/test-pk-blob-parity.sh` — verify 9/9 pass
+
+**Known gaps / unverified claims**
+- Browser tests run locally (30/30 pass) but not in CI yet
+- Linux cross-compile not verified on actual Linux hardware
+- TASK-214 (CI oracle strategy), TASK-207 (CI re-enable), TASK-216 (nix), TASK-217 (npm) still in backlog
+
+**Test Suite Review Findings (TASK-219)**
+- 72 total tests, 65 passing (90%)
+- **Top blind spot**: Browser/WASM path has no automated tests in CI
+- Recommended: Add WASM browser tests before release
+
+---
+
 ## Round 2025-12-25 (76) — seq divergence + schema mismatch fixes (2 tasks)
 
 **Tasks executed**

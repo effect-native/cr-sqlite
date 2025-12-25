@@ -41,7 +41,7 @@
         # Build the CR-SQLite extension
         crSqliteExtension = pkgs.stdenv.mkDerivation rec {
           pname = "cr-sqlite";
-          version = "0.16.3";
+          version = "0.16.300-preview";
           
           src = crSqliteSource;
           dontStrip = true;
@@ -161,7 +161,7 @@
         printVersion = pkgs.writeShellApplication {
           name = "cr-sqlite-version";
           text = ''
-            echo "0.16.3"
+            echo "0.16.300-preview"
           '';
         };
 

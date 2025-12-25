@@ -13,7 +13,23 @@
 //! - Both provided: returns key between them
 
 const std = @import("std");
+const builtin = @import("builtin");
 const api = @import("ffi/api.zig");
+
+/// Get a suitable allocator for the current platform.
+/// On native platforms, we use GeneralPurposeAllocator for debugging.
+/// On WASM/freestanding, we use a simple FixedBufferAllocator over a static buffer
+/// since std.heap.GeneralPurposeAllocator requires OS primitives not available.
+fn getWasmSafeAllocator() std.mem.Allocator {
+    if (comptime (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)) {
+        // For WASM, use page_allocator which is backed by memory.grow
+        return std.heap.wasm_allocator;
+    } else {
+        // For native, use page_allocator for simplicity in UDF context
+        // (GeneralPurposeAllocator pulls in debug/logging code that's heavy)
+        return std.heap.page_allocator;
+    }
+}
 
 /// Printable ASCII digits for base-95 encoding (space to tilde)
 pub const BASE_95_DIGITS = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
@@ -426,10 +442,8 @@ fn fractKeyBetweenFunc(
         break :blk ptr.?[0..len];
     };
 
-    // Use SQLite's allocator via context
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use a WASM-safe allocator
+    const allocator = getWasmSafeAllocator();
 
     const result = fractKeyBetween(allocator, left, right) catch |err| {
         const msg = switch (err) {
@@ -564,10 +578,8 @@ fn fractAsOrderedFunc(
     // Collect collection columns from argv[2..argc]
     const collection_col_count: usize = if (argc > 2) @intCast(argc - 2) else 0;
 
-    // Use a general purpose allocator for building SQL strings
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use a WASM-safe allocator for building SQL strings
+    const allocator = getWasmSafeAllocator();
 
     // Build collection columns array
     var collection_cols = allocator.alloc([]const u8, collection_col_count) catch {
@@ -691,10 +703,8 @@ fn fractFixConflictFunc(
     const pk_names_start = sentinel_idx + 1;
     const pk_values_start = pk_names_start + pk_count;
 
-    // Use allocator for SQL building
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use a WASM-safe allocator for SQL building
+    const allocator = getWasmSafeAllocator();
 
     // Build WHERE clause for pk columns: "pk1" = ?1 AND "pk2" = ?2
     var pk_predicates: std.ArrayListUnmanaged(u8) = .empty;

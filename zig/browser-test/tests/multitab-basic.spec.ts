@@ -222,6 +222,7 @@ test.describe('OPFS Persistence', () => {
     
     // Open a new page in the same context (shares OPFS storage)
     const page2 = await context.newPage();
+    
     await page2.goto('/multitab-test.html');
     await page2.waitForFunction(() => (window as any).dbClient?.ready, { timeout: 10000 });
     

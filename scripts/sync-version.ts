@@ -37,25 +37,42 @@ const updatePackageVersion = (crSqliteVersion: string) =>
     const packageJson: PackageJson = JSON.parse(packageJsonContent);
 
     const currentVersion = packageJson.version;
-    
-    // Parse current version to check if it already matches CR-SQLite version
-    const [currentBase, currentSuffix] = currentVersion.includes('-') 
-      ? currentVersion.split('-', 2)
-      : [currentVersion, null];
-    
-    // If CR-SQLite base version matches, keep the current version (including any suffix)
-    if (currentBase === crSqliteVersion) {
-      yield* Console.log(`✅ CR-SQLite version matches (${currentBase}), keeping current version: ${currentVersion}`);
-      return false;
-    }
-    
-    // If CR-SQLite version changed, update to new base version with -1 suffix
-    const newVersion = `${crSqliteVersion}-1`;
 
-    yield* Console.log(
-      `📦 Updating to new CR-SQLite version: ${currentVersion} → ${newVersion}`,
-    );
-    packageJson.version = newVersion;
+    // If CR-SQLite version already includes a prerelease tag (e.g., "0.16.300-preview"),
+    // use it directly as the canonical version. Don't append "-1".
+    const isPrerelease = crSqliteVersion.includes('-');
+    
+    if (isPrerelease) {
+      // For prerelease versions, the Nix version IS the canonical version
+      if (currentVersion === crSqliteVersion) {
+        yield* Console.log(`✅ Version already matches: ${currentVersion}`);
+        return false;
+      }
+      
+      yield* Console.log(
+        `📦 Updating to prerelease version: ${currentVersion} → ${crSqliteVersion}`,
+      );
+      packageJson.version = crSqliteVersion;
+    } else {
+      // For stable versions, parse and compare base versions
+      const [currentBase, _currentSuffix] = currentVersion.includes('-') 
+        ? currentVersion.split('-', 2)
+        : [currentVersion, null];
+      
+      // If CR-SQLite base version matches, keep the current version (including any suffix)
+      if (currentBase === crSqliteVersion) {
+        yield* Console.log(`✅ CR-SQLite version matches (${currentBase}), keeping current version: ${currentVersion}`);
+        return false;
+      }
+      
+      // If CR-SQLite version changed, update to new base version with -1 suffix
+      const newVersion = `${crSqliteVersion}-1`;
+
+      yield* Console.log(
+        `📦 Updating to new CR-SQLite version: ${currentVersion} → ${newVersion}`,
+      );
+      packageJson.version = newVersion;
+    }
 
     const updatedContent = JSON.stringify(packageJson, null, 2) + "\n";
     yield* fs.writeFileString(packageJsonPath, updatedContent);

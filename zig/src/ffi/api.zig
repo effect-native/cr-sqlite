@@ -68,12 +68,11 @@ pub const SQLITE_STATIC: DestructorFn = null;
 ///
 /// Zig 0.15 enforces alignment checks for `@ptrFromInt` when the destination is
 /// a function-pointer type. The sentinel value `-1` is not guaranteed to satisfy
-/// function pointer alignment, so constructing it via `@ptrFromInt` can fail to
-/// compile.
+/// function pointer alignment.
 ///
-/// Use a bitcast of the all-ones pointer bits instead (same representation, no
-/// alignment check).
-pub const SQLITE_TRANSIENT: DestructorFn = @bitCast(@as(usize, @bitCast(@as(isize, -1))));
+/// We use @ptrFromInt with the all-ones pattern (maxInt(usize) == -1 as unsigned).
+/// This works in Zig 0.15+ because @ptrFromInt on optional pointers allows any value.
+pub const SQLITE_TRANSIENT: DestructorFn = @ptrFromInt(std.math.maxInt(usize));
 
 /// Platform-specific implementation for getting SQLITE_TRANSIENT.
 /// On native platforms with C interop, we use the C workaround function.
@@ -631,9 +630,21 @@ pub fn bind_text(pStmt: ?*c.sqlite3_stmt, i: c_int, z: [*c]const u8, n: c_int, x
 
 /// Wrapper for sqlite3_bind_blob
 /// Binds a blob value to a prepared statement parameter.
+///
+/// NOTE: If z is null and n is 0, this binds an empty blob (not NULL).
+/// SQLite's native bind_blob would bind NULL if z is null, regardless of n.
+/// We use bind_zeroblob(0) to correctly bind an empty blob in this case.
 pub fn bind_blob(pStmt: ?*c.sqlite3_stmt, i: c_int, z: ?*const anyopaque, n: c_int, xDel: DestructorFn) c_int {
     const api = sqlite_c.sqlite3_api;
     if (api == null) return SQLITE_MISUSE;
+
+    // Handle empty blob case: z is null but we want an empty blob, not NULL.
+    // SQLite's bind_blob binds NULL if the pointer is null, so use bind_zeroblob instead.
+    if (z == null and n == 0) {
+        const zeroblob_func = api.*.bind_zeroblob orelse return SQLITE_MISUSE;
+        return zeroblob_func(pStmt, i, 0);
+    }
+
     const func = api.*.bind_blob orelse return SQLITE_MISUSE;
     return func(pStmt, i, z, n, xDel);
 }

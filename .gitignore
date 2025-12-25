@@ -24,3 +24,8 @@ zig/*.o
 zig/wasm-build/build/
 zig/wasm-build/dist/
 .tmp/
+lib/crsqlite-zig-darwin-aarch64.dylib
+lib/crsqlite-zig-darwin-universal.dylib
+lib/crsqlite-zig-darwin-x86_64.dylib
+lib/crsqlite-zig-linux-aarch64.so
+lib/crsqlite-zig-linux-x86_64.so

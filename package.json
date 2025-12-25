@@ -1,6 +1,6 @@
 {
   "name": "@effect-native/libcrsql",
-  "version": "0.16.3-1",
+  "version": "0.16.300-preview",
   "description": "Pure-Nix CR-SQLite extension (.dylib/.so) for conflict-free replicated databases",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
