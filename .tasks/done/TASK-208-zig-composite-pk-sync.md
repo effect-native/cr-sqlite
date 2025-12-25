@@ -4,9 +4,10 @@
 Fix the Zig implementation to support sync for tables with composite primary keys.
 
 ## Status
-- State: triage
+- State: DONE
 - Priority: MEDIUM (blocks inventory-style apps with Zig)
 - Discovered: 2025-12-25 (TASK-205 analysis)
+- Completed: 2025-12-25
 
 ## Problem
 
@@ -38,11 +39,11 @@ TASK-202 fixed single-column PK sync, but the fix only handles single PK values.
 
 ## Acceptance Criteria
 
-1. [ ] `bash zig/harness/test-app-inventory.sh` shows Zig PASS (not XFAIL)
-2. [ ] Composite INTEGER,INTEGER PK works
-3. [ ] Composite TEXT,TEXT PK works
-4. [ ] Composite TEXT,INTEGER,TEXT PK works
-5. [ ] Existing single PK tests continue to pass
+1. [x] `bash zig/harness/test-app-inventory.sh` shows Zig PASS (not XFAIL)
+2. [x] Composite INTEGER,INTEGER PK works
+3. [x] Composite TEXT,TEXT PK works
+4. [x] Composite TEXT,INTEGER,TEXT PK works
+5. [x] Existing single PK tests continue to pass
 
 ## Test Cases
 
@@ -82,6 +83,36 @@ rm -rf "$TMPDIR"
 
 ## Progress Log
 - 2025-12-25: Created from TASK-205 analysis.
+- 2025-12-25: Implemented composite PK support in merge_insert.zig.
 
 ## Completion Notes
-(Empty until done.)
+
+**Changes Made:**
+
+Added composite primary key support to `zig/src/merge_insert.zig`:
+
+1. **New helper function `buildCompositePkWhereClause`**: Builds WHERE clauses using tuple comparison with subquery:
+   ```sql
+   WHERE ("col1", "col2") = (SELECT "col1", "col2" FROM "table__crsql_pks" WHERE __crsql_key = ?)
+   ```
+
+2. **Updated `rowExistsInBaseTable`**: Now checks for composite PKs when `getPkColumnName` returns null and uses the composite WHERE clause builder.
+
+3. **Updated `deleteFromBaseTable`**: Same pattern - handles composite PKs with tuple comparison.
+
+4. **Updated `updateBaseTableColumn`**: Same pattern - handles composite PKs with tuple comparison.
+
+5. **Updated `insertRowForSentinelResurrection`**: For composite PKs, builds INSERT ... SELECT with all PK columns from the pks table.
+
+6. **Updated `insertRowForResurrection`**: For composite PKs, queries all PK values from pks table and binds them all to the INSERT statement.
+
+7. **Updated `insertOrUpdateColumn`**: Decodes all PK values from pk blob and builds INSERT with all PK columns.
+
+8. **Updated `insertPkOnlyRow`**: Same pattern - handles composite PKs for PK-only tables.
+
+9. **Added helper functions `bindValue` and `bindValueAtIndex`**: Extract common value binding logic.
+
+**Test Results:**
+- `test-app-inventory.sh`: All 4 tests PASS (was XFAIL)
+- `test-app-todo.sh`: All tests PASS (regression check)
+- `test-app-chat.sh`: All tests PASS (regression check)

@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-25 (Post-Round 74: Test bug fixes)
+> Last updated: 2025-12-25 (Post-Round 75: Composite PK sync + Hypothesis tests)
 
 ## Status
 
@@ -25,10 +25,12 @@
 - PK UPDATE: ✅ **16/16 PASSING** (Round 74)
 - **App simulation (Todo)**: ✅ **2/2 PASSING** (Round 73)
 - **App simulation (Chat)**: ✅ **4/4 PASSING** (Round 73)
-- **App simulation (Inventory)**: ⚠️ **Rust 4/4, Zig XFAIL** (composite PK sync not yet implemented)
+- **App simulation (Inventory)**: ✅ **4/4 PASSING** (Round 75 — composite PK sync fixed)
 - **Stress test (60 iterations)**: ✅ **60/60 PASSING, 0 divergences** (Round 73)
+- **CL merge properties**: ✅ **18/18 PASSING** (Round 75)
+- **Sentinel properties**: ✅ **15/15 PASSING** (Round 75)
 - Parity suite: **357 passed, 13 failed (pre-existing), 22 skipped**
-- Test scripts: **65+ total**
+- Test scripts: **67+ total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
@@ -43,11 +45,9 @@ No active tasks. Core sync functionality is complete and working.
 | **TASK-207** | BLOCKED | Re-enable CI for release | Medium (blocked on release decision) |
 | **TASK-186** | MEDIUM | Schema mismatch: unknown column behavior | Design decision |
 
-### Triage Inbox (6 items)
+### Triage Inbox (4 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
-| **TASK-208** | MEDIUM | Composite PK sync bug | Blocks inventory-style apps |
-| **TASK-191** | HIGH | Port Python Hypothesis tests | Valuable for edge cases |
 | **TASK-199** | MEDIUM | seq divergence (Zig=1, Rust=0) | Needs design decision |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
@@ -61,7 +61,17 @@ No active tasks. Core sync functionality is complete and working.
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
 - **seq divergence**: Zig starts seq at 1, Rust/C at 0 (doesn't affect sync correctness)
-- **Composite PK sync**: INSERT INTO crsql_changes fails for tables with composite PKs (TASK-208)
+
+### Completed Round 75 (2025-12-25) — Composite PK sync + Hypothesis tests
+- [x] **TASK-208**: Fix composite PK sync ✓
+  - Root cause: Merge functions only handled single-column PKs
+  - Fix: Added `buildCompositePkWhereClause` helper, updated all merge functions to iterate PK columns
+  - Files: `zig/src/merge_insert.zig`
+  - Result: `test-app-inventory.sh` now 4/4 PASS (was XFAIL)
+- [x] **TASK-191**: Port Python Hypothesis tests ✓
+  - Created `test-cl-merge-properties.sh` (6 properties, 18 assertions)
+  - Created `test-sentinel-properties.sh` (8 properties, 15 assertions)
+  - No divergences found — full parity with Rust/C
 
 ### Completed Round 74 (2025-12-25) — Test bug fixes
 - [x] **TASK-204**: Fix PK UPDATE test schema mismatch ✓

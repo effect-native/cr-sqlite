@@ -390,6 +390,69 @@ fn getPkColumnName(db: ?*api.sqlite3, table_name: []const u8) !?[256]u8 {
     return null;
 }
 
+/// Helper to build a WHERE clause for composite PKs using a subquery to the pks table.
+/// Builds: WHERE ("col1", "col2", ...) = (SELECT "col1", "col2", ... FROM "table__crsql_pks" WHERE __crsql_key = ?)
+/// Returns the SQL length written (not including null terminator).
+fn buildCompositePkWhereClause(
+    db: ?*api.sqlite3,
+    table_name: []const u8,
+    buf: []u8,
+) MergeError!usize {
+    var table_name_buf: [256]u8 = undefined;
+    const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+    const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
+
+    if (info.pk_count == 0) {
+        return MergeError.SqliteError;
+    }
+
+    var fbs = std.io.fixedBufferStream(buf);
+    const writer = fbs.writer();
+
+    // Build: WHERE ("col1", "col2") = (SELECT "col1", "col2" FROM "table__crsql_pks" WHERE __crsql_key = ?)
+    writer.writeAll("WHERE (") catch return MergeError.BufferOverflow;
+
+    // Write column tuple for base table
+    var pk_order: usize = 1;
+    var pk_written: usize = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (0..info.count) |i| {
+            const col = &info.columns[i];
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                }
+                writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.writeAll(") = (SELECT ") catch return MergeError.BufferOverflow;
+
+    // Write column tuple for subquery
+    pk_order = 1;
+    pk_written = 0;
+    while (pk_written < info.pk_count) : (pk_order += 1) {
+        for (0..info.count) |i| {
+            const col = &info.columns[i];
+            if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                if (pk_written > 0) {
+                    writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                }
+                writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                pk_written += 1;
+                break;
+            }
+        }
+    }
+
+    writer.print(" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+    return fbs.pos;
+}
+
 /// Find the __crsql_key (pk) for a row in the pks table given the PK blob.
 /// This works with the NEW Rust/C-compatible schema where PK values are stored
 /// as individual columns, not as a packed blob.
@@ -556,72 +619,159 @@ pub fn getPkValueFromKey(
 
 /// Check if a row exists in the base table by __crsql_key.
 /// Looks up the actual PK value from the pks table and uses that to match the base row.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn rowExistsInBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
     crsql_key: i64,
 ) MergeError!bool {
     // Get the PK column name to use in WHERE clause
-    const pk_col = getPkColumnName(db, table_name) catch return false;
-
-    var buf: [512]u8 = undefined;
-
-    // Use a subquery to look up the PK value from the pks table
-    const sql = if (pk_col) |pk_col_name| blk: {
-        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col_name, 0) orelse pk_col_name.len;
-        const pk_col_slice = pk_col_name[0..pk_col_len];
-        break :blk std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, pk_col_slice, pk_col_slice, table_name }) catch return false;
-    } else blk: {
-        // For rowid tables, __crsql_key == base rowid
-        break :blk std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return false;
+    const pk_col = getPkColumnName(db, table_name) catch |err| {
+        // If it's not a SqliteError, it might be a composite PK table
+        if (err == MergeError.SqliteError) return false;
+        return false;
     };
 
-    var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-        return false;
+    var buf: [1024]u8 = undefined;
+
+    if (pk_col) |pk_col_name| {
+        // Single-column PK - use the simpler subquery
+        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col_name, 0) orelse pk_col_name.len;
+        const pk_col_slice = pk_col_name[0..pk_col_len];
+        const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, pk_col_slice, pk_col_slice, table_name }) catch return false;
+
+        var stmt: ?*api.sqlite3_stmt = null;
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return false;
+        }
+        defer _ = api.finalize(stmt);
+
+        _ = api.bind_int64(stmt, 1, crsql_key);
+        return api.step(stmt) == api.SQLITE_ROW;
+    } else {
+        // Composite PK or rowid-only table - check if it's composite
+        var table_name_buf: [256]u8 = undefined;
+        const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return false;
+        const info = as_crr.getTableInfo(db, table_name_z) catch return false;
+
+        if (info.pk_count > 1) {
+            // Composite PK - use tuple comparison with subquery
+            var fbs = std.io.fixedBufferStream(&buf);
+            const writer = fbs.writer();
+
+            writer.print("SELECT 1 FROM \"{s}\" ", .{table_name}) catch return false;
+
+            // Build WHERE clause for composite PK
+            const where_len = buildCompositePkWhereClause(db, table_name, buf[fbs.pos..]) catch return false;
+            fbs.pos += where_len;
+
+            if (fbs.pos >= buf.len) return false;
+            buf[fbs.pos] = 0;
+
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
+                return false;
+            }
+            defer _ = api.finalize(stmt);
+
+            _ = api.bind_int64(stmt, 1, crsql_key);
+            return api.step(stmt) == api.SQLITE_ROW;
+        } else {
+            // Rowid-only table
+            const sql = std.fmt.bufPrintZ(&buf, "SELECT 1 FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return false;
+
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return false;
+            }
+            defer _ = api.finalize(stmt);
+
+            _ = api.bind_int64(stmt, 1, crsql_key);
+            return api.step(stmt) == api.SQLITE_ROW;
+        }
     }
-    defer _ = api.finalize(stmt);
-
-    _ = api.bind_int64(stmt, 1, crsql_key);
-
-    return api.step(stmt) == api.SQLITE_ROW;
 }
 
 /// Delete row from base table by __crsql_key.
 /// Looks up the actual PK value from the pks table and uses that to delete the base row.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn deleteFromBaseTable(
     db: ?*api.sqlite3,
     table_name: []const u8,
     crsql_key: i64,
 ) MergeError!void {
     // Get the PK column name to use in WHERE clause
-    const pk_col = getPkColumnName(db, table_name) catch return MergeError.SqliteError;
+    const pk_col = getPkColumnName(db, table_name) catch null;
 
-    var buf: [512]u8 = undefined;
+    var buf: [1024]u8 = undefined;
 
-    // Use a subquery to look up the PK value from the pks table
-    const sql = if (pk_col) |pk_col_name| blk: {
+    if (pk_col) |pk_col_name| {
+        // Single-column PK - use the simpler subquery
         const pk_col_len = std.mem.indexOfScalar(u8, &pk_col_name, 0) orelse pk_col_name.len;
         const pk_col_slice = pk_col_name[0..pk_col_len];
-        break :blk std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, pk_col_slice, pk_col_slice, table_name }) catch return MergeError.BufferOverflow;
-    } else blk: {
-        // For rowid tables, __crsql_key == base rowid
-        break :blk std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
-    };
+        const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, pk_col_slice, pk_col_slice, table_name }) catch return MergeError.BufferOverflow;
 
-    var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
-    }
-    defer _ = api.finalize(stmt);
+        var stmt: ?*api.sqlite3_stmt = null;
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+        defer _ = api.finalize(stmt);
 
-    _ = api.bind_int64(stmt, 1, crsql_key);
+        _ = api.bind_int64(stmt, 1, crsql_key);
 
-    const rc = api.step(stmt);
-    if (rc != api.SQLITE_DONE) {
-        return MergeError.SqliteError;
+        const rc = api.step(stmt);
+        if (rc != api.SQLITE_DONE) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // Composite PK or rowid-only table - check if it's composite
+        var table_name_buf: [256]u8 = undefined;
+        const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+        const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
+
+        if (info.pk_count > 1) {
+            // Composite PK - use tuple comparison with subquery
+            var fbs = std.io.fixedBufferStream(&buf);
+            const writer = fbs.writer();
+
+            writer.print("DELETE FROM \"{s}\" ", .{table_name}) catch return MergeError.BufferOverflow;
+
+            // Build WHERE clause for composite PK
+            const where_len = try buildCompositePkWhereClause(db, table_name, buf[fbs.pos..]);
+            fbs.pos += where_len;
+
+            if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+            buf[fbs.pos] = 0;
+
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+            defer _ = api.finalize(stmt);
+
+            _ = api.bind_int64(stmt, 1, crsql_key);
+
+            const rc = api.step(stmt);
+            if (rc != api.SQLITE_DONE) {
+                return MergeError.SqliteError;
+            }
+        } else {
+            // Rowid-only table
+            const sql = std.fmt.bufPrintZ(&buf, "DELETE FROM \"{s}\" WHERE rowid = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+            defer _ = api.finalize(stmt);
+
+            _ = api.bind_int64(stmt, 1, crsql_key);
+
+            const rc = api.step(stmt);
+            if (rc != api.SQLITE_DONE) {
+                return MergeError.SqliteError;
+            }
+        }
     }
     // Note: In the new schema, tombstoning is tracked via the clock table sentinel,
     // not via a base_rowid column in the pks table.
@@ -706,20 +856,20 @@ pub fn zeroClockOnResurrectCached(
 /// Creates a new row with just the PK value (non-PK columns will be NULL).
 /// Used when a resurrection sentinel (odd CL) arrives for a tombstoned row.
 /// Looks up the actual PK value from the pks table using __crsql_key.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn insertRowForSentinelResurrection(
     db: ?*api.sqlite3,
     table_name: []const u8,
     crsql_key: i64,
 ) MergeError!void {
     // Get the PK column name from the table schema
-    const pk_col_name = try getPkColumnName(db, table_name);
+    const pk_col_name = getPkColumnName(db, table_name) catch null;
 
-    var buf: [512]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var stmt: ?*api.sqlite3_stmt = null;
 
     if (pk_col_name) |pk_col| {
-        // Table has a declared PK column - use INSERT ... SELECT to get the PK value from pks table
+        // Single-column PK - use INSERT ... SELECT to get the PK value from pks table
         const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
         const pk_col_slice = pk_col[0..pk_col_len];
 
@@ -730,11 +880,69 @@ pub fn insertRowForSentinelResurrection(
             return MergeError.SqliteError;
         }
     } else {
-        // No declared PK column - use rowid directly (__crsql_key == base rowid)
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid) VALUES (?)", .{table_name}) catch return MergeError.BufferOverflow;
+        // Composite PK or rowid-only table - check if it's composite
+        var table_name_buf: [256]u8 = undefined;
+        const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+        const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
 
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-            return MergeError.SqliteError;
+        if (info.pk_count > 1) {
+            // Composite PK - build INSERT ... SELECT with all PK columns
+            var fbs = std.io.fixedBufferStream(&buf);
+            const writer = fbs.writer();
+
+            writer.print("INSERT INTO \"{s}\" (", .{table_name}) catch return MergeError.BufferOverflow;
+
+            // Write column list
+            var pk_order: usize = 1;
+            var pk_written: usize = 0;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (0..info.count) |i| {
+                    const col = &info.columns[i];
+                    if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                        }
+                        writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                        pk_written += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.writeAll(") SELECT ") catch return MergeError.BufferOverflow;
+
+            // Write select list
+            pk_order = 1;
+            pk_written = 0;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (0..info.count) |i| {
+                    const col = &info.columns[i];
+                    if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                        }
+                        writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                        pk_written += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.print(" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+            if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+            buf[fbs.pos] = 0;
+
+            if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        } else {
+            // Rowid-only table - use rowid directly (__crsql_key == base rowid)
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid) VALUES (?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
         }
     }
     defer _ = api.finalize(stmt);
@@ -751,7 +959,7 @@ pub fn insertRowForSentinelResurrection(
 /// Insert a row for resurrection (resurrecting a deleted row with new data).
 /// Creates a new row with the given __crsql_key and column value.
 /// Looks up the actual PK value from the pks table.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn insertRowForResurrection(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -760,10 +968,10 @@ pub fn insertRowForResurrection(
     value: ?*api.sqlite3_value,
 ) MergeError!void {
     // Get the PK column name from the table schema
-    const pk_col_name = try getPkColumnName(db, table_name);
+    const pk_col_name = getPkColumnName(db, table_name) catch null;
 
     if (pk_col_name) |pk_col| {
-        // Table has a declared PK column
+        // Single-column PK
         const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
         const pk_col_slice = pk_col[0..pk_col_len];
 
@@ -814,80 +1022,199 @@ pub fn insertRowForResurrection(
         }
 
         // Bind column value based on type
-        if (value) |v| {
-            const val_type = api.value_type(v);
-            switch (val_type) {
-                api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
-                api.SQLITE_FLOAT => {
-                    _ = api.bind_double(stmt, 2, api.value_double(v));
-                },
-                api.SQLITE_TEXT => {
-                    const text = api.value_text(v);
-                    const len = api.value_bytes(v);
-                    if (text) |t| {
-                        _ = api.bind_text(stmt, 2, t, len, api.getTransientDestructor());
-                    } else {
-                        _ = api.bind_null(stmt, 2);
-                    }
-                },
-                api.SQLITE_BLOB => {
-                    const blob = api.value_blob(v);
-                    const len = api.value_bytes(v);
-                    _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
-                },
-                else => _ = api.bind_null(stmt, 2),
-            }
-        } else {
-            _ = api.bind_null(stmt, 2);
-        }
+        try bindValue(stmt, 2, value);
 
         const rc = api.step(stmt);
         if (rc != api.SQLITE_DONE) {
             return MergeError.SqliteError;
         }
     } else {
-        // No declared PK column - use rowid directly (__crsql_key == base rowid)
-        var buf: [1024]u8 = undefined;
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+        // Composite PK or rowid-only table - check if it's composite
+        var table_name_buf: [256]u8 = undefined;
+        const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+        const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
 
-        var stmt: ?*api.sqlite3_stmt = null;
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-            return MergeError.SqliteError;
-        }
-        defer _ = api.finalize(stmt);
+        if (info.pk_count > 1) {
+            // Composite PK - query all PK values from pks table, then insert with data column
+            // Build: SELECT pk1, pk2, ... FROM "table__crsql_pks" WHERE __crsql_key = ?
+            var pk_query_buf: [1024]u8 = undefined;
+            var pk_fbs = std.io.fixedBufferStream(&pk_query_buf);
+            const pk_writer = pk_fbs.writer();
 
-        _ = api.bind_int64(stmt, 1, crsql_key);
+            pk_writer.writeAll("SELECT ") catch return MergeError.BufferOverflow;
 
-        // Bind column value based on type
-        if (value) |v| {
-            const val_type = api.value_type(v);
-            switch (val_type) {
-                api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
-                api.SQLITE_FLOAT => {
-                    _ = api.bind_double(stmt, 2, api.value_double(v));
-                },
-                api.SQLITE_TEXT => {
-                    const text = api.value_text(v);
-                    const len = api.value_bytes(v);
-                    if (text) |t| {
-                        _ = api.bind_text(stmt, 2, t, len, api.getTransientDestructor());
-                    } else {
-                        _ = api.bind_null(stmt, 2);
+            var pk_order: usize = 1;
+            var pk_written: usize = 0;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (0..info.count) |i| {
+                    const col = &info.columns[i];
+                    if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            pk_writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                        }
+                        pk_writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                        pk_written += 1;
+                        break;
                     }
-                },
-                api.SQLITE_BLOB => {
-                    const blob = api.value_blob(v);
-                    const len = api.value_bytes(v);
-                    _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
-                },
-                else => _ = api.bind_null(stmt, 2),
+                }
+            }
+
+            pk_writer.print(" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?", .{table_name}) catch return MergeError.BufferOverflow;
+
+            if (pk_fbs.pos >= pk_query_buf.len) return MergeError.BufferOverflow;
+            pk_query_buf[pk_fbs.pos] = 0;
+
+            var pk_query_stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, @ptrCast(&pk_query_buf), -1, &pk_query_stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+            defer _ = api.finalize(pk_query_stmt);
+
+            _ = api.bind_int64(pk_query_stmt, 1, crsql_key);
+
+            if (api.step(pk_query_stmt) != api.SQLITE_ROW) {
+                return MergeError.NoRows;
+            }
+
+            // Build: INSERT INTO "table" (pk1, pk2, ..., col) VALUES (?, ?, ..., ?)
+            var buf: [2048]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&buf);
+            const writer = fbs.writer();
+
+            writer.print("INSERT INTO \"{s}\" (", .{table_name}) catch return MergeError.BufferOverflow;
+
+            pk_order = 1;
+            pk_written = 0;
+            while (pk_written < info.pk_count) : (pk_order += 1) {
+                for (0..info.count) |i| {
+                    const col = &info.columns[i];
+                    if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                        if (pk_written > 0) {
+                            writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                        }
+                        writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                        pk_written += 1;
+                        break;
+                    }
+                }
+            }
+
+            writer.print(", \"{s}\") VALUES (", .{col_name}) catch return MergeError.BufferOverflow;
+
+            // Placeholders for PK columns + data column
+            for (0..info.pk_count) |i| {
+                if (i > 0) {
+                    writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                }
+                writer.writeAll("?") catch return MergeError.BufferOverflow;
+            }
+            writer.writeAll(", ?)") catch return MergeError.BufferOverflow;
+
+            if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+            buf[fbs.pos] = 0;
+
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+            defer _ = api.finalize(stmt);
+
+            // Bind all PK values from query result
+            for (0..info.pk_count) |i| {
+                const col_idx: c_int = @intCast(i);
+                const bind_idx: c_int = @intCast(i + 1);
+                const pk_val = api.column_value(pk_query_stmt, col_idx);
+                if (pk_val) |v| {
+                    const pk_type = api.value_type(v);
+                    const bind_rc = switch (pk_type) {
+                        api.SQLITE_INTEGER => api.bind_int64(stmt, bind_idx, api.value_int64(v)),
+                        api.SQLITE_TEXT => blk: {
+                            const text = api.value_text(v);
+                            const len = api.value_bytes(v);
+                            break :blk api.bind_text(stmt, bind_idx, text, len, api.getTransientDestructor());
+                        },
+                        api.SQLITE_BLOB => blk: {
+                            const blob = api.value_blob(v);
+                            const len = api.value_bytes(v);
+                            break :blk api.bind_blob(stmt, bind_idx, blob, len, api.getTransientDestructor());
+                        },
+                        else => api.bind_null(stmt, bind_idx),
+                    };
+                    if (bind_rc != api.SQLITE_OK) {
+                        return MergeError.SqliteError;
+                    }
+                } else {
+                    if (api.bind_null(stmt, bind_idx) != api.SQLITE_OK) {
+                        return MergeError.SqliteError;
+                    }
+                }
+            }
+
+            // Bind data column value
+            const data_bind_idx: c_int = @intCast(info.pk_count + 1);
+            try bindValueAtIndex(stmt, data_bind_idx, value);
+
+            const rc = api.step(stmt);
+            if (rc != api.SQLITE_DONE) {
+                return MergeError.SqliteError;
             }
         } else {
-            _ = api.bind_null(stmt, 2);
-        }
+            // Rowid-only table - use rowid directly (__crsql_key == base rowid)
+            var buf: [1024]u8 = undefined;
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
 
-        const rc = api.step(stmt);
-        if (rc != api.SQLITE_DONE) {
+            var stmt: ?*api.sqlite3_stmt = null;
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+            defer _ = api.finalize(stmt);
+
+            _ = api.bind_int64(stmt, 1, crsql_key);
+
+            // Bind column value based on type
+            try bindValue(stmt, 2, value);
+
+            const rc = api.step(stmt);
+            if (rc != api.SQLITE_DONE) {
+                return MergeError.SqliteError;
+            }
+        }
+    }
+}
+
+/// Helper to bind a sqlite3_value to a statement parameter
+fn bindValue(stmt: ?*api.sqlite3_stmt, param_idx: c_int, value: ?*api.sqlite3_value) MergeError!void {
+    return bindValueAtIndex(stmt, param_idx, value);
+}
+
+/// Helper to bind a sqlite3_value to a statement parameter at a specific index
+fn bindValueAtIndex(stmt: ?*api.sqlite3_stmt, param_idx: c_int, value: ?*api.sqlite3_value) MergeError!void {
+    if (value) |v| {
+        const val_type = api.value_type(v);
+        const bind_rc = switch (val_type) {
+            api.SQLITE_INTEGER => api.bind_int64(stmt, param_idx, api.value_int64(v)),
+            api.SQLITE_FLOAT => api.bind_double(stmt, param_idx, api.value_double(v)),
+            api.SQLITE_TEXT => blk: {
+                const text = api.value_text(v);
+                const len = api.value_bytes(v);
+                if (text) |t| {
+                    break :blk api.bind_text(stmt, param_idx, t, len, api.getTransientDestructor());
+                } else {
+                    break :blk api.bind_null(stmt, param_idx);
+                }
+            },
+            api.SQLITE_BLOB => blk: {
+                const blob = api.value_blob(v);
+                const len = api.value_bytes(v);
+                break :blk api.bind_blob(stmt, param_idx, blob, len, api.getTransientDestructor());
+            },
+            else => api.bind_null(stmt, param_idx),
+        };
+        if (bind_rc != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        if (api.bind_null(stmt, param_idx) != api.SQLITE_OK) {
             return MergeError.SqliteError;
         }
     }
@@ -895,7 +1222,7 @@ pub fn insertRowForResurrection(
 
 /// Update a column value in the base table for an existing row.
 /// Looks up the actual PK value from the pks table and uses that to update the base row.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn updateBaseTableColumn(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -904,23 +1231,51 @@ pub fn updateBaseTableColumn(
     value: ?*api.sqlite3_value,
 ) MergeError!void {
     // Get the PK column name to use in WHERE clause
-    const pk_col = getPkColumnName(db, table_name) catch return MergeError.SqliteError;
+    const pk_col = getPkColumnName(db, table_name) catch null;
 
     var buf: [1024]u8 = undefined;
+    var stmt: ?*api.sqlite3_stmt = null;
 
-    const sql = if (pk_col) |pk_col_name| blk: {
+    if (pk_col) |pk_col_name| {
+        // Single-column PK - use the simpler subquery
         const pk_col_len = std.mem.indexOfScalar(u8, &pk_col_name, 0) orelse pk_col_name.len;
         const pk_col_slice = pk_col_name[0..pk_col_len];
-        break :blk std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, col_name, pk_col_slice, pk_col_slice, table_name }) catch return MergeError.BufferOverflow;
-    } else blk: {
-        // No declared PK column - use rowid directly (only valid for rowid-based tables)
-        // For rowid tables, __crsql_key == base rowid
-        break :blk std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
-    };
+        const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE \"{s}\" = (SELECT \"{s}\" FROM \"{s}__crsql_pks\" WHERE __crsql_key = ?)", .{ table_name, col_name, pk_col_slice, pk_col_slice, table_name }) catch return MergeError.BufferOverflow;
 
-    var stmt: ?*api.sqlite3_stmt = null;
-    if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
-        return MergeError.SqliteError;
+        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+            return MergeError.SqliteError;
+        }
+    } else {
+        // Composite PK or rowid-only table - check if it's composite
+        var table_name_buf: [256]u8 = undefined;
+        const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+        const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
+
+        if (info.pk_count > 1) {
+            // Composite PK - use tuple comparison with subquery
+            var fbs = std.io.fixedBufferStream(&buf);
+            const writer = fbs.writer();
+
+            writer.print("UPDATE \"{s}\" SET \"{s}\" = ? ", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+            // Build WHERE clause for composite PK
+            const where_len = try buildCompositePkWhereClause(db, table_name, buf[fbs.pos..]);
+            fbs.pos += where_len;
+
+            if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+            buf[fbs.pos] = 0;
+
+            if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        } else {
+            // Rowid-only table
+            const sql = std.fmt.bufPrintZ(&buf, "UPDATE \"{s}\" SET \"{s}\" = ? WHERE rowid = ?", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        }
     }
     defer _ = api.finalize(stmt);
 
@@ -962,7 +1317,7 @@ pub fn updateBaseTableColumn(
 
 /// Insert or update a column value in the base table for a given row.
 /// Handles both declared-PK and rowid-based tables.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 pub fn insertOrUpdateColumn(
     db: ?*api.sqlite3,
     table_name: []const u8,
@@ -987,75 +1342,126 @@ pub fn insertOrUpdateColumn(
 
     if (values.len == 0) return MergeError.DecodeError;
 
-    // Get the first PK value (single-column PKs only for now)
-    const pk_value = values[0];
+    // Check the number of PK columns
+    var table_name_buf: [256]u8 = undefined;
+    const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+    const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
 
-    // Get the PK column name from the table schema
-    const pk_col_name = try getPkColumnName(db, table_name);
+    if (values.len != info.pk_count) {
+        return MergeError.DecodeError; // Mismatch between unpacked values and PK column count
+    }
 
-    var buf: [1024]u8 = undefined;
+    var buf: [2048]u8 = undefined;
     var stmt: ?*api.sqlite3_stmt = null;
 
-    if (pk_col_name) |pk_col| {
-        // Table has a declared PK column - insert using that column name
-        // Find the length of the null-terminated PK column name
-        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
-        const pk_col_slice = pk_col[0..pk_col_len];
+    if (info.pk_count == 1) {
+        // Single-column PK - use the simpler approach
+        const pk_value = values[0];
 
-        // Build: INSERT INTO "{table}" ("{pk_col}", "{col}") VALUES (?, ?)
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\", \"{s}\") VALUES (?, ?)", .{ table_name, pk_col_slice, col_name }) catch return MergeError.BufferOverflow;
+        // Get the PK column name
+        const pk_col_name = getPkColumnName(db, table_name) catch null;
 
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        if (pk_col_name) |pk_col| {
+            const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+            const pk_col_slice = pk_col[0..pk_col_len];
+
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\", \"{s}\") VALUES (?, ?)", .{ table_name, pk_col_slice, col_name }) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        } else {
+            // Rowid table
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        }
+        defer _ = api.finalize(stmt);
+
+        // Bind the PK value based on its type
+        switch (pk_value) {
+            .Integer => |i| _ = api.bind_int64(stmt, 1, i),
+            .Text => |t| _ = api.bind_text(stmt, 1, t.ptr, @intCast(t.len), api.getTransientDestructor()),
+            .Blob => |b| _ = api.bind_blob(stmt, 1, b.ptr, @intCast(b.len), api.getTransientDestructor()),
+            .Null => _ = api.bind_null(stmt, 1),
+            .Float => return MergeError.DecodeError, // Float PKs not supported
+        }
+
+        // Bind column value
+        try bindValueAtIndex(stmt, 2, value);
+
+        const rc = api.step(stmt);
+        if (rc != api.SQLITE_DONE) {
             return MergeError.SqliteError;
         }
     } else {
-        // No declared PK column - use rowid directly
-        // Build: INSERT INTO "{table}" (rowid, "{col}") VALUES (?, ?)
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid, \"{s}\") VALUES (?, ?)", .{ table_name, col_name }) catch return MergeError.BufferOverflow;
+        // Composite PK - build INSERT with all PK columns + data column
+        var fbs = std.io.fixedBufferStream(&buf);
+        const writer = fbs.writer();
 
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        writer.print("INSERT INTO \"{s}\" (", .{table_name}) catch return MergeError.BufferOverflow;
+
+        // Write PK column names in order
+        var pk_order: usize = 1;
+        var pk_written: usize = 0;
+        while (pk_written < info.pk_count) : (pk_order += 1) {
+            for (0..info.count) |i| {
+                const col = &info.columns[i];
+                if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                    if (pk_written > 0) {
+                        writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                    }
+                    writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                    pk_written += 1;
+                    break;
+                }
+            }
+        }
+
+        writer.print(", \"{s}\") VALUES (", .{col_name}) catch return MergeError.BufferOverflow;
+
+        // Placeholders for PK columns + data column
+        for (0..info.pk_count) |i| {
+            if (i > 0) {
+                writer.writeAll(", ") catch return MergeError.BufferOverflow;
+            }
+            writer.writeAll("?") catch return MergeError.BufferOverflow;
+        }
+        writer.writeAll(", ?)") catch return MergeError.BufferOverflow;
+
+        if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+        buf[fbs.pos] = 0;
+
+        if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
             return MergeError.SqliteError;
         }
-    }
-    defer _ = api.finalize(stmt);
+        defer _ = api.finalize(stmt);
 
-    // Bind the PK value based on its type
-    switch (pk_value) {
-        .Integer => |i| _ = api.bind_int64(stmt, 1, i),
-        .Text => |t| _ = api.bind_text(stmt, 1, t.ptr, @intCast(t.len), api.getTransientDestructor()),
-        .Blob => |b| _ = api.bind_blob(stmt, 1, b.ptr, @intCast(b.len), api.getTransientDestructor()),
-        .Null => _ = api.bind_null(stmt, 1),
-        .Float => return MergeError.DecodeError, // Float PKs not supported
-    }
-
-    // Bind column value based on type
-    if (value) |v| {
-        const val_type = api.value_type(v);
-        switch (val_type) {
-            api.SQLITE_INTEGER => _ = api.bind_int64(stmt, 2, api.value_int64(v)),
-            api.SQLITE_FLOAT => {
-                _ = api.bind_double(stmt, 2, api.value_double(v));
-            },
-            api.SQLITE_TEXT => {
-                const text = api.value_text(v);
-                const len = api.value_bytes(v);
-                _ = api.bind_text(stmt, 2, text, len, api.getTransientDestructor());
-            },
-            api.SQLITE_BLOB => {
-                const blob = api.value_blob(v);
-                const len = api.value_bytes(v);
-                _ = api.bind_blob(stmt, 2, blob, len, api.getTransientDestructor());
-            },
-            api.SQLITE_NULL => _ = api.bind_null(stmt, 2),
-            else => return MergeError.SqliteError,
+        // Bind all PK values in order
+        for (values, 0..) |pk_val, idx| {
+            const bind_idx: c_int = @intCast(idx + 1);
+            const bind_rc = switch (pk_val) {
+                .Integer => |i| api.bind_int64(stmt, bind_idx, i),
+                .Text => |t| api.bind_text(stmt, bind_idx, t.ptr, @intCast(t.len), api.getTransientDestructor()),
+                .Blob => |b| api.bind_blob(stmt, bind_idx, b.ptr, @intCast(b.len), api.getTransientDestructor()),
+                .Null => api.bind_null(stmt, bind_idx),
+                .Float => return MergeError.DecodeError,
+            };
+            if (bind_rc != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
         }
-    } else {
-        _ = api.bind_null(stmt, 2);
-    }
 
-    const rc = api.step(stmt);
-    if (rc != api.SQLITE_DONE) {
-        return MergeError.SqliteError;
+        // Bind data column value
+        const data_bind_idx: c_int = @intCast(info.pk_count + 1);
+        try bindValueAtIndex(stmt, data_bind_idx, value);
+
+        const rc = api.step(stmt);
+        if (rc != api.SQLITE_DONE) {
+            return MergeError.SqliteError;
+        }
     }
 }
 
@@ -1173,7 +1579,7 @@ pub fn insertIntoPksTableAndGetPk(
 
 /// Insert a row into a PK-only table (table with no non-PK columns).
 /// Decodes the pk blob to get the PK value and inserts a row with just that value.
-/// Supports INTEGER, TEXT, and BLOB primary keys.
+/// Supports INTEGER, TEXT, and BLOB primary keys, including composite PKs.
 /// Returns the new rowid.
 pub fn insertPkOnlyRow(
     db: ?*api.sqlite3,
@@ -1181,7 +1587,7 @@ pub fn insertPkOnlyRow(
     pk_blob: [*]const u8,
     pk_blob_len: usize,
 ) MergeError!i64 {
-    // Decode the PK blob to get the PK value
+    // Decode the PK blob to get the PK values
     const pk_slice = pk_blob[0..pk_blob_len];
     const values = codec.unpack(std.heap.page_allocator, pk_slice) catch return MergeError.DecodeError;
     defer {
@@ -1197,49 +1603,119 @@ pub fn insertPkOnlyRow(
 
     if (values.len == 0) return MergeError.DecodeError;
 
-    // Get the first PK value (single-column PKs only for now)
-    const pk_value = values[0];
+    // Get table info to determine PK structure
+    var table_name_buf: [256]u8 = undefined;
+    const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return MergeError.BufferOverflow;
+    const info = as_crr.getTableInfo(db, table_name_z) catch return MergeError.SqliteError;
 
-    // Get the PK column name from the table schema
-    const pk_col_name = try getPkColumnName(db, table_name);
+    if (values.len != info.pk_count) {
+        return MergeError.DecodeError; // Mismatch between unpacked values and PK column count
+    }
 
-    var buf: [512]u8 = undefined;
+    var buf: [2048]u8 = undefined;
     var stmt: ?*api.sqlite3_stmt = null;
 
-    if (pk_col_name) |pk_col| {
-        // Table has a declared PK column - insert using that column name
-        const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
-        const pk_col_slice = pk_col[0..pk_col_len];
+    if (info.pk_count == 1) {
+        // Single-column PK
+        const pk_value = values[0];
 
-        // Build: INSERT INTO "{table}" ("{pk_col}") VALUES (?)
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\") VALUES (?)", .{ table_name, pk_col_slice }) catch return MergeError.BufferOverflow;
+        // Get the PK column name from the table schema
+        const pk_col_name = getPkColumnName(db, table_name) catch null;
 
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        if (pk_col_name) |pk_col| {
+            const pk_col_len = std.mem.indexOfScalar(u8, &pk_col, 0) orelse pk_col.len;
+            const pk_col_slice = pk_col[0..pk_col_len];
+
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (\"{s}\") VALUES (?)", .{ table_name, pk_col_slice }) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        } else {
+            // Rowid-only table
+            const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid) VALUES (?)", .{table_name}) catch return MergeError.BufferOverflow;
+
+            if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        }
+        defer _ = api.finalize(stmt);
+
+        // Bind the PK value based on its type
+        switch (pk_value) {
+            .Integer => |i| _ = api.bind_int64(stmt, 1, i),
+            .Text => |t| _ = api.bind_text(stmt, 1, t.ptr, @intCast(t.len), api.getTransientDestructor()),
+            .Blob => |b| _ = api.bind_blob(stmt, 1, b.ptr, @intCast(b.len), api.getTransientDestructor()),
+            .Null => _ = api.bind_null(stmt, 1),
+            .Float => return MergeError.DecodeError,
+        }
+
+        const rc = api.step(stmt);
+        if (rc != api.SQLITE_DONE) {
             return MergeError.SqliteError;
         }
     } else {
-        // No declared PK column - use rowid directly
-        // Build: INSERT INTO "{table}" (rowid) VALUES (?)
-        const sql = std.fmt.bufPrintZ(&buf, "INSERT INTO \"{s}\" (rowid) VALUES (?)", .{table_name}) catch return MergeError.BufferOverflow;
+        // Composite PK - build INSERT with all PK columns
+        var fbs = std.io.fixedBufferStream(&buf);
+        const writer = fbs.writer();
 
-        if (api.prepare_v2(db, sql, -1, &stmt, null) != api.SQLITE_OK) {
+        writer.print("INSERT INTO \"{s}\" (", .{table_name}) catch return MergeError.BufferOverflow;
+
+        // Write PK column names in order
+        var pk_order: usize = 1;
+        var pk_written: usize = 0;
+        while (pk_written < info.pk_count) : (pk_order += 1) {
+            for (0..info.count) |i| {
+                const col = &info.columns[i];
+                if (col.pk_index == @as(c_int, @intCast(pk_order))) {
+                    if (pk_written > 0) {
+                        writer.writeAll(", ") catch return MergeError.BufferOverflow;
+                    }
+                    writer.print("\"{s}\"", .{col.name[0..col.name_len]}) catch return MergeError.BufferOverflow;
+                    pk_written += 1;
+                    break;
+                }
+            }
+        }
+
+        writer.writeAll(") VALUES (") catch return MergeError.BufferOverflow;
+
+        // Placeholders for PK columns
+        for (0..info.pk_count) |i| {
+            if (i > 0) {
+                writer.writeAll(", ") catch return MergeError.BufferOverflow;
+            }
+            writer.writeAll("?") catch return MergeError.BufferOverflow;
+        }
+        writer.writeAll(")") catch return MergeError.BufferOverflow;
+
+        if (fbs.pos >= buf.len) return MergeError.BufferOverflow;
+        buf[fbs.pos] = 0;
+
+        if (api.prepare_v2(db, @ptrCast(&buf), -1, &stmt, null) != api.SQLITE_OK) {
             return MergeError.SqliteError;
         }
-    }
-    defer _ = api.finalize(stmt);
+        defer _ = api.finalize(stmt);
 
-    // Bind the PK value based on its type
-    switch (pk_value) {
-        .Integer => |i| _ = api.bind_int64(stmt, 1, i),
-        .Text => |t| _ = api.bind_text(stmt, 1, t.ptr, @intCast(t.len), api.getTransientDestructor()),
-        .Blob => |b| _ = api.bind_blob(stmt, 1, b.ptr, @intCast(b.len), api.getTransientDestructor()),
-        .Null => _ = api.bind_null(stmt, 1),
-        .Float => return MergeError.DecodeError, // Float PKs not supported
-    }
+        // Bind all PK values in order
+        for (values, 0..) |pk_val, idx| {
+            const bind_idx: c_int = @intCast(idx + 1);
+            const bind_rc = switch (pk_val) {
+                .Integer => |i| api.bind_int64(stmt, bind_idx, i),
+                .Text => |t| api.bind_text(stmt, bind_idx, t.ptr, @intCast(t.len), api.getTransientDestructor()),
+                .Blob => |b| api.bind_blob(stmt, bind_idx, b.ptr, @intCast(b.len), api.getTransientDestructor()),
+                .Null => api.bind_null(stmt, bind_idx),
+                .Float => return MergeError.DecodeError,
+            };
+            if (bind_rc != api.SQLITE_OK) {
+                return MergeError.SqliteError;
+            }
+        }
 
-    const rc = api.step(stmt);
-    if (rc != api.SQLITE_DONE) {
-        return MergeError.SqliteError;
+        const rc = api.step(stmt);
+        if (rc != api.SQLITE_DONE) {
+            return MergeError.SqliteError;
+        }
     }
 
     // Return the rowid of the inserted row
