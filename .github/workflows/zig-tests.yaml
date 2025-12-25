@@ -157,13 +157,22 @@ jobs:
           nix run nixpkgs#sqlite -- --version
           echo ""
           echo "=== Test extension load ==="
-          CRSQL_DEBUG=1 nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_version();" 2>&1 || true
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_version();" 2>&1 || true
           echo ""
           echo "=== Test crsql_db_version ==="
           nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_db_version();" 2>&1 || true
           echo ""
           echo "=== Test crsql_site_id ==="
           nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT hex(crsql_site_id());" 2>&1 || true
+          echo ""
+          echo "=== Test crsql_changes insert (rows_impacted issue) ==="
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "
+            CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
+            SELECT crsql_as_crr('foo');
+            BEGIN;
+            INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
+            SELECT crsql_rows_impacted();
+          " 2>&1 || echo "ERROR: $?"
 
       - name: Run parity tests
         working-directory: zig
