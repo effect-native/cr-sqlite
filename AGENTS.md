@@ -60,6 +60,8 @@ Workflow:
 
 ## "Update tasks" (backlog refresh)
 
+**Primary goal:** identify and unblock the `0.16.300-preview` release.
+
 Meaning: reconcile intended docs/specs vs built reality, then refresh `.tasks/`.
 
 "Delegate work" and "Update tasks" are an adversarial collaboration loop:
@@ -68,7 +70,12 @@ Meaning: reconcile intended docs/specs vs built reality, then refresh `.tasks/`.
 - Gap backlog (`research/zig-cr/92-gap-backlog.md`) is the opposite evergreen handoff (update→delegate).
 
 Do this, in order:
-0. Read the delegate evidence first:
+0. Anchor on the release tracker:
+   - Treat `.tasks/backlog/TASK-209-release-0.16.300-preview.md` as the source of truth.
+   - Any discovered gap must become either:
+     - a checked/unchecked blocker line in TASK-209 **plus** an owning task card, or
+     - a triage task explicitly marked "not a release blocker" with rationale.
+1. Read the delegate evidence first:
    - `.tasks/DELEGATE_WORK_HANDOFF.md`
    - Treat it as *claims to falsify*.
    - Prefer using the captured test output + coverage notes to avoid rerunning expensive tests.
@@ -98,6 +105,8 @@ Output:
 
 ## "Delegate work" (parallel subagents)
 
+**Primary goal:** unblock the `0.16.300-preview` release by executing release-blocker tasks.
+
 Meaning: take a curated subset of `.tasks/backlog/` and run multiple subagents in parallel.
 
 This workflow must produce an evergreen handoff for the adversarial "Update tasks" phase:
@@ -105,9 +114,10 @@ This workflow must produce an evergreen handoff for the adversarial "Update task
 - **Delegate handoff log** (`.tasks/DELEGATE_WORK_HANDOFF.md`) is delegate→update.
 
 Procedure:
-1. Read `research/zig-cr/92-gap-backlog.md` first (it is the task map).
-2. Pick tasks with disjoint `Files to Modify`.
-3. For each selected task:
+1. Read `.tasks/backlog/TASK-209-release-0.16.300-preview.md` first (release blockers).
+2. Then read `research/zig-cr/92-gap-backlog.md` (task map + historical context).
+3. Pick tasks with disjoint `Files to Modify`.
+4. For each selected task:
    - Move `.tasks/backlog/TASK-*.md` → `.tasks/active/TASK-*.md`.
    - Launch one subagent with the task card as the entire prompt.
    - Instruct it to only touch listed files and to update the task card as it goes.

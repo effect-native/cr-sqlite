@@ -31,6 +31,7 @@
 - **CL merge properties**: ✅ **18/18 PASSING** (Round 75)
 - **Sentinel properties**: ✅ **15/15 PASSING** (Round 75)
 - Parity suite: **367 passed, 4 failed (pre-existing edge cases), 22 skipped**
+- Release focus: **Primary goal is `0.16.300-preview` (Native + WASM + Browser)**
 - Test scripts: **67+ total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
@@ -40,10 +41,20 @@
 ### Active (0 tasks)
 No active tasks. Core sync functionality is complete and working.
 
-### Backlog (1 task)
+### Backlog (Release focus: `0.16.300-preview`)
 | Task | Priority | Summary | Effort |
 |------|----------|---------|--------|
-| **TASK-207** | BLOCKED | Re-enable CI for release | Medium (blocked on release decision) |
+| **TASK-209** | HIGH | Release tracker: 0.16.300-preview | Large |
+| **TASK-210** | HIGH | Release versioning + tags | Medium |
+| **TASK-211** | HIGH | Native Zig artifacts (darwin + linux) | Medium |
+| **TASK-212** | HIGH | Fix WASM build for release | Medium |
+| **TASK-213** | HIGH | Browser provider uses local WASM (no CDN sql.js) | Medium |
+| **TASK-214** | HIGH | CI oracle strategy | Medium |
+| **TASK-207** | MED | Re-enable CI for release | Medium |
+| **TASK-215** | HIGH | GitHub Release ships Zig artifacts | Medium |
+| **TASK-216** | HIGH | Nix release uses Zig artifacts + preview version | Medium |
+| **TASK-217** | HIGH | effect-native OIDC npm release path | Large |
+| **TASK-218** | HIGH | Upstream 0.16.3 compat checklist | Medium |
 
 ### Triage Inbox (3 items)
 | Task | Priority | Summary | Disposition |
@@ -55,7 +66,7 @@ No active tasks. Core sync functionality is complete and working.
 ### Blocked on Tom
 | Item | Summary |
 |------|---------|
-| **release-readiness-decision.md** | When are we ready for first public release? |
+| **release-readiness-decision.md** | Tom sign-off gate for releasing `0.16.300-preview` |
 
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
