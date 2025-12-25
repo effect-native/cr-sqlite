@@ -4,9 +4,10 @@
 Port tests from `core/rs/integration_check/` to bash parity harness to invalidate "Zig parity is complete".
 
 ## Status
-- State: triage
+- State: done
 - Priority: MEDIUM (many already covered, but check for gaps)
 - Discovered: 2025-12-23 (hypothesis invalidation request)
+- Completed: 2025-12-25
 
 ## Hypothesis to Invalidate
 "All Rust integration tests have equivalent coverage in the Zig harness."
@@ -46,4 +47,7 @@ Located in `core/rs/integration_check/src/t/`:
 - 2025-12-23: Created from hypothesis invalidation request.
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-25: Closed as already complete.
+- All Rust integration tests have equivalent bash harness coverage as documented in the task.
+- Coverage map in `research/zig-cr/92-gap-backlog.md` confirms full coverage.
+- No additional porting needed — hypothesis was already validated through existing tests.

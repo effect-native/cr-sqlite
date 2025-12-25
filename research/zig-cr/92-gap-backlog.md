@@ -1,11 +1,12 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-23 (Post-Round 69: Backlog organized, parity complete)
+> Last updated: 2025-12-25 (Post-Round 73: P0 sync bug FIXED, sync works)
 
 ## Status
 
 - **BUILD: ✅ PASSING** — compiles successfully
 - **MVP: ✅ PASSING** — all core tests pass
+- **SYNC: ✅ WORKING** — Round 73 fixed critical INSERT INTO crsql_changes bug
 - Oracle parity: ✅ **18/18 PASSING**
 - Cross-open parity: ✅ **24/24 PASSING**
 - rows_impacted: ✅ **18/18 PASSING**
@@ -15,45 +16,62 @@
 - Sentinel parity: ✅ **6/6 PASSING** (Round 63)
 - Multinode sync: ✅ **6/6 PASSING** (Round 63)
 - Schema mismatch: ⚠️ **11/12 PASSING** (1 divergence: unknown column behavior)
-- Savepoint sync: ✅ **16/16 PASSING** (Round 67 — TASK-181 fixed)
+- Savepoint sync: ✅ **16/16 PASSING** (Round 67)
 - ATTACH CRR: ✅ **15/15 PASSING** (Round 66)
 - Site ID collision: ✅ **13/13 PASSING** (Round 66)
 - Trigger CRR: ✅ **31/31 PASSING** (Round 67)
 - VACUUM CRR: ✅ **17/17 PASSING** (Round 68)
-- Wide table: ✅ **13/13 PASSING** (Round 69 — 64-col limit FIXED)
-- Test scripts: **63 total**
+- Wide table: ✅ **13/13 PASSING** (Round 69)
+- **App simulation (Todo)**: ✅ **2/2 PASSING** (Round 73)
+- **App simulation (Chat)**: ✅ **4/4 PASSING** (Round 73)
+- **Stress test (60 iterations)**: ✅ **60/60 PASSING, 0 divergences** (Round 73)
+- Parity suite: **357 passed, 13 failed (pre-existing), 22 skipped**
+- Test scripts: **65+ total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
 
 ## Now (next parallel assignments)
 
-### Backlog: Empty (all parity work complete)
+### Active (0 tasks)
+No active tasks. Core sync functionality is complete and working.
 
-No tasks ready to delegate. The Zig implementation has reached functional parity with the Rust/C oracle.
+### Backlog (4 tasks)
+| Task | Priority | Summary | Effort |
+|------|----------|---------|--------|
+| **TASK-207** | BLOCKED | Re-enable CI for release | Medium (blocked on release decision) |
+| **TASK-186** | MEDIUM | Schema mismatch: unknown column behavior | Design decision |
+| **TASK-204** | LOW | Fix PK UPDATE test schema mismatch | Quick fix |
+| **TASK-205** | LOW | Fix inventory app test | Quick fix |
 
-### Pending Decisions (1 item)
-| Task | Summary | Blocker |
-|------|---------|---------|
-| **TASK-186** | Schema mismatch: unknown column behavior | Design decision needed |
+### Triage Inbox (5 items)
+| Task | Priority | Summary | Disposition |
+|------|----------|---------|-------------|
+| **TASK-191** | HIGH | Port Python Hypothesis tests | Valuable for edge cases |
+| **TASK-199** | MEDIUM | seq divergence (Zig=1, Rust=0) | Needs design decision |
+| **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
+| **TASK-201** | LOW | Performance regression tests | Nice to have |
+| **TASK-203** | LOW | Empty blob PK encoding divergence | Edge case |
 
-Current divergence (intentional, not a bug):
-- **Zig**: ERROR on unknown columns (strict)
-- **Rust/C**: IGNORE unknown columns (lenient)
-
-Options:
-1. Align with Rust/C (ignore) — maximizes forward compatibility
-2. Keep strict (error) — catches schema drift early  
-3. Make configurable — `crsql_config_set('ignore-unknown-columns', 1)`
-
-### Triage Inbox (organized by priority)
-
-#### LOW Priority — Nice to Have
-| Task | Summary | Risk | Effort |
-|------|---------|------|--------|
-| **TASK-156** | Linux CI parity | CI only | Medium |
+### Blocked on Tom
+| Item | Summary |
+|------|---------|
+| **release-readiness-decision.md** | When are we ready for first public release? |
 
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
+- **seq divergence**: Zig starts seq at 1, Rust/C at 0 (doesn't affect sync correctness)
+
+### Completed Round 73 (2025-12-25) — P0 SYNC BUG FIXED
+- [x] **TASK-202**: Fix INSERT INTO crsql_changes failure ✓ (P0 CRITICAL)
+  - Root cause: Merge functions only supported INTEGER PKs, TEXT/BLOB PKs failed
+  - Fix: Added TEXT/BLOB PK binding, changed to subquery lookups via pks table
+  - Files: `zig/src/merge_insert.zig`, `zig/src/changes_vtab.zig`
+- [x] **TASK-198**: Fix db_version off-by-one divergence ✓
+  - Root cause: `pending_db_version` not using `-1` sentinel for uninitialized
+  - Fix: Changed initial values to `-1`, unconditional commit, re-read on access
+  - Files: `zig/src/site_identity.zig`, `zig/src/local_writes/after_write.zig`
+
+**Key outcome**: Cross-device sync now works! The core cr-sqlite functionality is complete.
 
 ### Completed Round 69 (2025-12-23)
 - [x] TASK-189: Fix 64-column limit bug ✓ (MAX_COLUMNS increased to 2000, 100+ columns now work)

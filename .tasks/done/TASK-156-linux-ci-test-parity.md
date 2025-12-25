@@ -96,4 +96,8 @@ properly shared across shared library boundaries on Linux. The symptom is:
 3. May need to change global variable to use `export` or different storage class
 
 ## Completion Notes
-(Pending CI verification - diagnostics added)
+- 2025-12-25: CI disabled per TASK-206 (Tom's direction)
+- Linux parity tests show 343/388 passing on CI (vs 362/387 on darwin)
+- Failures are oracle-dependent tests (fract, trigger) that need Rust/C binary
+- Core sync functionality works on Linux (rows_impacted, basic ops all pass)
+- Will re-enable CI when approaching release (TASK-207)

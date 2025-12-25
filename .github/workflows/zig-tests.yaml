@@ -1,15 +1,24 @@
 name: zig-tests
 
+# CI TEMPORARILY DISABLED (2025-12-25)
+# See: .tasks/active/TASK-206-disable-ci-temporarily.md
+# Re-enable: .tasks/backlog/TASK-207-reenable-ci-for-release.md
+#
+# Reasons:
+# 1. WASM build requires Zig 0.14 compat (we only support latest Zig 0.15+)
+# 2. Some tests depend on Rust/C oracle not available in CI
+# 3. macOS GitHub Actions has transient nix install issues
+#
+# To re-enable, change 'disabled-zig-ci-trigger/**' back to 'zig/**'
+
 on:
   push:
     branches: [main]
     paths:
-      - 'zig/**'
-      - '.github/workflows/zig-tests.yaml'
+      - 'disabled-zig-ci-trigger/**'
   pull_request:
     paths:
-      - 'zig/**'
-      - '.github/workflows/zig-tests.yaml'
+      - 'disabled-zig-ci-trigger/**'
 
 jobs:
   build-native:
