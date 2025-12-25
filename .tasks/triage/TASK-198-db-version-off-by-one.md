@@ -1,4 +1,4 @@
-# TASK-196 — db_version off-by-one divergence
+# TASK-198 — db_version off-by-one divergence
 
 ## Goal
 Fix the db_version tracking divergence where Zig produces db_version values 1 higher than Rust/C after certain operation sequences.
@@ -65,7 +65,7 @@ The db_version increment logic differs in edge cases. Possible causes:
 
 ## Parent Docs / Cross-links
 
-- Discovery: `.tasks/triage/TASK-190-fuzz-invalidation-round2.md`
+- Discovery: `.tasks/done/TASK-190-fuzz-invalidation-round2.md`
 - Related: `.tasks/done/TASK-130-fix-trigger-parity-test-column-bug.md` (seq divergence)
 - Test script: `zig/harness/test-fuzz-stress.sh`
 
