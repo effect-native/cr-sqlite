@@ -68,6 +68,101 @@ Artifacts:
 
 ---
 
+## Round 2025-12-25 (76) — seq divergence + schema mismatch fixes (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-199-seq-value-divergence.md` (bug fix)
+- `.tasks/done/TASK-186-schema-mismatch-unknown-column-behavior.md` (behavior alignment)
+
+**Commits**
+- `211de13e` — fix(zig): seq divergence + schema mismatch behavior (Round 76)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig (via nix), bash
+
+**Commands run (exact)**
+```bash
+make -C zig build
+bash zig/harness/test-clock-internals.sh
+bash zig/harness/test-schema-mismatch.sh
+bash zig/harness/test-app-todo.sh
+bash zig/harness/test-parity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-199: seq divergence fix (27/27 PASS, 0 seq divergences)</summary>
+
+**Root cause**: In `crsqlAfterInsertFunc`, Zig called `getNextSeq()` unconditionally for `maybeMarkReinserted()`, even when no sentinel row existed to update. This consumed `seq=0` without effect, causing the first column's seq to start at 1 instead of 0.
+
+Rust/C only calls `bump_seq()` when `create_record_existed=true` (resurrection case).
+
+**Fix**: Modified `getOrCreatePkKey()` to return a `GetOrCreateKeyResult` struct with both `key` and `existed` flag. Only call `getNextSeq()` for reinsert if `existed=true`.
+
+**Test output**:
+```text
+Clock Table Internals Test Summary
+  PASSED:         27
+  FAILED:         0
+  seq divergences: 0
+
+Before fix: Zig seq=1, Rust seq=0
+After fix:  Zig seq=0, Rust seq=0
+```
+
+**Files modified**: `zig/src/local_writes/after_write.zig`
+</details>
+
+<details>
+<summary>TASK-186: schema mismatch fix (12/12 PASS)</summary>
+
+**Design decision**: Align with Rust/C (lenient behavior) — ignore unknown columns during sync.
+
+**Root cause**: When applying a change for a column that doesn't exist locally, `updateBaseTableColumn()` or `insertOrUpdateColumn()` would fail with SQLITE_ERROR because the generated SQL references a non-existent column.
+
+**Fix**: Added `columnExistsInTable()` helper in `merge_insert.zig`. Added column existence checks before applying changes in `changes_vtab.zig`. If column doesn't exist, skip gracefully.
+
+**Test output**:
+```text
+Schema Mismatch Test Summary
+  PASSED:  12
+  FAILED:  0
+```
+
+**Files modified**: 
+- `zig/src/merge_insert.zig` — added `columnExistsInTable()`
+- `zig/src/changes_vtab.zig` — added column checks
+</details>
+
+<details>
+<summary>Regression checks</summary>
+
+```text
+test-app-todo.sh:
+  Results: 2 parity confirmed, 0 failures, 0 divergences
+
+test-parity.sh:
+  PASSED:  367
+  FAILED:  4 (pre-existing edge cases)
+  SKIPPED: 22
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `make -C zig build`
+3. `bash zig/harness/test-clock-internals.sh` — verify 27/27 pass, 0 seq divergences
+4. `bash zig/harness/test-schema-mismatch.sh` — verify 12/12 pass
+5. `bash zig/harness/test-parity.sh` — verify 367 passed
+
+**Known gaps / unverified claims**
+- Linux CI not verified (local darwin only)
+- No commits yet (pending)
+
+---
+
 ## Round 2025-12-25 (75) — Composite PK sync + Hypothesis tests (2 tasks)
 
 **Tasks executed**

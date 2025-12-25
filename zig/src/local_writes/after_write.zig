@@ -156,14 +156,21 @@ fn bindValue(stmt: ?*api.sqlite3_stmt, idx: c_int, val: *api.sqlite3_value) c_in
     };
 }
 
+/// Result of getOrCreatePkKey: the key and whether it already existed
+const GetOrCreateKeyResult = struct {
+    key: i64,
+    existed: bool,
+};
+
 /// Lookup __crsql_key for pk tuple; create if missing.
-/// Matches Rust/C `TableInfo.get_or_create_key_via_raw_values`.
+/// Matches Rust/C `TableInfo.get_or_create_key_for_insert`.
+/// Returns key and whether the record already existed (for resurrection handling).
 fn getOrCreatePkKey(
     db: ?*api.sqlite3,
     table_name: []const u8,
     info: *const TableInfo,
     pk_values: []*api.sqlite3_value,
-) ?i64 {
+) ?GetOrCreateKeyResult {
     if (db == null) {
         setLastError("db is null");
         return null;
@@ -263,7 +270,8 @@ fn getOrCreatePkKey(
 
     rc = api.step(select_stmt);
     if (rc == api.SQLITE_ROW) {
-        return api.column_int64(select_stmt, 0);
+        // Record already existed
+        return GetOrCreateKeyResult{ .key = api.column_int64(select_stmt, 0), .existed = true };
     }
 
     // INSERT INTO ... RETURNING __crsql_key
@@ -315,7 +323,8 @@ fn getOrCreatePkKey(
 
     rc = api.step(insert_stmt);
     if (rc == api.SQLITE_ROW) {
-        return api.column_int64(insert_stmt, 0);
+        // Newly created record
+        return GetOrCreateKeyResult{ .key = api.column_int64(insert_stmt, 0), .existed = false };
     }
 
     const err = api.errmsg(db);
@@ -568,13 +577,14 @@ fn crsqlAfterInsertFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
 
     // Get or create the key in __crsql_pks.
     // Note: we intentionally do this before reading current clocks.
-    const key_existing = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
+    const key_result = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
         // Return the captured error message with context
         var err_buf: [1024]u8 = undefined;
         const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_insert failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_insert: getOrCreatePkKey failed";
         api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
+    const key_existing = key_result.key;
 
     if (info.non_pk_count == 0) {
         const seq = site_identity.getNextSeq();
@@ -586,9 +596,12 @@ fn crsqlAfterInsertFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
         return;
     }
 
-    // If sentinel exists, bump it with maybe_mark_reinserted
-    const seq_reinsert = site_identity.getNextSeq();
-    _ = maybeMarkReinserted(db, table_name, key_existing, db_version, seq_reinsert);
+    // Only bump sentinel if the record already existed (resurrection case)
+    // Matches Rust/C: only calls update_create_record if create_record_existed
+    if (key_result.existed) {
+        const seq_reinsert = site_identity.getNextSeq();
+        _ = maybeMarkReinserted(db, table_name, key_existing, db_version, seq_reinsert);
+    }
 
     // Mark non-PK columns updated
     for (info.columns[0..info.count]) |col| {
@@ -650,12 +663,13 @@ fn crsqlAfterUpdateFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     }
     const next_db_version = site_identity.nextDbVersion(null);
 
-    const new_key = getOrCreatePkKey(db, table_name, &info, pk_new_values[0..pk_count]) orelse {
+    const new_key_result = getOrCreatePkKey(db, table_name, &info, pk_new_values[0..pk_count]) orelse {
         var err_buf: [1024]u8 = undefined;
         const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_update (new_key) failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_update: getOrCreatePkKey failed";
         api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
+    const new_key = new_key_result.key;
 
     var pk_changed = false;
     for (0..pk_count) |i| {
@@ -666,12 +680,13 @@ fn crsqlAfterUpdateFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     }
 
     if (pk_changed) {
-        const old_key = getOrCreatePkKey(db, table_name, &info, pk_old_values[0..pk_count]) orelse {
+        const old_key_result = getOrCreatePkKey(db, table_name, &info, pk_old_values[0..pk_count]) orelse {
             var err_buf: [1024]u8 = undefined;
             const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_update (old_key) failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_update: getOrCreatePkKey failed";
             api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
             return;
         };
+        const old_key = old_key_result.key;
         const seq_del = site_identity.getNextSeq();
         if (!markRowDeleted(db, table_name, old_key, next_db_version, seq_del)) {
             api.result_error(pCtx, "crsql_after_update: failed to mark deleted", -1);
@@ -743,12 +758,13 @@ fn crsqlAfterDeleteFunc(pCtx: ?*api.sqlite3_context, argc: c_int, argv: [*c]?*ap
     const db_version = site_identity.nextDbVersion(null);
     const seq = site_identity.getNextSeq();
 
-    const key = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
+    const key_result = getOrCreatePkKey(db, table_name, &info, pk_values[0..pk_count]) orelse {
         var err_buf: [1024]u8 = undefined;
         const err_msg = std.fmt.bufPrintZ(&err_buf, "crsql_after_delete failed: {s}", .{last_error_buf[0..last_error_len]}) catch "crsql_after_delete: getOrCreatePkKey failed";
         api.result_error(pCtx, err_msg.ptr, @intCast(err_msg.len));
         return;
     };
+    const key = key_result.key;
 
     if (!markRowDeleted(db, table_name, key, db_version, seq)) {
         api.result_error(pCtx, "crsql_after_delete: failed to mark deleted", -1);

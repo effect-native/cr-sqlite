@@ -363,6 +363,30 @@ pub fn setWinnerClockCached(
     _ = site_identity.nextDbVersion(db_version);
 }
 
+/// Check if a column exists in a table.
+/// Used to gracefully skip unknown columns during sync (matching Rust/C behavior).
+/// Returns true if the column exists, false otherwise.
+pub fn columnExistsInTable(db: ?*api.sqlite3, table_name: []const u8, col_name: []const u8) bool {
+    // Handle sentinel column specially - it's a virtual column that always "exists"
+    if (std.mem.eql(u8, col_name, "-1")) {
+        return true;
+    }
+
+    var table_name_buf: [256]u8 = undefined;
+    const table_name_z = std.fmt.bufPrintZ(&table_name_buf, "{s}", .{table_name}) catch return false;
+    const info = as_crr.getTableInfo(db, table_name_z) catch return false;
+
+    for (0..info.count) |i| {
+        const col = &info.columns[i];
+        const stored_name = col.name[0..col.name_len];
+        if (std.mem.eql(u8, stored_name, col_name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /// Helper to get the name of the single PK column for a table, if it exists.
 /// Returns null if the table uses rowid or has a compound PK.
 /// The returned buffer is owned by the function and valid until the next call.

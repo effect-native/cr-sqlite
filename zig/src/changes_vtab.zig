@@ -1731,6 +1731,15 @@ fn changesUpdate(
             // No local row - INSERT new row
             log.debug("changesUpdate: no local row, inserting new row", .{});
 
+            // Check if the column exists in the destination table.
+            // If not, skip this change gracefully (matches Rust/C lenient behavior).
+            // This handles staggered migrations where source has columns destination doesn't.
+            if (!merge_insert.columnExistsInTable(api_db, table_slice, cid_slice)) {
+                log.debug("changesUpdate: column '{s}' does not exist in table '{s}', skipping (lenient mode)", .{ cid_slice, table_slice });
+                pRowid.* = 0;
+                return vtab.SQLITE_OK;
+            }
+
             // Get the value from argv[5] (column 3: val)
             const insert_value = toApiValue(argv[5]);
 
@@ -1944,6 +1953,16 @@ fn changesUpdate(
             }
             rows_impacted.incrementRowsImpacted();
         }
+        pRowid.* = 0;
+        return vtab.SQLITE_OK;
+    }
+
+    // Step 4a: Check if column exists in destination table.
+    // If not, skip this change gracefully (matches Rust/C lenient behavior).
+    // This handles staggered migrations where source has columns destination doesn't.
+    // Note: This check comes AFTER sentinel handling since sentinels (-1) always "exist".
+    if (!merge_insert.columnExistsInTable(api_db, table_slice, cid_slice)) {
+        log.debug("changesUpdate: column '{s}' does not exist in table '{s}', skipping (lenient mode)", .{ cid_slice, table_slice });
         pRowid.* = 0;
         return vtab.SQLITE_OK;
     }

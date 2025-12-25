@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-25 (Post-Round 75: Composite PK sync + Hypothesis tests)
+> Last updated: 2025-12-25 (Post-Round 76: seq divergence + schema mismatch fixes)
 
 ## Status
 
@@ -15,7 +15,7 @@
 - Resurrection parity: ✅ **25/25 PASSING** (Round 63)
 - Sentinel parity: ✅ **6/6 PASSING** (Round 63)
 - Multinode sync: ✅ **6/6 PASSING** (Round 63)
-- Schema mismatch: ⚠️ **11/12 PASSING** (1 divergence: unknown column behavior)
+- Schema mismatch: ✅ **12/12 PASSING** (Round 76 — unknown column now ignored)
 - Savepoint sync: ✅ **16/16 PASSING** (Round 67)
 - ATTACH CRR: ✅ **15/15 PASSING** (Round 66)
 - Site ID collision: ✅ **13/13 PASSING** (Round 66)
@@ -23,13 +23,14 @@
 - VACUUM CRR: ✅ **17/17 PASSING** (Round 68)
 - Wide table: ✅ **13/13 PASSING** (Round 69)
 - PK UPDATE: ✅ **16/16 PASSING** (Round 74)
+- Clock internals: ✅ **27/27 PASSING, 0 seq divergences** (Round 76)
 - **App simulation (Todo)**: ✅ **2/2 PASSING** (Round 73)
 - **App simulation (Chat)**: ✅ **4/4 PASSING** (Round 73)
 - **App simulation (Inventory)**: ✅ **4/4 PASSING** (Round 75 — composite PK sync fixed)
 - **Stress test (60 iterations)**: ✅ **60/60 PASSING, 0 divergences** (Round 73)
 - **CL merge properties**: ✅ **18/18 PASSING** (Round 75)
 - **Sentinel properties**: ✅ **15/15 PASSING** (Round 75)
-- Parity suite: **357 passed, 13 failed (pre-existing), 22 skipped**
+- Parity suite: **367 passed, 4 failed (pre-existing edge cases), 22 skipped**
 - Test scripts: **67+ total**
 - Zig implementation: `zig/`
 - Canonical task queue: `.tasks/{backlog,active,done}/`
@@ -39,16 +40,14 @@
 ### Active (0 tasks)
 No active tasks. Core sync functionality is complete and working.
 
-### Backlog (2 tasks)
+### Backlog (1 task)
 | Task | Priority | Summary | Effort |
 |------|----------|---------|--------|
 | **TASK-207** | BLOCKED | Re-enable CI for release | Medium (blocked on release decision) |
-| **TASK-186** | MEDIUM | Schema mismatch: unknown column behavior | Design decision |
 
-### Triage Inbox (4 items)
+### Triage Inbox (3 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
-| **TASK-199** | MEDIUM | seq divergence (Zig=1, Rust=0) | Needs design decision |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
 | **TASK-203** | LOW | Empty blob PK encoding divergence | Edge case |
@@ -60,7 +59,18 @@ No active tasks. Core sync functionality is complete and working.
 
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
-- **seq divergence**: Zig starts seq at 1, Rust/C at 0 (doesn't affect sync correctness)
+
+### Completed Round 76 (2025-12-25) — seq divergence + schema mismatch fixes
+- [x] **TASK-199**: Fix seq value divergence (Zig=1, Rust=0) ✓
+  - Root cause: `crsqlAfterInsertFunc` called `getNextSeq()` unconditionally for `maybeMarkReinserted`, wasting seq=0
+  - Fix: Modified `getOrCreatePkKey()` to return `{key, existed}` struct, only bump seq for reinsert if existed
+  - Files: `zig/src/local_writes/after_write.zig`
+  - Result: `test-clock-internals.sh` now 27/27 PASS with 0 seq divergences
+- [x] **TASK-186**: Fix schema mismatch unknown column behavior ✓
+  - Decision: Align with Rust/C (lenient) — ignore unknown columns during sync
+  - Fix: Added `columnExistsInTable()` helper, check before applying column changes
+  - Files: `zig/src/merge_insert.zig`, `zig/src/changes_vtab.zig`
+  - Result: `test-schema-mismatch.sh` now 12/12 PASS
 
 ### Completed Round 75 (2025-12-25) — Composite PK sync + Hypothesis tests
 - [x] **TASK-208**: Fix composite PK sync ✓
