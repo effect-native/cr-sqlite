@@ -99,12 +99,7 @@ Try expressing the two hardest current tests as specs *without* embedding runner
 If either one forces bespoke runner code (“special-case this test”), the approach is suspect.
 
 ## Questions Tom needs to decide
-1) Does “any CR-SQLite implementation” mean:
-   - only loadable SQLite extensions (C/Zig), or
-   - also WASM + mobile runtimes?
-2) Should the spec suite assert:
-   - only public SQL surface behavior (preferred), or
-   - internal tables/triggers/layout too?
+Deferred until after first public release `0.16.300-preview`.
 
 ## Pointers
 - Zig harness runner: `zig/harness/test-parity.sh`

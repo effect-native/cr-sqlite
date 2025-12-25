@@ -77,7 +77,7 @@ rm -rf "$TMPDIR"
 ## Parent Docs / Cross-links
 
 - Related: `.tasks/done/TASK-202-fix-crsql-changes-insert-failure.md` (single PK fix)
-- Related: `.tasks/active/TASK-205-fix-inventory-app-test.md` (documents xfail)
+- Related: `.tasks/done/TASK-205-fix-inventory-app-test.md` (documents xfail)
 - Test: `zig/harness/test-app-inventory.sh`
 
 ## Progress Log

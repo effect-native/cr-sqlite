@@ -50,4 +50,12 @@ When are we ready for our first public release of the Zig cr-sqlite implementati
 - `.tasks/backlog/TASK-207-reenable-ci-for-release.md`
 
 ## Tom's Decision
-(Pending)
+
+- Release scope: **Native + WASM + Browser**
+- Versioning: `0.16.300-preview`
+  - Rationale: upstream `cr-sqlite` abandoned around `v0.16.3`; this preview line targets full backwards compatibility with that surface, but remains preview until validated in multiple real products.
+- Distribution:
+  - npm (OIDC) via the `effect-native` repo
+  - native binaries via GitHub Releases
+  - nix via GitHub tags
+- Documentation requirement: none for first preview release
