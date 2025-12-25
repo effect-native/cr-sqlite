@@ -10,20 +10,13 @@ const builtin = @import("builtin");
 const api = @import("api.zig");
 
 /// Debug logging for extension initialization.
-/// Enabled via CRSQL_DEBUG=1 environment variable.
-/// Uses std.debug.print which writes to stderr on native platforms.
+/// Note: Disabled due to potential issues with std library functions in shared library context.
+/// Zig's std.posix.getenv and std.debug.print may cause segfaults on Linux when called from
+/// a dynamically loaded extension before the Zig runtime is properly initialized.
 fn debugLog(comptime fmt: []const u8, args: anytype) void {
-    // Skip debug logging on freestanding/WASM targets
-    if (comptime (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)) {
-        return;
-    }
-
-    // On native platforms, check CRSQL_DEBUG environment variable
-    const debug_env = std.posix.getenv("CRSQL_DEBUG");
-    if (debug_env == null) return;
-    if (!std.mem.eql(u8, debug_env.?, "1")) return;
-
-    std.debug.print("[crsql-init] " ++ fmt ++ "\n", args);
+    // Disable all debug logging to avoid std library crashes in shared library context
+    _ = fmt;
+    _ = args;
 }
 const after_write = @import("../local_writes/after_write.zig");
 const as_crr = @import("../as_crr.zig");

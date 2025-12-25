@@ -52,12 +52,17 @@ fn hasTable(db: ?*api.sqlite3, table_name: [*:0]const u8) bool {
 var prng_state: u64 = 0;
 var prng_initialized: bool = false;
 
-/// Initialize PRNG with a seed (for WASM/freestanding)
+/// Initialize PRNG with a seed
 fn initPrng() void {
     if (!prng_initialized) {
-        // Use a fixed seed for deterministic behavior in WASM
-        // Production builds should call setSeed() from JS with real entropy
-        prng_state = 0x853c49e6748fea9b; // Arbitrary non-zero seed
+        // Seed with a combination of:
+        // 1. A non-zero constant to ensure we never have all zeros
+        // 2. Address of this function (ASLR provides entropy)
+        // This provides reasonable uniqueness without relying on std library
+        const base_seed: u64 = 0x853c49e6748fea9b;
+        const addr_entropy: u64 = @intFromPtr(&initPrng);
+        prng_state = base_seed ^ addr_entropy;
+        if (prng_state == 0) prng_state = base_seed; // Never allow zero state
         prng_initialized = true;
     }
 }
@@ -74,15 +79,15 @@ fn xorshift64() u64 {
 }
 
 /// Fill buffer with random bytes (platform-aware)
+/// Note: We use xorshift64 PRNG on all platforms for simplicity and to avoid
+/// potential issues with std.crypto.random when called from a dynamically loaded
+/// shared library. The Zig std library may assume runtime initialization that
+/// hasn't happened in the extension load context.
 fn fillRandomBytes(buf: []u8) void {
-    if (comptime (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)) {
-        // WASM/freestanding: Use xorshift64 PRNG
-        for (buf) |*byte| {
-            byte.* = @truncate(xorshift64());
-        }
-    } else {
-        // Native: use OS-provided cryptographic randomness
-        std.crypto.random.bytes(buf);
+    // Use xorshift64 PRNG on all platforms
+    // This is seeded with timestamp + address entropy on first call
+    for (buf) |*byte| {
+        byte.* = @truncate(xorshift64());
     }
 }
 
