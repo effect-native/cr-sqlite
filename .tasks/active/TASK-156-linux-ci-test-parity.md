@@ -54,6 +54,15 @@ This task adds/strengthens Linux execution for the same “canonical” test ent
   - Version mismatch causes extension to load but functions return empty
   - Also 2 failing unit tests in `clset_vtab.zig` (edge case: "_schema" alone)
   - WASM build fails due to Zig 0.14 incompatibility
+- 2025-12-25: Deep investigation of Linux parity test failures:
+  - CI run 20506960231 shows parity tests returning empty values on Linux
+  - Unit tests PASS (same process), parity tests FAIL (cross-process via shell)
+  - Extension loads successfully (no "no such function" errors)
+  - Functions return empty instead of expected values
+  - Root cause investigation: global variable visibility in shared library
+  - Added diagnostic logging to `zig/src/ffi/init.zig` (via CRSQL_DEBUG=1)
+  - Added API initialization checks in `site_identity.zig` functions
+  - Added diagnostic step to CI workflow to surface errors
 
 ## Fixes Applied
 1. **CI Workflow**: Updated `.github/workflows/zig-tests.yaml` to use nix for zig consistently
@@ -65,5 +74,26 @@ This task adds/strengthens Linux execution for the same “canonical” test ent
    - Changed `name.len < suffix.len` to `name.len <= suffix.len`
    - Prevents "_schema" alone from being considered valid (empty base name)
 
+3. **Diagnostic Logging**: Added debug output to init.zig (2025-12-25)
+   - Enable with `CRSQL_DEBUG=1` environment variable
+   - Logs each initialization step and any failures
+   - Added API initialization checks in UDF implementations
+
+4. **CI Diagnostics**: Added "Diagnose extension loading" step
+   - Runs before parity tests to surface extension load issues
+   - Shows file info, sqlite version, and basic function tests
+
+## Investigation Status (2025-12-25)
+**Root cause suspected:** Global variable `sqlite3_api` in `sqlite_c.zig` may not be
+properly shared across shared library boundaries on Linux. The symptom is:
+- Extension init completes successfully (unit tests pass)
+- But when SQLite calls the UDF, the global `sqlite3_api` may be uninitialized
+- This causes `result_int64()` to silently do nothing (null API pointer check)
+
+**Next steps:**
+1. Run CI to capture diagnostic output
+2. If API is null in UDF context, need to investigate Zig's shared library symbol visibility
+3. May need to change global variable to use `export` or different storage class
+
 ## Completion Notes
-(Pending CI verification)
+(Pending CI verification - diagnostics added)

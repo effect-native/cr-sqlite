@@ -146,6 +146,25 @@ jobs:
         working-directory: zig
         run: nix run nixpkgs#zig -- build
 
+      - name: Diagnose extension loading
+        working-directory: zig
+        run: |
+          echo "=== Extension file info ==="
+          ls -la zig-out/lib/
+          file zig-out/lib/libcrsqlite.so
+          echo ""
+          echo "=== SQLite version ==="
+          nix run nixpkgs#sqlite -- --version
+          echo ""
+          echo "=== Test extension load ==="
+          CRSQL_DEBUG=1 nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_version();" 2>&1 || true
+          echo ""
+          echo "=== Test crsql_db_version ==="
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_db_version();" 2>&1 || true
+          echo ""
+          echo "=== Test crsql_site_id ==="
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT hex(crsql_site_id());" 2>&1 || true
+
       - name: Run parity tests
         working-directory: zig
         run: make test-parity

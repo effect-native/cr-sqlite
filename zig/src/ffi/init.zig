@@ -6,7 +6,25 @@
 //! Reference: `core/src/crsqlite.c` (C implementation)
 
 const std = @import("std");
+const builtin = @import("builtin");
 const api = @import("api.zig");
+
+/// Debug logging for extension initialization.
+/// Enabled via CRSQL_DEBUG=1 environment variable.
+/// Uses std.debug.print which writes to stderr on native platforms.
+fn debugLog(comptime fmt: []const u8, args: anytype) void {
+    // Skip debug logging on freestanding/WASM targets
+    if (comptime (builtin.os.tag == .freestanding or builtin.cpu.arch == .wasm32 or builtin.cpu.arch == .wasm64)) {
+        return;
+    }
+
+    // On native platforms, check CRSQL_DEBUG environment variable
+    const debug_env = std.posix.getenv("CRSQL_DEBUG");
+    if (debug_env == null) return;
+    if (!std.mem.eql(u8, debug_env.?, "1")) return;
+
+    std.debug.print("[crsql-init] " ++ fmt ++ "\n", args);
+}
 const after_write = @import("../local_writes/after_write.zig");
 const as_crr = @import("../as_crr.zig");
 const automigrate = @import("../automigrate.zig");
@@ -189,11 +207,15 @@ pub export fn sqlite3_crsqlite_init(
 ) callconv(.c) c_int {
     _ = pzErrMsg; // TODO: use for detailed error messages
 
+    debugLog("sqlite3_crsqlite_init called", .{});
+
     // Initialize the global API pointer (SQLITE_EXTENSION_INIT2 equivalent)
     const init_rc = api.initApi(pApi);
     if (init_rc != api.SQLITE_OK) {
+        debugLog("initApi failed with rc={d}", .{init_rc});
         return init_rc;
     }
+    debugLog("initApi succeeded", .{});
 
     // Enable trusted_schema so our INNOCUOUS functions can be called from triggers.
     // Without this, SQLite 3.31.0+ rejects functions in triggers by default.
@@ -210,8 +232,10 @@ pub export fn sqlite3_crsqlite_init(
         null,
     );
     if (create_master_rc != api.SQLITE_OK) {
+        debugLog("create crsql_master failed with rc={d}", .{create_master_rc});
         return create_master_rc;
     }
+    debugLog("crsql_master table created", .{});
 
     // Write the crsqlite_version to crsql_master for cross-implementation compatibility.
     // This is critical: when Rust/C opens a Zig-created database, it checks this version
@@ -221,8 +245,10 @@ pub export fn sqlite3_crsqlite_init(
     // Using INSERT OR IGNORE so we don't overwrite an existing version on re-open.
     const write_version_rc = writeVersionToMaster(db);
     if (write_version_rc != api.SQLITE_OK) {
+        debugLog("writeVersionToMaster failed with rc={d}", .{write_version_rc});
         return write_version_rc;
     }
+    debugLog("version written to crsql_master", .{});
 
     // Create crsql_tracked_peers table for tracking peer sync state.
     // Reference: core/rs/core/src/bootstrap.rs
@@ -248,23 +274,31 @@ pub export fn sqlite3_crsqlite_init(
         null,
     );
     if (create_tracked_peers_rc != api.SQLITE_OK) {
+        debugLog("create crsql_tracked_peers failed with rc={d}", .{create_tracked_peers_rc});
         return create_tracked_peers_rc;
     }
+    debugLog("crsql_tracked_peers table created", .{});
 
     // Initialize site_id (creates table if needed, loads or generates site_id)
     if (!site_identity.initSiteId(db)) {
+        debugLog("initSiteId failed", .{});
         return api.SQLITE_ERROR;
     }
+    debugLog("site_id initialized", .{});
 
     // Initialize db_version from existing clock tables
     site_identity.initDbVersionFromDb(db);
+    debugLog("db_version initialized to {d}", .{site_identity.getDbVersion()});
 
     // Register functions
     const func_rc = registerFunctions(db);
     if (func_rc != api.SQLITE_OK) {
+        debugLog("registerFunctions failed with rc={d}", .{func_rc});
         return func_rc;
     }
+    debugLog("functions registered successfully", .{});
 
+    debugLog("sqlite3_crsqlite_init completed successfully", .{});
     return api.SQLITE_OK;
 }
 

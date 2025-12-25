@@ -329,6 +329,12 @@ fn crsqlSiteIdFunc(
         return;
     }
 
+    // Check if API is properly initialized
+    if (!api.isInitialized()) {
+        api.result_error(pCtx, "crsql: API not initialized in site_id", -1);
+        return;
+    }
+
     // Get the database handle for THIS connection
     const db = api.context_db_handle(pCtx);
     if (db == null) {
@@ -368,6 +374,13 @@ fn crsqlDbVersionFunc(
     _ = argv;
     if (argc != 0) {
         api.result_error(pCtx, "crsql_db_version takes no arguments", -1);
+        return;
+    }
+
+    // Check if API is properly initialized
+    if (!api.isInitialized()) {
+        // API not initialized - this would explain empty results
+        api.result_error(pCtx, "crsql: API not initialized in db_version", -1);
         return;
     }
 
