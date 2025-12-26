@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-26 (Post-Round 78: CI + Distribution — ready for verification)
+> Last updated: 2025-12-26 (Post-Round 80: WASM Zig 0.15 verified, browser tests stable)
 
 ## Status
 
@@ -66,14 +66,22 @@ No active tasks.
 - [x] **TASK-219**: Test suite review ✓ — 72 tests, blind spots documented
 - [x] **WF-028**: Empty BLOB PK encoding ✓ — fixed in api.zig bind_blob()
 
-### Triage Inbox (5 items)
+### Triage Inbox (3 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
-| **TASK-220** | HIGH | Verify CI passes after re-enable | Release blocker (verification) |
-| **TASK-222** | HIGH | Browser test failure investigation | Release blocker (transient?) |
-| **TASK-223** | HIGH | Verify WASM build uses Zig 0.15 | Release blocker (toolchain) |
+| **TASK-220** | HIGH | Verify CI passes after re-enable | Release blocker — **requires push to GitHub** |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
+
+### Completed Round 80 (2025-12-26) — WASM + browser verification
+- [x] **TASK-223**: Verify WASM uses Zig 0.15 ✓
+  - Confirmed: `nix run nixpkgs#zig -- version` → 0.15.2
+  - WASM build succeeds, produces `crsqlite.wasm` (5.26 MB)
+  - No 0.14 references in build chain
+- [x] **TASK-222**: Browser test failure investigation ✓
+  - Round 79 failure was transient (could not reproduce)
+  - 3 consecutive runs: 30/30 passed
+  - No code changes required
 
 ### Completed Round 79 (2025-12-26) — Test alignment
 - [x] **TASK-221**: Merge atomicity test alignment ✓

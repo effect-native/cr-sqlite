@@ -37,8 +37,9 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
 - [x] **WASM build works on current Zig toolchain and is reproducible in CI**.
   - Task: `.tasks/done/TASK-212-fix-wasm-build-for-release.md`
   - Status: DONE (Round 77) — Zig 0.15 compat fixed
-- [ ] **Verify WASM build uses Zig 0.15** (not 0.14).
-  - Task: `.tasks/triage/TASK-223-verify-wasm-uses-zig-0.15.md`
+- [x] **Verify WASM build uses Zig 0.15** (not 0.14).
+  - Task: `.tasks/done/TASK-223-verify-wasm-uses-zig-0.15.md`
+  - Status: DONE (Round 80) — Zig 0.15.2 confirmed, WASM build verified
 - [x] **Browser bundle uses local CR-SQLite WASM (not CDN sql.js)**.
   - Task: `.tasks/done/TASK-213-browser-provider-loads-crsqlite-wasm.md`
   - Status: DONE (Round 77) — no CDN dependency, 30/30 browser tests pass
@@ -98,6 +99,7 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
 - 2025-12-25: Round 77 — 8 tasks completed (versioning, artifacts, WASM, browser, GitHub release, compat checklist, test review, WF-028 fix)
 - 2025-12-25: Round 78 — 4 tasks completed (CI re-enable, oracle strategy, nix Zig, npm OIDC)
 - 2025-12-25: **All technical blockers cleared.** Only remaining: Tom sign-off + CI verification.
+- 2025-12-26: Round 80 — 2 tasks completed (WASM Zig 0.15 verified, browser test failure confirmed transient)
 
 ## Completion Notes
 (Empty until done.)

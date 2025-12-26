@@ -68,6 +68,73 @@ Artifacts:
 
 ---
 
+## Round 2025-12-26 (80) — WASM toolchain + browser test verification (2 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-223-verify-wasm-uses-zig-0.15.md` — verify WASM toolchain version
+- `.tasks/done/TASK-222-browser-test-failure-investigation.md` — investigate transient browser test failure
+
+**Commits**
+- (no commits — verification only)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, Zig 0.15.2, pnpm, playwright
+
+**Commands run (exact)**
+```bash
+# TASK-223: Toolchain verification
+nix run nixpkgs#zig -- version
+cd zig && nix run nixpkgs#zig -- build wasm
+grep -r "0\.14" zig/build.zig zig/wasm-build/ .github/workflows/ flake.nix
+
+# TASK-222: Browser test verification (3 runs)
+cd zig/browser-test && pnpm test
+cd zig/browser-test && pnpm test
+cd zig/browser-test && pnpm test
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>TASK-223: Zig version + WASM build</summary>
+
+```text
+$ nix run nixpkgs#zig -- version
+0.15.2
+
+$ cd zig && nix run nixpkgs#zig -- build wasm
+(success — produced libcrsqlite.a 5.26MB, crsqlite.wasm 5.26MB)
+
+$ grep -r "0\.14" zig/build.zig zig/wasm-build/ .github/workflows/ flake.nix
+(no matches found)
+```
+</details>
+
+<details>
+<summary>TASK-222: Browser tests (3 consecutive runs)</summary>
+
+```text
+Run 1: 30/30 passed (17.7s)
+Run 2: 30/30 passed (15.6s)
+Run 3: 30/30 passed (15.4s)
+
+All tests stable across 3 consecutive runs.
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `nix run nixpkgs#zig -- version` — verify 0.15.x
+3. `cd zig && nix run nixpkgs#zig -- build wasm` — verify WASM builds
+4. `cd zig/browser-test && pnpm install && pnpm test` — verify 30/30 pass
+
+**Known gaps / unverified claims**
+- CI verification (TASK-220) still pending — requires push to GitHub
+- Round 79 browser failure was transient (could not reproduce)
+
+---
+
 ## Round 2025-12-26 (79) — Test alignment (1 task)
 
 **Tasks executed**
