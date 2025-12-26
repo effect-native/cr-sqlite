@@ -68,6 +68,62 @@ Artifacts:
 
 ---
 
+## Round 2025-12-26 (79) — Test alignment (1 task)
+
+**Tasks executed**
+- `.tasks/done/TASK-221-merge-atomicity-test-alignment.md` — align atomicity tests with lenient unknown-column policy
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, bash
+
+**Commands run (exact)**
+```bash
+bash zig/harness/test-merge-atomicity.sh
+```
+
+**Outputs (paste)**
+
+<details>
+<summary>test-merge-atomicity.sh (9/9 PASS)</summary>
+
+```text
+Test 1: Single multi-row INSERT applies all rows atomically
+  PASS: All 3 rows applied (rows_impacted=3)
+Test 2: Invalid table in batch causes entire statement to fail
+  PASS: Entire batch rolled back (item count=0)
+Test 3: rows_impacted is 0 after failed batch
+  PASS: rows_impacted resets to 0 after commit
+Test 4: Failed transaction commits nothing
+  PASS: Failed transaction committed nothing (count=0)
+Test 5: Explicit savepoints allow partial rollback
+  INFO: Transaction rolled back entirely (strict atomicity)
+Test 6: Duplicate PKs in single batch handled correctly
+  PASS: Second value (higher col_version) wins (b=20)
+Test 7: Base table integrity after failed batch (hard error)
+  PASS: Existing row unchanged after failed batch (qty=100)
+Test 8: rows_impacted accumulates within transaction
+  PASS: rows_impacted accumulates in transaction (count=2)
+Test 9: Best-effort apply ignores unknown columns, applies valid rows
+  PASS: Valid row applied, unknown column row ignored (count=1, name='valid_item')
+
+Merge Atomicity Tests Summary: 9 passed, 0 failed, 0 skipped
+All merge atomicity tests passed!
+```
+</details>
+
+**Reproduction steps (clean checkout)**
+1. `git clone <repo> && cd cr-sqlite`
+2. `bash zig/harness/test-merge-atomicity.sh` — verify 9/9 pass
+
+**Known gaps / unverified claims**
+- CI verification (TASK-220) still pending — requires push to GitHub
+
+---
+
 ## Round 2025-12-25 (78) — CI + Distribution (4 tasks)
 
 **Tasks executed**

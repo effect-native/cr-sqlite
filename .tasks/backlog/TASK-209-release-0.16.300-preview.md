@@ -47,8 +47,9 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
   - Status: DONE (Round 78)
 - [ ] **Verify CI passes on GitHub after re-enable** (required jobs green).
   - Task: `.tasks/triage/TASK-220-verify-ci-passes-after-reenable.md`
-- [ ] **Merge atomicity test expectations match current sync policy** (and pass in CI).
-  - Task: `.tasks/triage/TASK-221-merge-atomicity-test-alignment.md`
+- [x] **Merge atomicity test expectations match current sync policy** (and pass in CI).
+  - Task: `.tasks/done/TASK-221-merge-atomicity-test-alignment.md`
+  - Status: DONE (Round 79) — tests updated, 9/9 pass
 - [x] **Oracle-dependent tests have a CI strategy**.
   - Task: `.tasks/done/TASK-214-ci-oracle-strategy.md`
   - Status: DONE (Round 78) — required vs optional jobs split, 23 zig-only tests identified

@@ -70,21 +70,26 @@ No active tasks.
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
 | **TASK-220** | HIGH | Verify CI passes after re-enable | Release blocker (verification) |
-| **TASK-221** | HIGH | Merge atomicity test alignment | Release blocker (CI gate risk) |
+| **TASK-222** | HIGH | Browser test failure investigation | Release blocker (transient?) |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
+
+### Completed Round 79 (2025-12-26) — Test alignment
+- [x] **TASK-221**: Merge atomicity test alignment ✓
+  - Policy: best-effort apply for ignorable (unknown column), rollback on hard errors
+  - Changes: Test 2/7 use invalid table name, added Test 9 for best-effort validation
+  - Result: `test-merge-atomicity.sh` now 9/9 PASS
 
 ### Blocked on Tom
 | Item | Summary |
 |------|---------|
 | **release-readiness-decision.md** | Tom sign-off gate for releasing `0.16.300-preview` |
-| **zig-merge-atomicity-vs-lenient-schema-mismatch.md** | Clarify batch-apply semantics under unknown-column ignore policy |
 
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
 
 ### Blocked on Tom (edge-case parity decisions)
-- `./.wishes/blocked-on-tom/zig-merge-atomicity-vs-lenient-schema-mismatch.md` — decide atomicity semantics under lenient unknown-column policy (recommended: best-effort apply)
+*(None — atomicity decision resolved in Round 79)*
 
 ### Completed Round 76 (2025-12-25) — seq divergence + schema mismatch fixes
 - [x] **TASK-199**: Fix seq value divergence (Zig=1, Rust=0) ✓

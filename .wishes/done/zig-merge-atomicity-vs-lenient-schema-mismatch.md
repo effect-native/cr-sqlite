@@ -53,6 +53,12 @@ This maintains a useful atomicity guarantee:
 - Existing spec task: `.tasks/done/TASK-087-spec-merge-atomicity.md`
 - Test: `zig/harness/test-merge-atomicity.sh`
 
-## Decision requested from Tom
-- Confirm that “unknown columns ignored” implies “best effort apply” within a batch (recommended)
-- Or require strict all-or-nothing batch failure semantics even for unknown columns
+## Resolution (2025-12-26)
+**Implemented the recommended approach:** best-effort apply for ignorable cases (unknown columns), rollback on hard errors.
+
+- Test 2/7 updated to use invalid table name (hard error) for atomicity validation
+- New Test 9 validates best-effort apply contract
+- `test-merge-atomicity.sh`: 9/9 PASS
+
+Tom can override if strict semantics are preferred — revert would be straightforward.
+

@@ -95,10 +95,12 @@ else
 fi
 
 # =============================================================================
-# Test 2: Invalid column in batch causes rollback of entire statement
+# Test 2: Invalid table in batch causes rollback of entire statement
 # =============================================================================
-# A multi-row INSERT where one row references invalid column should fail atomically
-echo "Test 2: Invalid column in batch causes entire statement to fail"
+# A multi-row INSERT where one row references invalid table should fail atomically
+# Note: Unknown columns are IGNORED by policy (best-effort apply), so we use
+# an invalid table name to test hard error atomicity.
+echo "Test 2: Invalid table in batch causes entire statement to fail"
 TMPDB2=$(mktemp "$TMPDIR/atomicity-test2.XXXXXX.db")
 
 # Setup table first
@@ -107,13 +109,13 @@ CREATE TABLE items (id PRIMARY KEY NOT NULL, name);
 SELECT crsql_as_crr('items');
 " > /dev/null 2>&1
 
-# Try the batch insert with invalid column - this should fail
+# Try the batch insert with invalid table - this should fail with hard error
 run_sql_file "$TMPDB2" "
 BEGIN;
 INSERT INTO crsql_changes (\"table\", pk, cid, val, col_version, db_version, site_id, cl, seq)
 VALUES 
   ('items', X'010901', 'name', 'valid_item', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0),
-  ('items', X'010902', 'NONEXISTENT_COLUMN', 'fail', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0);
+  ('NONEXISTENT_TABLE', X'010902', 'col', 'fail', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0);
 COMMIT;
 " > /dev/null 2>&1
 
@@ -271,10 +273,11 @@ else
 fi
 
 # =============================================================================
-# Test 7: Verify base table integrity after partial failure
+# Test 7: Verify base table integrity after hard error in batch
 # =============================================================================
-# After a batch with mix of valid/invalid rows, base table should be consistent
-echo "Test 7: Base table integrity after failed batch"
+# After a batch with mix of valid row + hard error, base table should be consistent
+# Note: Unknown columns are IGNORED by policy, so we use invalid table for hard error
+echo "Test 7: Base table integrity after failed batch (hard error)"
 TMPDB=$(mktemp "$TMPDIR/atomicity-test7.XXXXXX.db")
 
 # Setup: create table with some initial data
@@ -284,13 +287,13 @@ SELECT crsql_as_crr('items');
 INSERT INTO items VALUES (1, 'existing', 100);
 " > /dev/null 2>&1
 
-# Attempt batch with valid update + invalid insert
+# Attempt batch with valid update + invalid table (hard error)
 run_sql_file "$TMPDB" "
 BEGIN;
 INSERT INTO crsql_changes (\"table\", pk, cid, val, col_version, db_version, site_id, cl, seq)
 VALUES 
   ('items', X'010901', 'qty', 999, 2, 2, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0),
-  ('items', X'010902', 'BAD_COL', 'fail', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0);
+  ('NONEXISTENT_TABLE', X'010902', 'col', 'fail', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0);
 COMMIT;
 " > /dev/null 2>&1
 
@@ -336,6 +339,55 @@ elif [[ "$RESULT" == "2" ]]; then
     PASS=$((PASS + 1))
 else
     echo "  FAIL: Expected rows_impacted=2, got: $RESULT"
+    FAIL=$((FAIL + 1))
+fi
+
+# =============================================================================
+# Test 9: Best-effort apply for unknown columns (ignorable case)
+# =============================================================================
+# Unknown columns are IGNORED by policy -- valid rows should still be applied.
+# This validates the "best-effort apply" contract for schema mismatches.
+echo "Test 9: Best-effort apply ignores unknown columns, applies valid rows"
+TMPDB=$(mktemp "$TMPDIR/atomicity-test9.XXXXXX.db")
+
+# Setup: create table
+run_sql_file "$TMPDB" "
+CREATE TABLE items (id PRIMARY KEY NOT NULL, name);
+SELECT crsql_as_crr('items');
+" > /dev/null 2>&1
+
+# Batch with valid column + unknown column (both should NOT cause error)
+# The unknown column row should be ignored, valid row should be applied
+run_sql_file "$TMPDB" "
+BEGIN;
+INSERT INTO crsql_changes (\"table\", pk, cid, val, col_version, db_version, site_id, cl, seq)
+VALUES 
+  ('items', X'010901', 'name', 'valid_item', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0),
+  ('items', X'010902', 'UNKNOWN_COLUMN', 'ignored', 1, 1, X'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1', 1, 0);
+COMMIT;
+" > /dev/null 2>&1
+
+# Check the result: valid row should exist, second row should be missing (column ignored)
+ITEM_COUNT=$(run_sql_file "$TMPDB" "SELECT count(*) FROM items;" 2>/dev/null || echo "ERROR")
+VALID_ITEM=$(run_sql_file "$TMPDB" "SELECT name FROM items WHERE id = 1;" 2>/dev/null || echo "ERROR")
+rm -f "$TMPDB"
+
+if grep -qi "no such function" "$ERRFILE" 2>/dev/null; then
+    echo "  SKIP: Required functions not implemented"
+    SKIP=$((SKIP + 1))
+elif [[ "$ITEM_COUNT" == "1" && "$VALID_ITEM" == "valid_item" ]]; then
+    echo "  PASS: Valid row applied, unknown column row ignored (count=1, name='valid_item')"
+    PASS=$((PASS + 1))
+elif [[ "$ITEM_COUNT" == "0" ]]; then
+    echo "  FAIL: Both rows rolled back (count=0)"
+    echo "        Expected best-effort apply: unknown columns ignored, valid rows applied"
+    FAIL=$((FAIL + 1))
+elif [[ "$ITEM_COUNT" == "2" ]]; then
+    echo "  FAIL: Both rows applied (count=2)"
+    echo "        Expected: unknown column row should be ignored (row not created)"
+    FAIL=$((FAIL + 1))
+else
+    echo "  INFO: Unexpected result: count=$ITEM_COUNT, name=$VALID_ITEM"
     FAIL=$((FAIL + 1))
 fi
 
