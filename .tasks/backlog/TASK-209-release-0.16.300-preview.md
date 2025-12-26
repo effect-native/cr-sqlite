@@ -37,6 +37,8 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
 - [x] **WASM build works on current Zig toolchain and is reproducible in CI**.
   - Task: `.tasks/done/TASK-212-fix-wasm-build-for-release.md`
   - Status: DONE (Round 77) — Zig 0.15 compat fixed
+- [ ] **Verify WASM build uses Zig 0.15** (not 0.14).
+  - Task: `.tasks/triage/TASK-223-verify-wasm-uses-zig-0.15.md`
 - [x] **Browser bundle uses local CR-SQLite WASM (not CDN sql.js)**.
   - Task: `.tasks/done/TASK-213-browser-provider-loads-crsqlite-wasm.md`
   - Status: DONE (Round 77) — no CDN dependency, 30/30 browser tests pass

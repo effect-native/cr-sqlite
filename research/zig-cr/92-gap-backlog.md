@@ -66,11 +66,12 @@ No active tasks.
 - [x] **TASK-219**: Test suite review ✓ — 72 tests, blind spots documented
 - [x] **WF-028**: Empty BLOB PK encoding ✓ — fixed in api.zig bind_blob()
 
-### Triage Inbox (4 items)
+### Triage Inbox (5 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
 | **TASK-220** | HIGH | Verify CI passes after re-enable | Release blocker (verification) |
 | **TASK-222** | HIGH | Browser test failure investigation | Release blocker (transient?) |
+| **TASK-223** | HIGH | Verify WASM build uses Zig 0.15 | Release blocker (toolchain) |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
 
