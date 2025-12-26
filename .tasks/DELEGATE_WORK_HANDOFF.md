@@ -77,7 +77,7 @@ Artifacts:
 - `.tasks/done/TASK-217-effect-native-oidc-npm-release.md` — verified OIDC already configured
 
 **Commits**
-- (pending commit)
+- `a4e704bf` — feat(release): CI + distribution infrastructure (Round 78)
 
 **Environment**
 - OS: darwin (macOS ARM64)
@@ -132,7 +132,7 @@ crsqlite.dylib  2.7MB (Zig build, was ~15MB Rust)
 - Empty BLOB PK parity fix (WF-028)
 
 **Commits**
-- (pending commit)
+- `5bfeb9ac` — feat(release): 0.16.300-preview infrastructure (Round 77)
 
 **Environment**
 - OS: darwin (macOS ARM64)

@@ -4,13 +4,13 @@
 Fix the PK blob encoding for empty blob primary keys to match Rust/C oracle.
 
 ## Status
-- State: triage
+- State: done
 - Priority: LOW (edge case, not blocking sync)
 - Discovered: 2025-12-20 (TASK-133)
 
-## Problem
+## Problem (historical)
 
-When a table has an empty blob (`X''`) as its primary key value, the encoded PK in `crsql_changes` differs:
+When a table has an empty blob (`X''`) as its primary key value, the encoded PK in `crsql_changes` used to differ:
 
 ```
 Zig:    0105
@@ -41,8 +41,8 @@ This is a rare edge case and doesn't affect sync correctness (the blob value its
 
 ## Acceptance Criteria
 
-1. [ ] Empty blob PK encoded as `0104` (matching Rust/C)
-2. [ ] `bash zig/harness/test-pk-blob-parity.sh` passes 9/9
+1. [x] Empty blob PK encoded as `0104` (matching Rust/C)
+2. [x] `bash zig/harness/test-pk-blob-parity.sh` passes 9/9
 
 ## Parent Docs / Cross-links
 
@@ -50,7 +50,8 @@ This is a rare edge case and doesn't affect sync correctness (the blob value its
 - Related: `.tasks/done/TASK-133-pk-blob-format-edge-case-parity.md`
 
 ## Progress Log
-- 2025-12-25: Created from Round 73 test results.
+- 2025-12-25: Captured as edge-case parity follow-up.
 
 ## Completion Notes
-(Empty until done.)
+- 2025-12-26: Verified fixed — `bash zig/harness/test-pk-blob-parity.sh` now passes WF-028 (empty blob PK encoding = `0104`).
+- Fix landed in Round 77 (`5bfeb9ac`), tracked in `research/zig-cr/92-gap-backlog.md`.

@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-25 (Post-Round 78: CI + Distribution — ALL TECHNICAL BLOCKERS CLEARED)
+> Last updated: 2025-12-26 (Post-Round 78: CI + Distribution — ready for verification)
 
 ## Status
 
@@ -66,9 +66,11 @@ No active tasks.
 - [x] **TASK-219**: Test suite review ✓ — 72 tests, blind spots documented
 - [x] **WF-028**: Empty BLOB PK encoding ✓ — fixed in api.zig bind_blob()
 
-### Triage Inbox (2 items)
+### Triage Inbox (4 items)
 | Task | Priority | Summary | Disposition |
 |------|----------|---------|-------------|
+| **TASK-220** | HIGH | Verify CI passes after re-enable | Release blocker (verification) |
+| **TASK-221** | HIGH | Merge atomicity test alignment | Release blocker (CI gate risk) |
 | **TASK-200** | LOW | Zig validation gaps (more permissive) | Nice to have |
 | **TASK-201** | LOW | Performance regression tests | Nice to have |
 
@@ -76,12 +78,12 @@ No active tasks.
 | Item | Summary |
 |------|---------|
 | **release-readiness-decision.md** | Tom sign-off gate for releasing `0.16.300-preview` |
+| **zig-merge-atomicity-vs-lenient-schema-mismatch.md** | Clarify batch-apply semantics under unknown-column ignore policy |
 
 ### Known Limitations
 - **crsql_changes SELECT perf**: ~2-7x slower on wide tables vs Rust/C (COUNT is fast, SELECT * is slow)
 
 ### Blocked on Tom (edge-case parity decisions)
-- `./.wishes/blocked-on-tom/zig-empty-blob-pk-encoding-parity.md` — decide whether to fix empty BLOB PK encoding (recommended: fix parity)
 - `./.wishes/blocked-on-tom/zig-merge-atomicity-vs-lenient-schema-mismatch.md` — decide atomicity semantics under lenient unknown-column policy (recommended: best-effort apply)
 
 ### Completed Round 76 (2025-12-25) — seq divergence + schema mismatch fixes

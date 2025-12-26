@@ -42,10 +42,13 @@ This list is intended to be exhaustive. Each blocker must have an owning task ca
   - Status: DONE (Round 77) — no CDN dependency, 30/30 browser tests pass
 
 ### CI / validation
-- [x] **CI re-enabled and passing** on Linux + macOS, including WASM + browser tests.
+- [x] **CI re-enabled** on Linux + macOS (workflow restored, split strategy implemented).
   - Task: `.tasks/done/TASK-207-reenable-ci-for-release.md`
-  - Status: DONE (Round 78) — workflow re-enabled, split strategy implemented
-  - Follow-up: `.tasks/triage/TASK-220-verify-ci-passes-after-reenable.md`
+  - Status: DONE (Round 78)
+- [ ] **Verify CI passes on GitHub after re-enable** (required jobs green).
+  - Task: `.tasks/triage/TASK-220-verify-ci-passes-after-reenable.md`
+- [ ] **Merge atomicity test expectations match current sync policy** (and pass in CI).
+  - Task: `.tasks/triage/TASK-221-merge-atomicity-test-alignment.md`
 - [x] **Oracle-dependent tests have a CI strategy**.
   - Task: `.tasks/done/TASK-214-ci-oracle-strategy.md`
   - Status: DONE (Round 78) — required vs optional jobs split, 23 zig-only tests identified

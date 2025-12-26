@@ -35,6 +35,7 @@ Even though empty BLOB PKs are rare, this is an encoding-level contract, and itâ
 - Existing triage task: `.tasks/triage/TASK-203-empty-blob-pk-encoding-divergence.md`
 - Test: `zig/harness/test-pk-blob-parity.sh` (WF-028)
 
-## Decision requested from Tom
-- Accept divergence (document + adjust tests), OR
-- Approve parity fix in Zig (recommended)
+## Completion Notes
+- 2025-12-26: WF-028 now passes; Zig encodes empty BLOB PK as `0104`.
+- Verification: `bash zig/harness/test-pk-blob-parity.sh`
+- Fix commit: `5bfeb9ac` (Round 77)
