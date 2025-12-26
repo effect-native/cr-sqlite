@@ -68,6 +68,57 @@ Artifacts:
 
 ---
 
+## Round 2025-12-25 (78) — CI + Distribution (4 tasks)
+
+**Tasks executed**
+- `.tasks/done/TASK-207-reenable-ci-for-release.md` — CI workflow re-enabled
+- `.tasks/done/TASK-214-ci-oracle-strategy.md` — split required vs optional jobs
+- `.tasks/done/TASK-216-nix-release-uses-zig.md` — flake.nix builds from Zig
+- `.tasks/done/TASK-217-effect-native-oidc-npm-release.md` — verified OIDC already configured
+
+**Commits**
+- (pending commit)
+
+**Environment**
+- OS: darwin (macOS ARM64)
+- Tooling: nix, zig 0.15
+
+**Key Changes Made**
+
+| Task | Summary |
+|------|---------|
+| TASK-207+214 | CI split: 6 required jobs (build, WASM, unit, zig-only parity, browser, release-gate) + 1 optional (oracle parity) |
+| TASK-216 | flake.nix now builds from `zig/` directory, `nix run .#print-version` returns `0.16.300-preview` |
+| TASK-217 | No changes needed — OIDC provenance already configured in effect-native |
+
+**CI Strategy Summary**
+- Required (must pass): build-native, build-wasm, test-unit, test-parity-zig-only (23 tests), test-browser, release-gate
+- Optional (informational): test-parity-oracle
+
+**Zig-Only Tests (23)**
+```
+test-alter, test-automigrate, test-backfill, test-clock-edge-cases,
+test-clset-vtab, test-crsqlite, test-e2e-sync, test-filters, test-fract,
+test-is-crr, test-large-data, test-merge-atomicity, test-noops,
+test-persistence, test-pk-update, test-realistic-collab, test-realistic-offline,
+test-realistic-sync, test-rowid-slab, test-sync-bit-isolation,
+test-table-compat, test-unpack-columns-vtab, test-wal-concurrency
+```
+
+**Nix Verification**
+```
+$ nix run .#print-version
+0.16.300-preview
+
+$ ls -la result/lib/
+crsqlite.dylib  2.7MB (Zig build, was ~15MB Rust)
+```
+
+**Known gaps / unverified claims**
+- CI not yet pushed to GitHub — follow-up task created: `.tasks/triage/TASK-220-verify-ci-passes-after-reenable.md`
+
+---
+
 ## Round 2025-12-25 (77) — Release 0.16.300-preview infrastructure (8 tasks in parallel)
 
 **Tasks executed**

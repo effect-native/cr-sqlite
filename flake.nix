@@ -4,24 +4,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    # Bring the sqlite-rs-embedded submodule in as an explicit input
-    sqlite-rs-embedded = {
-      url = "github:vlcn-io/sqlite-rs-embedded";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, sqlite-rs-embedded }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs { inherit system overlays; };
+        pkgs = import nixpkgs { inherit system; };
 
-        # Use the working tree as source (include submodules)
-        # builtins.path snapshots the on-disk tree instead of the flake's
-        # git-based source (which omits submodule contents). We then apply a
-        # lightweight clean filter to avoid bulky folders like node_modules.
+        # Use the working tree as source
         crSqliteSource = pkgs.lib.cleanSourceWith {
           src = builtins.path { path = ./.; name = "crsqlite-src"; };
           filter = path: type:
@@ -30,95 +20,51 @@
               ".git" 
               "node_modules" "dist" "result" "build" "target"
               ".direnv" ".turbo" ".vscode" "__pycache__"
+              "zig-cache" "zig-out"
             ]);
         };
-        
-        # Rust toolchain - pin to sqlite-rs-embedded's nightly
-        rustToolchain = pkgs.rust-bin.fromRustupToolchain {
-          channel = "nightly-2024-03-15";
-        };
 
-        # Build the CR-SQLite extension
+        # Build the CR-SQLite extension using Zig
         crSqliteExtension = pkgs.stdenv.mkDerivation rec {
           pname = "cr-sqlite";
           version = "0.16.300-preview";
           
           src = crSqliteSource;
           dontStrip = true;
-          # Inject the sqlite-rs-embedded source after unpack so it is available
-          # even though flakes omit submodules by default.
-          postUnpack = ''
-            echo "Injecting sqlite-rs-embedded from flake input..."
-            mkdir -p core/rs/sqlite-rs-embedded
-            cp -a --no-preserve=mode,ownership ${sqlite-rs-embedded}/. core/rs/sqlite-rs-embedded/
-          '';
           
           nativeBuildInputs = with pkgs; [
-            rustToolchain
-            pkg-config
-            gnumake
-            git
-            cacert
-            llvmPackages.clang
-            llvmPackages.libclang
+            zig
           ];
 
-          buildInputs = with pkgs; [
-            sqlite
-            openssl
-          ];
-
-          # Rust/Cargo environment
-          CARGO_HOME = "$TMPDIR/.cargo";
-          RUSTC_BOOTSTRAP = "1";
-          # Ensure cargo downloads work (Darwin often needs explicit CA bundle)
-          SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-          NIX_SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-          # Help bindgen find libclang
-          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-          
-          # Build the extension using the upstream Makefile
+          # Build the extension using Zig
+          # Use -p to install directly to $out, avoiding zig-out
           buildPhase = ''
             set -euxo pipefail
-            echo "Ensuring sqlite-rs-embedded present in source tree..."
-            if [ ! -d core/rs/sqlite-rs-embedded ]; then
-              mkdir -p core/rs/sqlite-rs-embedded
-              cp -a --no-preserve=mode,ownership ${sqlite-rs-embedded}/. core/rs/sqlite-rs-embedded/
-            fi
-
-            echo "=== DEBUG: Files in build root (first 30) ==="
-            find . -maxdepth 2 -type f | head -30 || true
-            echo "=== DEBUG: core directory checks ==="
-            ls -la core || true
-            ls -la core/rs || true
-            ls -la core/rs/sqlite-rs-embedded || true
-            test -f core/Makefile && echo "Found core/Makefile" || (echo "Missing core/Makefile" && exit 1)
-
-            echo "Building CR-SQLite loadable extension via Makefile..."
-            make -C core CC=clang loadable
+            export ZIG_GLOBAL_CACHE_DIR="$TMPDIR/zig-cache"
+            export ZIG_LOCAL_CACHE_DIR="$TMPDIR/zig-local-cache"
+            cd zig
+            zig build -Doptimize=ReleaseFast -p $out
           '';
 
           installPhase = ''
-            mkdir -p $out/lib
-            
-            # Copy the loadable extension from core/dist/
-            if [ -f core/dist/crsqlite.dylib ]; then
-              cp core/dist/crsqlite.dylib $out/lib/crsqlite.dylib
-            elif [ -f core/dist/crsqlite.so ]; then
-              cp core/dist/crsqlite.so $out/lib/crsqlite.so
+            # Zig outputs libcrsqlite.dylib on Darwin, libcrsqlite.so on Linux
+            # Rename to crsqlite.dylib/crsqlite.so for consistency with legacy naming
+            if [ -f $out/lib/libcrsqlite.dylib ]; then
+              mv $out/lib/libcrsqlite.dylib $out/lib/crsqlite.dylib
+            elif [ -f $out/lib/libcrsqlite.so ]; then
+              mv $out/lib/libcrsqlite.so $out/lib/crsqlite.so
             else
-              echo "ERROR: No extension file found in core/dist/"
-              find core/dist/ -type f || echo "No core/dist directory found"
+              echo "ERROR: No extension file found in $out/lib/"
+              find $out/ -type f || echo "No output found"
               exit 1
             fi
             
-            # List what we built for debugging
             echo "Built extension:"
             ls -la $out/lib/
           '';
 
           meta = with pkgs.lib; {
-            description = "CR-SQLite loadable extension for ${system}";
+            description = "CR-SQLite loadable extension for ${system} (Zig build)";
             platforms = [ system ];
             license = licenses.asl20;
           };
@@ -263,10 +209,8 @@
         devShells.default = pkgs.mkShell { 
           buildInputs = with pkgs; [ 
             sqlite 
-            rustToolchain
+            zig
             pkg-config
-            cmake
-            gnumake
           ]; 
         };
         

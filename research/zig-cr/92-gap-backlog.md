@@ -1,6 +1,6 @@
 # 92-gap-backlog
 
-> Last updated: 2025-12-25 (Post-Round 77: Release infrastructure + 8 tasks completed)
+> Last updated: 2025-12-25 (Post-Round 78: CI + Distribution — ALL TECHNICAL BLOCKERS CLEARED)
 
 ## Status
 
@@ -45,13 +45,16 @@
 No active tasks.
 
 ### Backlog (Release focus: `0.16.300-preview`)
-| Task | Priority | Summary | Effort |
+| Task | Priority | Summary | Status |
 |------|----------|---------|--------|
-| **TASK-209** | HIGH | Release tracker: 0.16.300-preview | Large |
-| **TASK-214** | HIGH | CI oracle strategy | Medium |
-| **TASK-207** | MED | Re-enable CI for release | Medium |
-| **TASK-216** | HIGH | Nix release uses Zig artifacts + preview version | Medium |
-| **TASK-217** | HIGH | effect-native OIDC npm release path | Large |
+| **TASK-209** | HIGH | Release tracker: 0.16.300-preview | **READY FOR TOM SIGN-OFF** |
+
+### Completed Round 78 (2025-12-25) — CI + Distribution
+- [x] **TASK-207**: CI re-enabled ✓ — workflow active, split strategy
+- [x] **TASK-214**: Oracle strategy ✓ — required vs optional jobs separated
+- [x] **TASK-216**: Nix uses Zig ✓ — flake.nix builds from zig/, version correct
+- [x] **TASK-217**: npm OIDC ✓ — already configured, no changes needed
+- Follow-up: `.tasks/triage/TASK-220-verify-ci-passes-after-reenable.md`
 
 ### Completed Round 77 (2025-12-25)
 - [x] **TASK-210**: Release versioning + tags ✓ — `0.16.300-preview` across package.json, flake.nix

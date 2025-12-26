@@ -2,6 +2,14 @@
 
 Short operating manual for AI agents working in this repo.
 
+## Invariants
+
+These must always hold true:
+
+1. **Don't ask to keep going.** When there are well-defined tasks to begin, delegate them immediately. Keep going until actually blocked (waiting on Tom, missing information, file conflicts, etc.).
+
+2. **Capture follow-up work immediately.** When any task (including subagent work) surfaces follow-up work, create a triage task card in `.tasks/triage/` right away. Don't just mention it — file it.
+
 ## Pointers
 
 - Wishes inbox: `.wishes/`

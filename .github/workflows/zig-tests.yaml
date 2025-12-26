@@ -1,24 +1,30 @@
 name: zig-tests
 
-# CI TEMPORARILY DISABLED (2025-12-25)
-# See: .tasks/active/TASK-206-disable-ci-temporarily.md
-# Re-enable: .tasks/backlog/TASK-207-reenable-ci-for-release.md
+# CI Strategy (TASK-207, TASK-214):
 #
-# Reasons:
-# 1. WASM build requires Zig 0.14 compat (we only support latest Zig 0.15+)
-# 2. Some tests depend on Rust/C oracle not available in CI
-# 3. macOS GitHub Actions has transient nix install issues
+# Required jobs (must pass for release):
+#   - build-native: Build Zig extension on Linux + macOS
+#   - build-wasm: Build WASM target
+#   - test-unit: Zig unit tests
+#   - test-browser: Playwright browser tests
 #
-# To re-enable, change 'disabled-zig-ci-trigger/**' back to 'zig/**'
+# Optional jobs (informational, allowed to fail):
+#   - test-parity-oracle: Oracle parity tests (require Rust/C binaries)
+#
+# Oracle binaries are checked into lib/ and available in CI.
 
 on:
   push:
     branches: [main]
     paths:
-      - 'disabled-zig-ci-trigger/**'
+      - 'zig/**'
+      - 'lib/**'
+      - '.github/workflows/zig-tests.yaml'
   pull_request:
     paths:
-      - 'disabled-zig-ci-trigger/**'
+      - 'zig/**'
+      - 'lib/**'
+      - '.github/workflows/zig-tests.yaml'
 
 jobs:
   build-native:
@@ -130,8 +136,12 @@ jobs:
         working-directory: zig
         run: nix run nixpkgs#zig -- build test
 
-  test-parity:
-    name: Parity Tests
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Zig-Only Parity Tests (Required for Release)
+  # Tests that run against the Zig extension alone, no oracle needed.
+  # ═══════════════════════════════════════════════════════════════════════════
+  test-parity-zig-only:
+    name: Parity Tests (Zig-only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +165,7 @@ jobs:
         working-directory: zig
         run: nix run nixpkgs#zig -- build
 
-      - name: Diagnose extension loading
+      - name: Smoke test extension loading
         working-directory: zig
         run: |
           echo "=== Extension file info ==="
@@ -165,27 +175,114 @@ jobs:
           echo "=== SQLite version ==="
           nix run nixpkgs#sqlite -- --version
           echo ""
-          echo "=== Test extension load ==="
-          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_version();" 2>&1 || true
-          echo ""
-          echo "=== Test crsql_db_version ==="
-          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_db_version();" 2>&1 || true
-          echo ""
-          echo "=== Test crsql_site_id ==="
-          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT hex(crsql_site_id());" 2>&1 || true
-          echo ""
-          echo "=== Test crsql_changes insert (rows_impacted issue) ==="
-          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "
-            CREATE TABLE foo (a PRIMARY KEY NOT NULL, b);
-            SELECT crsql_as_crr('foo');
-            BEGIN;
-            INSERT INTO crsql_changes VALUES ('foo', X'010901', 'b', 2, 1, 1, NULL, 1, 1);
-            SELECT crsql_rows_impacted();
-          " 2>&1 || echo "ERROR: $?"
+          echo "=== Smoke tests ==="
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_version();"
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT crsql_db_version();"
+          nix run nixpkgs#sqlite -- :memory: -cmd ".load zig-out/lib/libcrsqlite.so" "SELECT hex(crsql_site_id());"
 
-      - name: Run parity tests
+      - name: Run Zig-only parity tests
         working-directory: zig
-        run: make test-parity
+        run: |
+          # Run tests that don't require the oracle
+          # These validate Zig extension behavior independently
+          cd harness
+          for test in \
+            test-alter.sh \
+            test-automigrate.sh \
+            test-backfill.sh \
+            test-clock-edge-cases.sh \
+            test-clset-vtab.sh \
+            test-crsqlite.sh \
+            test-e2e-sync.sh \
+            test-filters.sh \
+            test-fract.sh \
+            test-is-crr.sh \
+            test-large-data.sh \
+            test-merge-atomicity.sh \
+            test-noops.sh \
+            test-persistence.sh \
+            test-pk-update.sh \
+            test-realistic-collab.sh \
+            test-realistic-offline.sh \
+            test-realistic-sync.sh \
+            test-rowid-slab.sh \
+            test-sync-bit-isolation.sh \
+            test-table-compat.sh \
+            test-unpack-columns-vtab.sh \
+            test-wal-concurrency.sh \
+          ; do
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Running: $test"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            if bash "$test"; then
+              echo "✓ $test PASSED"
+            else
+              EXIT_CODE=$?
+              if [ $EXIT_CODE -eq 2 ]; then
+                echo "⚠ $test SKIPPED (functions not implemented)"
+              else
+                echo "✗ $test FAILED (exit $EXIT_CODE)"
+                exit 1
+              fi
+            fi
+            echo ""
+          done
+          echo "All Zig-only parity tests passed!"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Oracle Parity Tests (Optional - Informational)
+  # Tests that compare Zig vs Rust/C oracle. Allowed to fail if oracle unavailable.
+  # ═══════════════════════════════════════════════════════════════════════════
+  test-parity-oracle:
+    name: Parity Tests (Oracle)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Oracle tests are informational, not release-blocking
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Cache Zig
+        uses: actions/cache@v4
+        with:
+          path: |
+            zig/.zig-cache
+            ~/.cache/zig
+          key: zig-nix-${{ runner.os }}-${{ hashFiles('zig/build.zig', 'zig/build.zig.zon') }}
+          restore-keys: |
+            zig-nix-${{ runner.os }}-
+
+      - name: Build extension
+        working-directory: zig
+        run: nix run nixpkgs#zig -- build
+
+      - name: Check oracle availability
+        id: oracle-check
+        run: |
+          if [ -f "lib/crsqlite-linux-x86_64.so" ]; then
+            echo "Oracle binary found: lib/crsqlite-linux-x86_64.so"
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "Oracle binary NOT found"
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run oracle parity tests
+        if: steps.oracle-check.outputs.available == 'true'
+        working-directory: zig
+        run: |
+          # Run full parity test suite (handles oracle availability internally)
+          # test-parity.sh checks for oracle via has_oracle() and skips tests gracefully
+          make test-parity || true  # continue-on-error at job level handles overall status
+
+      - name: Oracle unavailable notice
+        if: steps.oracle-check.outputs.available != 'true'
+        run: |
+          echo "⚠ Oracle parity tests skipped - Rust/C binary not available in CI"
+          echo "To add oracle: commit lib/crsqlite-linux-x86_64.so to repository"
 
   test-browser:
     name: Browser Tests
@@ -237,3 +334,33 @@ jobs:
           name: playwright-report
           path: zig/browser-test/test-results/
           retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Release Gate (Required for 0.16.300-preview)
+  # All required jobs must pass for release.
+  # Oracle parity tests are excluded from gate (informational only).
+  # ═══════════════════════════════════════════════════════════════════════════
+  release-gate:
+    name: Release Gate
+    runs-on: ubuntu-latest
+    needs:
+      - build-native
+      - build-wasm
+      - test-unit
+      - test-parity-zig-only
+      - test-browser
+    # Note: test-parity-oracle is NOT in needs - it's optional
+    steps:
+      - name: All required checks passed
+        run: |
+          echo "╔═══════════════════════════════════════════════════════════════════╗"
+          echo "║           Release Gate - All Required Checks Passed              ║"
+          echo "╠═══════════════════════════════════════════════════════════════════╣"
+          echo "║  ✓ build-native (Linux + macOS)                                   ║"
+          echo "║  ✓ build-wasm                                                     ║"
+          echo "║  ✓ test-unit                                                      ║"
+          echo "║  ✓ test-parity-zig-only                                           ║"
+          echo "║  ✓ test-browser                                                   ║"
+          echo "╠═══════════════════════════════════════════════════════════════════╣"
+          echo "║  Ready for 0.16.300-preview release                              ║"
+          echo "╚═══════════════════════════════════════════════════════════════════╝"

@@ -34,62 +34,10 @@
         "type": "github"
       }
     },
-    "nixpkgs_2": {
-      "locked": {
-        "lastModified": 1744536153,
-        "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "18dd725c29603f582cf1900e0d25f9f1063dbf11",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay",
-        "sqlite-rs-embedded": "sqlite-rs-embedded"
-      }
-    },
-    "rust-overlay": {
-      "inputs": {
-        "nixpkgs": "nixpkgs_2"
-      },
-      "locked": {
-        "lastModified": 1756434910,
-        "narHash": "sha256-5UJRyxZ8QCm+pgh5pNHXFJMmopMqHVraUhRA1g2AmA0=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "86e5140961c91a9ee1dde1c17d18a787d44ceef8",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "type": "github"
-      }
-    },
-    "sqlite-rs-embedded": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1703188587,
-        "narHash": "sha256-+nNV6+01T6dRqeIfLrkc5V3PAX9Zxo/VrSqy6Xf1fHE=",
-        "owner": "vlcn-io",
-        "repo": "sqlite-rs-embedded",
-        "rev": "aba562843b26642e2242f8e3388b83a1a2625031",
-        "type": "github"
-      },
-      "original": {
-        "owner": "vlcn-io",
-        "repo": "sqlite-rs-embedded",
-        "type": "github"
+        "nixpkgs": "nixpkgs"
       }
     },
     "systems": {
